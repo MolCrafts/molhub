@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molhub"
+version = "0.1.0"
+description = "Molecular dataset hub — map/iter-style dataset protocols, built-in datasets, and uploaders for HuggingFace and Figshare"
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [
+  { name = "Roy Kid" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+  "molcrafts-molpy>=0.3.0",
+  "tqdm",
+  "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "pytest-mock>=3.15",
+  "ruff>=0.15",
+]
+huggingface = ["huggingface_hub>=0.20"]
+
+[project.urls]
+Repository = "https://github.com/molcrafts/molhub"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+python_files = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+  "E402",
+  "E741",
+  "F403",
+  "F405",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
