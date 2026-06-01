@@ -1,0 +1,48 @@
+# Mirrors every check in .github/workflows/*.yml. Any divergence is a bug —
+# when you add/modify a CI step, update this file in the same commit.
+#
+# CI source: .github/workflows/ci.yml
+#   lint job:  ruff check src/ tests/
+#              ruff format --check src/ tests/
+#   test job:  pytest --cov=src/molhub --cov-report=term-missing --cov-report=xml -v
+#   (no typecheck step in CI — no ty hook here)
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+
+  # Ruff lint + format — mirrors the CI "lint" job.
+  # CI pins ruff via pyproject (ruff>=0.15); pinned here to the
+  # locally-installed version (ruff 0.15.13).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff
+        name: ruff check src/ tests/
+        args: [src/, tests/]
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format --check src/ tests/
+        args: [--check, src/, tests/]
+        pass_filenames: false
+
+  # Test suite — mirrors the CI "test" job. Heavy, so pre-push only.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest --cov=src/molhub
+        entry: pytest --cov=src/molhub --cov-report=term-missing --cov-report=xml -v
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
