@@ -43,9 +43,7 @@ class FigshareUploader:
         self._requests = requests
         token = token or os.environ.get("FIGSHARE_TOKEN")
         if not token:
-            raise ValueError(
-                "Figshare token required. Pass token= or set FIGSHARE_TOKEN env var."
-            )
+            raise ValueError("Figshare token required. Pass token= or set FIGSHARE_TOKEN env var.")
         self._token = token
         self._base_url = base_url or self.BASE_URL
         self._session = requests.Session()

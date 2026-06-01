@@ -18,12 +18,8 @@ def _inject_fake_huggingface_hub():
     fake.upload_file = mock.MagicMock(
         return_value="https://huggingface.co/datasets/test/ds/resolve/main/f.txt"
     )
-    fake.upload_folder = mock.MagicMock(
-        return_value="https://huggingface.co/datasets/test/ds"
-    )
-    fake.create_repo = mock.MagicMock(
-        return_value="https://huggingface.co/datasets/test/ds"
-    )
+    fake.upload_folder = mock.MagicMock(return_value="https://huggingface.co/datasets/test/ds")
+    fake.create_repo = mock.MagicMock(return_value="https://huggingface.co/datasets/test/ds")
     sys.modules["huggingface_hub"] = fake
     return fake
 
