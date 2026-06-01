@@ -126,8 +126,7 @@ class CSVDataset:
                 self._ensure_downloaded()
             if not self._path.exists():
                 raise FileNotFoundError(
-                    f"CSV not found at {self._path}. "
-                    "Set download=True or pre-download the file."
+                    f"CSV not found at {self._path}. Set download=True or pre-download the file."
                 )
         else:
             self._path = Path(path_or_url)
@@ -163,9 +162,7 @@ class CSVDataset:
         return dest
 
     @staticmethod
-    def _resolve_cache_path_static(
-        url: str, cache_dir: str | Path | None = None
-    ) -> Path:
+    def _resolve_cache_path_static(url: str, cache_dir: str | Path | None = None) -> Path:
         if cache_dir is not None:
             root = Path(cache_dir)
         elif "MOLHUB_CACHE_DIR" in os.environ:

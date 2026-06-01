@@ -46,9 +46,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
                 energy = float(tok.split("=", 1)[1])
                 break
         if energy is None:
-            raise ValueError(
-                f"Missing 'energy=...' tag in {path} at structure {len(frames)}"
-            )
+            raise ValueError(f"Missing 'energy=...' tag in {path} at structure {len(frames)}")
 
         symbols: list[str] = []
         xs: list[float] = []
