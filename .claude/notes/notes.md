@@ -1,0 +1,82 @@
+# 项目决策记录
+
+由 `/mol:note` 维护。**同步式**：规则变了就改写/删除旧条目，不是只追加。
+
+---
+
+## 定位：目录 + 归一化，不做字节仓储
+
+molhub 不托管大制品字节。分子数据集体量大（GB~TB）、再分发授权复杂，
+自建存储既不划算也不合规。molhub 的价值在**归一化与可寻址**：任何来源的东西
+都能通过一个稳定坐标取到、并被强制校验。字节留在上游（Zenodo / Figshare /
+HuggingFace）。
+
+**例外**：MolCrafts 自家插件走自建的小型 registry（静态对象存储 + CDN）。
+它必须实现同一套 `Registry` 接口，**不得特例化**——如果它需要开后门，
+说明接口抽错了。
+
+## 间接层的真实理由（已修正）
+
+`coordinate → locator[]` 这层间接**不是**为了防"链接腐烂"。上游标识确实稳定：
+Zenodo 有 concept DOI + 版本 DOI 且逐文件公布 md5，HuggingFace 在 repo 内按
+commit SHA / LFS sha256 内容寻址，Figshare DOI 持久。
+
+它存在的真实理由是四条：
+
+1. **DOI 不是字节** — DOI 解析到的是记录，仍需 `DOI → API → 文件列表 → 直链 → 校验`
+2. **国内镜像** — `hf-mirror.com` 等，对中文用户群是刚需
+3. **HF 命名空间可变** — commit SHA 内容寻址，但 `org/name` 可改名、删除、加 gating
+4. **裸 HTTP 源** — 大量 MD 数据集挂在课题组服务器上，那些是真会失效的
+
+## 失效模式是"未校验取回"，不是"链接失效"
+
+实证（2026-08-06）：`https://figshare.com/ndownloader/files/3195404` 返回
+**HTTP 202 / content-length 0**（Figshare 异步准备下载），链接本身活着。
+而 `src/molhub/dataset/qm9.py` 的 `_download()` 不查 status，直接
+`dest.write_bytes(r.read())` → 落盘 0 字节且不报错 → `_load_exclusion_list`
+返回空集 → `_ensure_downloaded` 因 `exists()` 为真而永不重试 → QM9 加载
+133,885 条而非 README 承诺的 130,831 条，**3,054 个未表征分子静默混入**。
+
+由此立为硬规则：manifest 中 digest 必填，CI 拒绝无 digest 的条目；digest 由
+bot 从上游 API 自动抓取，不手写；fetch 契约为「查 status → 流式写临时文件 →
+校验 digest → 原子改名」，任一步失败即换下一个 locator。
+
+**止血已落地**（2026-08-06）：两处 `_download` 已实现「查 status → 流式写
+`.part` → 原子改名」，`_is_cached` 拒绝 0 字节文件，回归测试锁定 202 与中断两条
+失败路径。digest 校验仍缺——它需要 manifest，属 Registry 层。
+
+## molpy 版本策略：小版本会搬公开 API
+
+molpy 是 pre-1.0，且在小版本间移动公开 API。0.3 → 0.9 把 `Frame`/`Block`/
+`Element` 从 `molpy.core.*` 搬到顶层，并把 `Frame.metadata` 改名 `Frame.meta`。
+原先 `molcrafts-molpy>=0.3.0` 的开放下界让这次破坏性升级悄悄进了 lock，
+origin/master 一度不可导入且 CI 未覆盖。依赖已收紧为 `>=0.12,<0.13`。
+
+**0.12 的 metadata 契约有两个静默陷阱**，全部封装在 `molhub.dataset.meta`：
+
+1. `Frame.meta` 每次读取返回**新 dict**，原地 `update`/`clear` 写进临时对象后被
+   丢弃，**不报错**。必须整体赋值 `frame.meta = {...}`。
+2. 值必须是 `MetaValue(dtype, value)`，裸 Python 值被拒；dtype 字符串是
+   `f64/f32/i64/i32/u64/bool/string`——字符串标签是 `string` 而非 `str`。
+
+调用方一律走 `set_targets(frame, {...})` / `targets(frame)`，不直接碰
+`MetaValue`。`test_meta.py` 里有一条回归测试专门锁定陷阱 1：若 molpy 哪天改成
+可原地修改，那条测试会失败，届时可重新评估这层封装。
+
+另注：`len(Block)` 是**列数**，行数是 `Block.nrows`；`len(Frame)` 是 block 个数。
+
+## 多语言绑定：规格先行
+
+Python 与 TypeScript 两套客户端**必然漂移**，且靠 code review 兜不住。对策：
+
+- JSON Schema 定义 manifest / index / 坐标语法，语言中立，置于索引仓
+- **语言中立的 conformance 测试套件**（JSON 测试向量 + mock registry），
+  两端必须同时通过：坐标解析、locator fallback 顺序、digest 校验失败路径、缓存布局
+- 缓存磁盘布局写入规格，两端同机共享 `$MOLHUB_HOME` 互相命中
+- `schema_version` 版本化
+
+## 索引独立成仓
+
+manifest 放在独立的 `molhub-index` 仓，不放客户端仓。理由：外部贡献者提
+manifest 不应需要客户端仓写权限，也不应触发库发版。当前 `qm9.py:60-61` 把
+上游 URL 硬编码成 Python 常量——改一个链接要发一次版，这正是要消除的形态。
