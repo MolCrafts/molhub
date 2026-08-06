@@ -165,12 +165,16 @@ For non-trivial work, prefer:
 
 - **坐标语法** `kind:namespace/name@version` — 由 molhub 拥有并承诺长期稳定；
   它存在的全部意义就是让上游 locator 变动时用户代码不动。改语法等于毁约。
-- **磁盘缓存布局** `$MOLHUB_HOME/blobs/sha256/<ab>/<full>` + `refs/` —
+- **磁盘缓存布局** `$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>` —
   Python 与 TypeScript 客户端同机共享此缓存，任何变更必须两端同步且升 schema 版本。
 - **manifest / index 的 JSON Schema** — 语言中立契约，前端与两个客户端共读；
   破坏性变更须走 `schema_version` 升级，不得原地改语义。
-- **digest 强校验契约** — fetch 必须「查 status → 流式写临时文件 → 校验 digest →
-  原子改名」；最终路径上永不出现未校验或半截文件。这条是数据正确性的最后防线。
+- **传输契约** — fetch 必须「查 status → 流式写临时文件 → 原子改名」；最终路径上
+  永不出现半截或错误响应的文件。这条不依赖 digest，是数据正确性的最后防线。
+- **digest 的定位** — manifest 记的是上游原样公布的值（Figshare/Zenodo 是 md5，
+  HF 是 sha256 LFS OID），用途是确认上游是否仍供应该版本；上游不公布就不记、不校验。
+  **molhub 绝不自行计算 digest** —— 自算的值只能证明「我那次下载到了什么」，且会让
+  编目必须先下载整个制品。
 - **`Registry` 驱动接口** — 第三方据此扩展；MolCrafts 自建 registry 亦不得特例化。
 - **`molhub.dataset` 的公开协议** — `MapDataset` / `IterableDataset` /
   `TargetSchema` 已被下游消费，变更需走 stage 策略。

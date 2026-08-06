@@ -8,7 +8,7 @@ import pytest
 
 from molhub.manifest import InvalidManifest, Manifest
 
-from .conftest import MAIN_SHA, manifest_yaml
+from .conftest import MAIN_MD5, manifest_yaml
 
 
 class TestManifestFields:
@@ -31,17 +31,16 @@ class TestManifestFields:
     def test_artifacts_are_keyed_by_role(self, manifest):
         assert set(manifest.artifacts) == {"main", "exclude"}
 
-    def test_digest_is_parsed(self, manifest):
-        assert manifest.artifact("main").digest.hexdigest == MAIN_SHA
+    def test_digest_is_the_platforms_published_value(self, manifest):
+        digest = manifest.artifact("main").digest
+        assert digest.algorithm == "md5"
+        assert digest.hexdigest == MAIN_MD5
 
     def test_locators_keep_their_order(self, manifest):
         assert [str(loc) for loc in manifest.artifact("main").locators] == [
             "fake://main",
             "fake://main-backup",
         ]
-
-    def test_upstream_digest_is_kept_for_reconciliation(self, manifest):
-        assert manifest.artifact("main").upstream_digest.startswith("md5:")
 
     def test_size_is_optional(self, manifest):
         assert manifest.artifact("exclude").size is None
@@ -59,9 +58,9 @@ class TestManifestFields:
 
 
 class TestManifestRejection:
-    def test_missing_sha256_is_refused(self):
-        """The whole point of the manifest layer; there is no lenient mode."""
-        bad = textwrap.dedent("""
+    def test_a_digest_is_optional(self):
+        """Some platforms publish none; molhub does not invent one."""
+        without = textwrap.dedent("""
             schema_version: 1
             kind: dataset
             namespace: molcrafts
@@ -73,17 +72,16 @@ class TestManifestRejection:
                 filename: qm9.tar.bz2
                 locators: [fake://main]
         """)
-        with pytest.raises(InvalidManifest, match="sha256"):
+        assert Manifest.from_yaml(without).artifact("main").digest is None
+
+    def test_malformed_digest_is_refused(self):
+        bad = manifest_yaml().replace(f'"md5:{MAIN_MD5}"', '"not-a-digest"')
+        with pytest.raises(InvalidManifest, match="digest"):
             Manifest.from_yaml(bad)
 
     def test_error_says_which_artifact_is_at_fault(self):
-        bad = manifest_yaml().replace(f'sha256: "{MAIN_SHA}"', 'sha256: ""', 1)
+        bad = manifest_yaml().replace(f'"md5:{MAIN_MD5}"', '"md5:zz"', 1)
         with pytest.raises(InvalidManifest, match="'main'"):
-            Manifest.from_yaml(bad)
-
-    def test_malformed_sha256_is_refused(self):
-        bad = manifest_yaml().replace(MAIN_SHA, "not-a-digest")
-        with pytest.raises(InvalidManifest, match="sha256"):
             Manifest.from_yaml(bad)
 
     @pytest.mark.parametrize("field", ["kind", "namespace", "name", "version", "title"])

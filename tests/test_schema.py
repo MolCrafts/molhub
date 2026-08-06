@@ -47,6 +47,20 @@ class TestSchemaIsWellFormed:
 
 
 class TestSchemaAcceptsValidManifests:
+    def test_an_artifact_without_a_digest(self, validator):
+        """Platforms that publish nothing must still be describable."""
+        validator.validate(
+            {
+                "schema_version": 1,
+                "kind": "dataset",
+                "namespace": "ns",
+                "name": "n",
+                "version": "1",
+                "title": "T",
+                "artifacts": [{"role": "main", "filename": "f", "locators": ["x://y"]}],
+            }
+        )
+
     def test_the_reference_manifest(self, validator):
         validator.validate(yaml.safe_load(manifest_yaml()))
 
@@ -62,9 +76,7 @@ class TestSchemaAcceptsValidManifests:
             "name": "n",
             "version": "1",
             "title": "T",
-            "artifacts": [
-                {"role": "main", "filename": "f", "sha256": "a" * 64, "locators": ["x://y"]}
-            ],
+            "artifacts": [{"role": "main", "filename": "f", "locators": ["x://y"]}],
         }
         validator.validate(minimal)
 
@@ -82,12 +94,8 @@ class TestSchemaRejectsWhatTheParserRejects:
         with pytest.raises(InvalidManifest):
             Manifest.from_mapping(document)
 
-    def test_missing_sha256(self, validator, base):
-        del base["artifacts"][0]["sha256"]
-        self._both_reject(validator, base)
-
-    def test_malformed_sha256(self, validator, base):
-        base["artifacts"][0]["sha256"] = "not-a-digest"
+    def test_malformed_digest(self, validator, base):
+        base["artifacts"][0]["digest"] = "not-a-digest"
         self._both_reject(validator, base)
 
     def test_missing_version(self, validator, base):

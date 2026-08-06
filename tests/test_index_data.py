@@ -61,10 +61,8 @@ class TestPolymerTgEntry:
     def test_declares_a_zenodo_locator(self, manifest):
         assert str(manifest.artifact("main").locators[0]).startswith("zenodo://")
 
-    def test_records_the_upstream_md5_separately_from_its_own_sha256(self, manifest):
-        artifact = manifest.artifact("main")
-        assert artifact.digest.algorithm == "sha256"
-        assert artifact.upstream_digest.startswith("md5:")
+    def test_digest_is_zenodos_own_published_md5(self, manifest):
+        assert manifest.artifact("main").digest.algorithm == "md5"
 
     def test_size_is_declared(self, manifest):
         assert manifest.artifact("main").size == 6024335

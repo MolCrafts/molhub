@@ -9,10 +9,19 @@ Parsing is typed and strict rather than schema-driven at runtime: the shipped
 CI and for non-Python clients, while this module produces precise, actionable
 errors without dragging a validator into every install.
 
-The one rule with no exceptions: **every artifact declares a sha256.** A
-manifest without one cannot be loaded. Without a digest there is nothing to
-check transferred bytes against, which is exactly how a 202 response once got
-cached as a valid file.
+A manifest names **one version** of an artifact. The ``digest`` field is how a
+fetch confirms upstream still serves that version: it is whatever the platform
+publishes, copied verbatim -- Figshare and Zenodo publish md5, HuggingFace
+publishes a sha256 LFS OID. When a platform publishes nothing, the field is
+absent and nothing is checked. molhub never invents a digest of its own; a
+number it computed from its own download would only attest to that download,
+and writing a manifest would absurdly require fetching the whole artifact
+first.
+
+A digest that stops matching means upstream changed, so the manifest needs a
+new version -- it is a version check, not a trust anchor. Corrupt or truncated
+transfers are caught by the transport contract in :mod:`molhub.registry`
+(status check, temp file, atomic rename), which does not depend on digests.
 """
 
 from __future__ import annotations
@@ -53,19 +62,18 @@ class Artifact:
     Attributes:
         role: How the consumer refers to this file — ``main``, ``exclude``, …
         filename: Name to give the file locally.
-        digest: molhub's authoritative sha256. Always present.
         locators: Ordered candidate sources; earlier ones are preferred.
-        size: Byte count when the manifest records one.
-        upstream_digest: The digest upstream publishes, for reconciliation.
-            Often md5, which is why it is not the authority.
+        digest: What the platform publishes for this file, copied verbatim, or
+            ``None`` when it publishes nothing. Used to confirm upstream still
+            serves the version this manifest names.
+        size: Byte count when the platform reports one.
     """
 
     role: str
     filename: str
-    digest: Digest
     locators: tuple[Locator, ...]
+    digest: Digest | None = None
     size: int | None = None
-    upstream_digest: str | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any], *, where: str) -> "Artifact":
@@ -76,11 +84,12 @@ class Artifact:
         """
         role = str(_require(data, "role", where))
         scope = f"{where} artifact {role!r}"
-        raw_digest = _require(data, "sha256", scope)
+
+        raw_digest = data.get("digest")
         try:
-            digest = Digest.sha256(str(raw_digest))
+            digest = Digest.parse(str(raw_digest)) if raw_digest else None
         except InvalidDigest as error:
-            raise InvalidManifest(f"{scope} has an unusable sha256: {error}") from error
+            raise InvalidManifest(f"{scope} has an unusable digest: {error}") from error
 
         raw_locators = _require(data, "locators", scope)
         if isinstance(raw_locators, str) or not isinstance(raw_locators, Sequence):
@@ -93,10 +102,9 @@ class Artifact:
         return cls(
             role=role,
             filename=str(_require(data, "filename", scope)),
-            digest=digest,
             locators=locators,
+            digest=digest,
             size=int(size) if size is not None else None,
-            upstream_digest=(str(data["upstream_digest"]) if data.get("upstream_digest") else None),
         )
 
 

@@ -93,7 +93,8 @@ def info(
     for role, artifact in manifest.artifacts.items():
         size = f"  {artifact.size} B" if artifact.size else ""
         typer.echo(f"  [{role}] {artifact.filename}{size}")
-        typer.echo(f"    {artifact.digest}")
+        if artifact.digest:
+            typer.echo(f"    {artifact.digest}")
         for locator in artifact.locators:
             typer.echo(f"    - {locator}")
 
@@ -126,24 +127,41 @@ def fetch(
 
 @cache_app.command("verify")
 def cache_verify(
+    index: _IndexOption = None,
     home: Annotated[
         Optional[Path], typer.Option("--home", help="Cache root. Defaults to $MOLHUB_HOME.")
     ] = None,
 ) -> None:
-    """Re-hash every cached blob and report any that no longer match."""
+    """Re-check cached files against the digests their manifests name.
+
+    Files whose manifest records no digest are counted and skipped: the
+    platform published nothing to check them against.
+    """
     store = BlobStore(home)
-    blobs = sorted(p for p in (store.root / "blobs").rglob("*") if p.is_file())
-    if not blobs:
-        typer.echo(f"No cached blobs under {store.root}.")
+    hub = _hub(index)
+
+    checked = skipped = stale = 0
+    for manifest in hub.search():
+        for role, artifact in manifest.artifacts.items():
+            path = store.path_for(f"{manifest.coordinate.canonical}/{role}")
+            if not path.is_file():
+                continue
+            if artifact.digest is None:
+                skipped += 1
+                continue
+            checked += 1
+            actual = Digest.of_file(path, algorithm=artifact.digest.algorithm)
+            if not actual.matches(artifact.digest):
+                stale += 1
+                typer.secho(
+                    f"stale  {manifest.coordinate.canonical} [{role}]  {path}",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+
+    if not checked and not skipped:
+        typer.echo(f"Nothing cached under {store.root}.")
         return
-
-    corrupt = 0
-    for blob in blobs:
-        expected = Digest(algorithm=blob.parent.parent.name, hexdigest=blob.name)
-        if not Digest.of_file(blob, algorithm=expected.algorithm).matches(expected):
-            corrupt += 1
-            typer.secho(f"corrupt  {blob}", fg=typer.colors.RED, err=True)
-
-    typer.echo(f"{len(blobs)} blob(s) checked, {corrupt} corrupt.")
-    if corrupt:
+    typer.echo(f"{checked} checked, {stale} stale, {skipped} without a published digest.")
+    if stale:
         raise typer.Exit(code=1)

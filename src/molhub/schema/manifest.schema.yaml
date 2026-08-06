@@ -70,7 +70,7 @@ $defs:
   artifact:
     type: object
     additionalProperties: false
-    required: [role, filename, sha256, locators]
+    required: [role, filename, locators]
     properties:
       role:
         description: How consumers refer to this file -- main, exclude, weights...
@@ -81,25 +81,20 @@ $defs:
         type: string
         minLength: 1
 
-      sha256:
+      digest:
         description: >-
-          Mandatory, and molhub's only authority on whether transferred bytes
-          are correct. Without it there is nothing to check a response against,
-          which is how an HTTP 202 with an empty body once got cached as a
-          valid file. The index CI fills this in; it is not hand-written.
+          Whatever the platform publishes for this file, copied verbatim --
+          Figshare and Zenodo publish md5, HuggingFace a sha256 LFS OID. Omit
+          it when the platform publishes nothing; molhub never invents one.
+          Its job is to confirm upstream still serves the version this manifest
+          names. When it stops matching, upstream changed and the manifest
+          needs a new version.
         type: string
-        pattern: "^[0-9a-f]{64}$"
+        pattern: "^(md5|sha1|sha256|sha512):[0-9a-f]+$"
 
       size:
         type: integer
         minimum: 0
-
-      upstream_digest:
-        description: >-
-          What upstream publishes, kept for reconciliation. Often md5, which is
-          why it is not the authority.
-        type: string
-        pattern: "^(md5|sha1|sha256|sha512):[0-9a-f]+$"
 
       locators:
         description: Ordered candidate sources; earlier entries are preferred.

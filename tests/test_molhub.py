@@ -72,13 +72,13 @@ class TestFetch:
         assert hub.fetch("qm9@v2") == first
         assert hub.registry_stub.network_calls == calls
 
-    def test_files_land_in_the_content_addressed_store(self, hub):
+    def test_files_land_under_their_coordinate(self, hub):
         path = hub.fetch("qm9@v2")["main"]
-        assert "blobs/sha256/" in str(path)
+        assert "qm9@v2" in str(path) and path.name == "main"
 
 
 class TestFetchDelegatesVerification:
-    """If Molhub verified digests itself, the guarantee would have two homes."""
+    """If Molhub checked digests itself, the rule would have two homes."""
 
     def test_wrong_bytes_are_rejected(self, index_dir, tmp_path):
         fake = FakeRegistry(bodies={"main": b"tampered", "main-backup": b"still wrong"})

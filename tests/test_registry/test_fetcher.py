@@ -1,7 +1,11 @@
-"""Tests for Fetcher — ordered fallback, digest enforcement, cache reuse.
+"""Tests for Fetcher — ordered fallback, cache reuse, optional version check.
 
-These cover the failure paths the whole layer exists for. The success path is
-the easy part; the guarantees live in what happens when a transfer goes wrong.
+Two guarantees, and they are separate on purpose:
+
+* Always — a returned path holds a complete file from a 200 response. This
+  comes from the transport contract and holds with no digest in sight.
+* When a digest is supplied — the file also matches it, confirming upstream
+  still serves the version the manifest names.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from molhub.registry.fetcher import Fetcher
 from .conftest import FakeRegistry
 
 _GOOD = b"good bytes"
-_GOOD_DIGEST = Digest.sha256(hashlib.sha256(_GOOD).hexdigest())
+_MD5 = f"md5:{hashlib.md5(_GOOD).hexdigest()}"
+KEY = "dataset:molcrafts/qm9@v2/main"
 
 
 def _fetcher(fake: FakeRegistry, home) -> Fetcher:
@@ -27,25 +32,29 @@ def _fetcher(fake: FakeRegistry, home) -> Fetcher:
 
 
 class TestFetcherSuccess:
-    def test_returns_the_canonical_blob_path(self, molhub_home):
+    def test_returns_the_cache_path_for_the_key(self, molhub_home):
         fake = FakeRegistry(bodies={"a": _GOOD})
-        path = _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
-        assert path == BlobStore(root=molhub_home).path_for(_GOOD_DIGEST)
+        path = _fetcher(fake, molhub_home).fetch(["fake://a"], KEY)
+        assert path == BlobStore(root=molhub_home).path_for(KEY)
 
     def test_content_is_correct(self, molhub_home):
         fake = FakeRegistry(bodies={"a": _GOOD})
-        assert _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST).read_bytes() == _GOOD
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], KEY).read_bytes() == _GOOD
 
-    def test_accepts_locator_objects_as_well_as_strings(self, molhub_home):
+    def test_works_with_no_digest_at_all(self, molhub_home):
+        """Platforms that publish nothing still get a usable fetch."""
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], KEY).exists()
+
+    def test_accepts_locator_objects(self, molhub_home):
         from molhub.registry.locator import Locator
 
         fake = FakeRegistry(bodies={"a": _GOOD})
-        path = _fetcher(fake, molhub_home).fetch([Locator.parse("fake://a")], _GOOD_DIGEST)
-        assert path.read_bytes() == _GOOD
+        assert _fetcher(fake, molhub_home).fetch([Locator.parse("fake://a")], KEY).exists()
 
     def test_stops_at_the_first_success(self, molhub_home):
         fake = FakeRegistry(bodies={"a": _GOOD, "b": _GOOD})
-        _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], _GOOD_DIGEST)
+        _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], KEY)
         assert fake.network_calls == 1
 
 
@@ -53,153 +62,114 @@ class TestFetcherCache:
     def test_second_fetch_makes_no_network_call(self, molhub_home):
         fake = FakeRegistry(bodies={"a": _GOOD})
         fetcher = _fetcher(fake, molhub_home)
-        first = fetcher.fetch(["fake://a"], _GOOD_DIGEST)
-        calls_after_first = fake.network_calls
-        second = fetcher.fetch(["fake://a"], _GOOD_DIGEST)
-        assert second == first
-        assert fake.network_calls == calls_after_first
+        first = fetcher.fetch(["fake://a"], KEY)
+        calls = fake.network_calls
+        assert fetcher.fetch(["fake://a"], KEY) == first
+        assert fake.network_calls == calls
 
     def test_a_fresh_fetcher_also_hits_the_shared_cache(self, molhub_home):
-        _fetcher(FakeRegistry(bodies={"a": _GOOD}), molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
+        _fetcher(FakeRegistry(bodies={"a": _GOOD}), molhub_home).fetch(["fake://a"], KEY)
         cold = FakeRegistry(bodies={"a": _GOOD})
-        _fetcher(cold, molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
+        _fetcher(cold, molhub_home).fetch(["fake://a"], KEY)
         assert cold.network_calls == 0
+
+    def test_a_different_key_is_fetched_separately(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        fetcher = _fetcher(fake, molhub_home)
+        fetcher.fetch(["fake://a"], "dataset:x/y@1/main")
+        fetcher.fetch(["fake://a"], "dataset:x/y@1/exclude")
+        assert fake.network_calls == 2
 
 
 class TestFetcherFallback:
     def test_falls_through_a_bad_status(self, molhub_home):
         fake = FakeRegistry(bodies={"a": 202, "b": _GOOD})
-        path = _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], _GOOD_DIGEST)
-        assert path.read_bytes() == _GOOD
-        assert fake.network_calls == 2
-
-    def test_falls_through_a_digest_mismatch(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": b"wrong bytes", "b": _GOOD})
-        path = _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], _GOOD_DIGEST)
-        assert path.read_bytes() == _GOOD
-
-    def test_mismatched_bytes_never_reach_the_store(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": b"wrong bytes", "b": _GOOD})
-        _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], _GOOD_DIGEST)
-        blobs = list((molhub_home / "blobs").rglob("*"))
-        assert [p for p in blobs if p.is_file() and p.read_bytes() == b"wrong bytes"] == []
-
-    def test_does_not_retry_the_same_locator_after_a_mismatch(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": b"wrong bytes", "b": _GOOD})
-        _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], _GOOD_DIGEST)
-        assert fake.fetch_calls == ["fake://a", "fake://b"]
+        assert (
+            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], KEY).read_bytes() == _GOOD
+        )
 
     def test_order_is_honoured(self, molhub_home):
         fake = FakeRegistry(bodies={"a": _GOOD, "b": _GOOD})
-        _fetcher(fake, molhub_home).fetch(["fake://b", "fake://a"], _GOOD_DIGEST)
+        _fetcher(fake, molhub_home).fetch(["fake://b", "fake://a"], KEY)
         assert fake.fetch_calls == ["fake://b"]
+
+    def test_nothing_partial_is_left_behind(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": 202})
+        with pytest.raises(AllLocatorsFailed):
+            _fetcher(fake, molhub_home).fetch(["fake://a"], KEY)
+        assert [p for p in molhub_home.rglob("*") if p.is_file()] == []
 
 
 class TestFetcherExhaustion:
     def test_raises_when_every_locator_fails(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": 202, "b": 500, "c": b"wrong"})
+        fake = FakeRegistry(bodies={"a": 202, "b": 500})
         with pytest.raises(AllLocatorsFailed):
-            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b", "fake://c"], _GOOD_DIGEST)
+            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], KEY)
 
-    def test_message_names_every_locator(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": 202, "b": 500, "c": b"wrong"})
+    def test_message_names_every_locator_and_reason(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": 202, "b": 500})
         with pytest.raises(AllLocatorsFailed) as excinfo:
-            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b", "fake://c"], _GOOD_DIGEST)
+            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], KEY)
         message = str(excinfo.value)
-        assert "fake://a" in message and "fake://b" in message and "fake://c" in message
-
-    def test_message_carries_each_reason(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": 202, "c": b"wrong"})
-        with pytest.raises(AllLocatorsFailed) as excinfo:
-            _fetcher(fake, molhub_home).fetch(["fake://a", "fake://c"], _GOOD_DIGEST)
-        message = str(excinfo.value)
-        assert "202" in message
-        assert "digest" in message.lower()
-
-    def test_nothing_is_left_in_the_store(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": 202})
-        with pytest.raises(AllLocatorsFailed):
-            _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
-        assert [p for p in molhub_home.rglob("*") if p.is_file()] == []
+        assert "fake://a" in message and "fake://b" in message
+        assert "202" in message and "500" in message
 
     def test_unknown_scheme_is_reported_not_raised_bare(self, molhub_home):
         fake = FakeRegistry(bodies={"b": _GOOD})
-        path = _fetcher(fake, molhub_home).fetch(["nosuch://a", "fake://b"], _GOOD_DIGEST)
-        assert path.read_bytes() == _GOOD
+        assert _fetcher(fake, molhub_home).fetch(["nosuch://a", "fake://b"], KEY).exists()
 
     def test_empty_locator_list_raises(self, molhub_home):
         with pytest.raises(AllLocatorsFailed):
-            _fetcher(FakeRegistry(), molhub_home).fetch([], _GOOD_DIGEST)
+            _fetcher(FakeRegistry(), molhub_home).fetch([], KEY)
+
+
+class TestVersionCheck:
+    """A digest is the platform's own published value. It answers one question:
+    does upstream still serve the version this manifest names?"""
+
+    def test_matching_digest_passes(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=_MD5).exists()
+
+    def test_accepts_a_digest_object(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        digest = Digest.parse(_MD5)
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=digest).exists()
+
+    def test_sha256_digest_is_equally_acceptable(self, molhub_home):
+        """HuggingFace publishes sha256; the field takes whatever upstream gives."""
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        sha = f"sha256:{hashlib.sha256(_GOOD).hexdigest()}"
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=sha).exists()
+
+    def test_mismatch_is_rejected(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": b"a different version"})
+        with pytest.raises(AllLocatorsFailed):
+            _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=_MD5)
+
+    def test_mismatched_file_is_not_cached(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": b"a different version"})
+        with pytest.raises(AllLocatorsFailed):
+            _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=_MD5)
+        assert [p for p in molhub_home.rglob("*") if p.is_file()] == []
+
+    def test_message_says_the_manifest_is_what_needs_updating(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": b"a different version"})
+        with pytest.raises(AllLocatorsFailed) as excinfo:
+            _fetcher(fake, molhub_home).fetch(["fake://a"], KEY, digest=_MD5)
+        assert "update the manifest" in str(excinfo.value)
+
+    def test_a_second_locator_is_still_tried(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": b"stale", "b": _GOOD})
+        path = _fetcher(fake, molhub_home).fetch(["fake://a", "fake://b"], KEY, digest=_MD5)
+        assert path.read_bytes() == _GOOD
 
 
 class TestFetcherExtensibility:
     def test_a_third_party_driver_needs_no_molhub_change(self, molhub_home):
-        """Registering a driver for a novel scheme is enough to fetch with it."""
         custom = FakeRegistry(scheme="dataverse", bodies={"doi/10.1/x": _GOOD})
         fetcher = Fetcher(
             drivers=Drivers.discover().with_driver(custom),
             blobs=BlobStore(root=molhub_home),
         )
-        path = fetcher.fetch(["dataverse://doi/10.1/x"], _GOOD_DIGEST)
-        assert path.read_bytes() == _GOOD
-
-
-class TestUpstreamDigestEnforcement:
-    """molhub's sha256 is derived, not quoted — Figshare and Zenodo publish
-    only md5. Re-checking the publisher's own number on every fetch is what
-    stops that derivation from being a self-referential note about one
-    download."""
-
-    def test_matching_upstream_digest_passes(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        upstream = f"md5:{hashlib.md5(_GOOD).hexdigest()}"
-        path = _fetcher(fake, molhub_home).fetch(
-            ["fake://a"], _GOOD_DIGEST, upstream_digest=upstream
-        )
-        assert path.read_bytes() == _GOOD
-
-    def test_wrong_upstream_digest_is_rejected(self, molhub_home):
-        """Even when the sha256 matches: the publisher disagrees, so stop."""
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        with pytest.raises(AllLocatorsFailed):
-            _fetcher(fake, molhub_home).fetch(
-                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
-            )
-
-    def test_rejected_bytes_are_not_stored(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        with pytest.raises(AllLocatorsFailed):
-            _fetcher(fake, molhub_home).fetch(
-                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
-            )
-        assert [p for p in molhub_home.rglob("*") if p.is_file()] == []
-
-    def test_failure_names_the_algorithm_and_both_values(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        with pytest.raises(AllLocatorsFailed) as excinfo:
-            _fetcher(fake, molhub_home).fetch(
-                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
-            )
-        message = str(excinfo.value)
-        assert "md5" in message and "0" * 32 in message
-        assert hashlib.md5(_GOOD).hexdigest() in message
-
-    def test_absent_upstream_digest_skips_the_check(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        assert _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST).exists()
-
-    def test_a_driver_reported_digest_is_checked_too(self, molhub_home):
-        """The API's live number counts even when the caller supplied none."""
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        fake.upstream_digest = f"md5:{'0' * 32}"
-        with pytest.raises(AllLocatorsFailed, match="publisher"):
-            _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
-
-    def test_upstream_check_accepts_a_digest_object(self, molhub_home):
-        fake = FakeRegistry(bodies={"a": _GOOD})
-        upstream = Digest.parse(f"md5:{hashlib.md5(_GOOD).hexdigest()}")
-        assert (
-            _fetcher(fake, molhub_home)
-            .fetch(["fake://a"], _GOOD_DIGEST, upstream_digest=upstream)
-            .exists()
-        )
+        assert fetcher.fetch(["dataverse://doi/10.1/x"], KEY).read_bytes() == _GOOD

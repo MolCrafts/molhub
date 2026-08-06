@@ -70,9 +70,10 @@ class Molhub:
     ) -> dict[str, Path]:
         """Retrieve an artifact's files, verified, and return them by role.
 
-        Each file is checked against the sha256 in its manifest **and** against
-        whatever digest the publisher declared, before it is stored. A cached
-        file is returned without any network access.
+        When the manifest records the platform's published digest, the
+        transferred file is checked against it — that confirms upstream still
+        serves the version this manifest names. A cached file is returned
+        without any network access.
 
         Args:
             coordinate: Full or shorthand coordinate.
@@ -84,8 +85,8 @@ class Molhub:
         Raises:
             UnknownArtifact: If the index has no such coordinate.
             KeyError: If a requested role is not declared by the manifest.
-            AllLocatorsFailed: If no locator for some file yielded bytes that
-                match its declared digest.
+            AllLocatorsFailed: If no locator for some file yielded a usable
+                transfer.
         """
         manifest = self.resolve(coordinate)
         wanted = list(manifest.artifacts) if roles is None else roles
@@ -94,8 +95,8 @@ class Molhub:
             artifact = manifest.artifact(role)
             fetched[role] = self._fetcher.fetch(
                 artifact.locators,
-                artifact.digest,
-                upstream_digest=artifact.upstream_digest,
+                f"{manifest.coordinate.canonical}/{role}",
+                digest=artifact.digest,
             )
         return fetched
 

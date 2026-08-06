@@ -6,8 +6,6 @@ shows a Python traceback instead of an exit code.
 
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 from typer.testing import CliRunner
 
@@ -58,7 +56,7 @@ class TestInfo:
 
     def test_prints_the_digest_and_locators(self, idx):
         out = runner.invoke(app, ["info", "qm9@v2", *idx]).stdout
-        assert "sha256:" in out
+        assert "md5:" in out
         assert "fake://main-backup" in out
 
     def test_prints_declared_targets(self, idx):
@@ -107,29 +105,46 @@ class TestFetch:
 
 
 class TestCacheVerify:
-    def test_reports_an_empty_cache(self, tmp_path):
-        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path)])
-        assert result.exit_code == 0
-        assert "No cached blobs" in result.stdout
+    """Verify re-checks cached files against the digests their manifests name."""
 
-    def test_passes_on_an_intact_blob(self, tmp_path):
-        body = b"intact"
-        digest = hashlib.sha256(body).hexdigest()
-        blob = tmp_path / "blobs" / "sha256" / digest[:2] / digest
-        blob.parent.mkdir(parents=True)
-        blob.write_bytes(body)
-        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path)])
-        assert result.exit_code == 0
-        assert "0 corrupt" in result.stdout
+    def _cache(self, home, body: bytes) -> None:
+        from molhub.registry import BlobStore
 
-    def test_detects_a_corrupted_blob(self, tmp_path):
-        digest = hashlib.sha256(b"intact").hexdigest()
-        blob = tmp_path / "blobs" / "sha256" / digest[:2] / digest
-        blob.parent.mkdir(parents=True)
-        blob.write_bytes(b"tampered")
-        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path)])
+        path = BlobStore(root=home).path_for("dataset:molcrafts/qm9@v2/main")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+
+    def test_reports_an_empty_cache(self, idx, tmp_path):
+        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path), *idx])
+        assert result.exit_code == 0
+        assert "Nothing cached" in result.stdout
+
+    def test_passes_on_an_intact_file(self, idx, tmp_path):
+        from .conftest import MAIN_BODY
+
+        self._cache(tmp_path, MAIN_BODY)
+        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path), *idx])
+        assert result.exit_code == 0
+        assert "0 stale" in result.stdout
+
+    def test_detects_a_file_that_no_longer_matches(self, idx, tmp_path):
+        self._cache(tmp_path, b"a different version")
+        result = runner.invoke(app, ["cache", "verify", "--home", str(tmp_path), *idx])
         assert result.exit_code == 1
-        assert "1 corrupt" in result.stdout
+        assert "1 stale" in result.stdout
+
+    def test_counts_files_whose_manifest_has_no_digest(self, tmp_path, index_dir):
+        """Nothing published means nothing to check — say so, do not pretend."""
+        manifest = index_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml"
+        manifest.write_text(
+            "\n".join(line for line in manifest.read_text().splitlines() if "digest:" not in line)
+        )
+        self._cache(tmp_path, b"anything at all")
+        result = runner.invoke(
+            app, ["cache", "verify", "--home", str(tmp_path), "--index", str(index_dir)]
+        )
+        assert result.exit_code == 0
+        assert "1 without a published digest" in result.stdout
 
 
 class TestBrokenIndex:

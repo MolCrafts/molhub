@@ -107,23 +107,32 @@ def publish(self, files: Sequence[Path], target: str,
 凭据只在发布时索取：`resolve` 是匿名的，token 缺失要到真正 publish 时才报错。
 `molhub.uploader` 降级为 shim，保两个小版本。
 
-## digest 的来源：只能派生，但必须锚定发布方
+## digest 的定位：版本标识，不是信任锚
 
-实测（2026-08-06）三家平台**都不发布 sha256**：
+**manifest 规定的是数据集的哪一版。** digest 的唯一用途是确认上游现在供应的还是
+不是那一版；对不上说明上游换了内容，该做的是**更新 manifest**，与"下载到的东西
+可不可信"无关。
 
-| 平台 | API 提供 |
+因此规则很简单：**上游公布什么就照抄什么，不公布就不记、不校验。**
+
+| 平台 | 公布的 |
 |---|---|
-| Figshare | `supplied_md5` / `computed_md5`；下载响应的 ETag 也是同一个 md5 |
+| Figshare | `supplied_md5` / `computed_md5`（页面上连这个都不显示，只有文件名和大小） |
 | Zenodo | `checksum: "md5:..."` |
-| HuggingFace | LFS OID 是 sha256，但**只对 LFS 跟踪的文件**，普通小文件没有 |
+| HuggingFace | LFS OID 是 sha256，仅覆盖 LFS 跟踪的文件 |
 
-所以 manifest 里的 sha256 **必然是派生的**，不是抄来的。派生流程：取回文件 →
-用发布方公布的 md5 校验 → 在这批已验证字节上算 sha256。
+**molhub 绝不自行计算 digest。** 曾经的设计是「sha256 必填、由 molhub 取回后
+算出」，那是错的，两个后果：
 
-**但派生不能靠注释担保。** `Fetcher.fetch` 现在接受 `upstream_digest`，且会检查
-两个来源的发布方声明：manifest 里策展时记下的那个，以及驱动 `resolve` 时从平台
-API 实时拿到的那个。任一不符即拒绝并换下一个 locator——**即使 molhub 自己的
-sha256 是对的**。
+1. 自算的值只能证明「我那一次下载到了什么」，对「是不是那一版」不多提供任何信息——
+   上游给的 md5 已经回答了这个问题。
+2. 写一份 manifest 变成必须先把整个制品下载一遍。revMD17 十个分子因此要 1.2 GB。
+   **目录不该需要先把货搬一遍才能编目。**
 
-这条把 sha256 从「我某次下载到的东西」变成「发布方声明的东西的另一种表述」。
-若哪天上游真的换了内容，报警的是 md5 不符，而不是等到有人发现结果不对。
+**传输正确性不靠 digest。** 202、半截、错误响应由传输契约拦住（查 status →
+流式写临时文件 → 原子改名），这条与 digest 完全无关，去掉必填 digest 不会把当初
+那个 0 字节排除表的 bug 放回来。
+
+缓存因此也不需要内容寻址：按 manifest 已经给出的坐标 + role 存放
+（`$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>`），不用为了决定存放位置而
+去哈希任何东西。

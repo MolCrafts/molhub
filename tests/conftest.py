@@ -11,11 +11,12 @@ MAIN_SHA = hashlib.sha256(MAIN_BODY).hexdigest()
 MAIN_MD5 = hashlib.md5(MAIN_BODY).hexdigest()
 SIDE_BODY = b"side artifact bytes"
 SIDE_SHA = hashlib.sha256(SIDE_BODY).hexdigest()
+SIDE_MD5 = hashlib.md5(SIDE_BODY).hexdigest()
 
 _SIDE_ARTIFACT = f"""\
   - role: exclude
     filename: excluded.txt
-    sha256: "{SIDE_SHA}"
+    digest: "md5:{SIDE_MD5}"
     locators:
       - fake://side
 """
@@ -47,9 +48,8 @@ def manifest_yaml(
         "artifacts:\n"
         "  - role: main\n"
         "    filename: qm9.tar.bz2\n"
-        f'    sha256: "{MAIN_SHA}"\n'
+        f'    digest: "md5:{MAIN_MD5}"\n'
         "    size: 19\n"
-        f'    upstream_digest: "md5:{MAIN_MD5}"\n'
         "    locators:\n"
         "      - fake://main          # preferred mirror\n"
         "      - fake://main-backup\n"
