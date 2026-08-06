@@ -155,12 +155,20 @@ class TestQM9SourceConstruction:
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
         src = QM9Source(tmp_path, total=100, targets=["U0", "gap"], download=False)
-        assert src.source_id == "qm9:v2:total=100:targets=U0+gap"
+        assert src.source_id == "dataset:molcrafts/qm9@v2#total=100,targets=U0+gap"
 
     def test_source_id_without_options(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        assert QM9Source(tmp_path, download=False).source_id == "qm9:v2"
+        assert QM9Source(tmp_path, download=False).source_id == "dataset:molcrafts/qm9@v2"
+
+    def test_unmodified_source_id_parses_as_a_coordinate(self, tmp_path):
+        from molhub.coordinate import Coordinate
+
+        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
+        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
+        source_id = QM9Source(tmp_path, download=False).source_id
+        assert Coordinate.parse(source_id).canonical == source_id
 
     def test_root_is_expanded_to_absolute(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")

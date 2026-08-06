@@ -1,0 +1,49 @@
+# QM9, from the Springer Nature Figshare collection 978904.
+#
+# The locators are resolved through the Figshare API rather than pinned to a
+# raw ndownloader URL. That distinction is not cosmetic: the raw endpoint
+# answers 202 with an empty body while it prepares a file, and molhub's own
+# history includes that response being cached as a valid 0-byte exclusion
+# list -- which silently turned 130,831 characterised molecules into 133,885.
+#
+# Figshare publishes only md5, so the sha256 here is derived rather than
+# quoted: the file was fetched, its md5 checked against the published value
+# below, and sha256 taken over those verified bytes. That derivation is not
+# taken on trust -- every fetch re-checks upstream_digest, so a mirror that
+# disagrees with the publisher is rejected even if it matches our sha256.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: qm9
+version: v2
+
+title: QM9 — 133,885 small organic molecules with quantum-chemical properties
+description: >-
+  DFT-computed geometries and 15 scalar properties for the GDB-9 subset of
+  small organic molecules with up to nine heavy atoms (C, N, O, F). The
+  uncharacterized list names the 3,054 molecules that failed the geometry
+  consistency check, leaving 130,831 usable entries.
+license: CC0-1.0
+citation: 10.1038/sdata.2014.22
+
+artifacts:
+  - role: main
+    filename: dsgdb9nsd.xyz.tar.bz2
+    sha256: 3a63848ac80691bdb8d41834b575afad345b9300d7a2db0c38adb7f6eaa8360c
+    size: 86144227
+    upstream_digest: md5:ad1ebd51ee7f5b3a6e32e974e5d54012
+    locators:
+      - figshare://1057646/dsgdb9nsd.xyz.tar.bz2
+
+  - role: exclude
+    filename: uncharacterized.txt
+    sha256: 3aa5115d540b356de94791d4a74c3bf1ed91c469ecf52a4f5d7cc0506fe02e24
+    size: 486752
+    upstream_digest: md5:a361887bacb427b8a0ce7903d92a53b4
+    locators:
+      - figshare://1057644/uncharacterized.txt
+
+targets:
+  graph_level:
+    [A, B, C, mu, alpha, homo, lumo, gap, r2, zpve, U0, U, H, G, Cv]
+  atom_level: []

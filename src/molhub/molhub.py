@@ -70,8 +70,9 @@ class Molhub:
     ) -> dict[str, Path]:
         """Retrieve an artifact's files, verified, and return them by role.
 
-        Each file is checked against the sha256 in its manifest before it is
-        stored, and a cached file is returned without any network access.
+        Each file is checked against the sha256 in its manifest **and** against
+        whatever digest the publisher declared, before it is stored. A cached
+        file is returned without any network access.
 
         Args:
             coordinate: Full or shorthand coordinate.
@@ -88,12 +89,15 @@ class Molhub:
         """
         manifest = self.resolve(coordinate)
         wanted = list(manifest.artifacts) if roles is None else roles
-        return {
-            role: self._fetcher.fetch(
-                manifest.artifact(role).locators, manifest.artifact(role).digest
+        fetched = {}
+        for role in wanted:
+            artifact = manifest.artifact(role)
+            fetched[role] = self._fetcher.fetch(
+                artifact.locators,
+                artifact.digest,
+                upstream_digest=artifact.upstream_digest,
             )
-            for role in wanted
-        }
+        return fetched
 
     def search(self, *, kind: str | None = None, query: str | None = None) -> list[Manifest]:
         """Return matching manifests, ordered by coordinate.

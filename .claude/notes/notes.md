@@ -106,3 +106,24 @@ def publish(self, files: Sequence[Path], target: str,
 
 凭据只在发布时索取：`resolve` 是匿名的，token 缺失要到真正 publish 时才报错。
 `molhub.uploader` 降级为 shim，保两个小版本。
+
+## digest 的来源：只能派生，但必须锚定发布方
+
+实测（2026-08-06）三家平台**都不发布 sha256**：
+
+| 平台 | API 提供 |
+|---|---|
+| Figshare | `supplied_md5` / `computed_md5`；下载响应的 ETag 也是同一个 md5 |
+| Zenodo | `checksum: "md5:..."` |
+| HuggingFace | LFS OID 是 sha256，但**只对 LFS 跟踪的文件**，普通小文件没有 |
+
+所以 manifest 里的 sha256 **必然是派生的**，不是抄来的。派生流程：取回文件 →
+用发布方公布的 md5 校验 → 在这批已验证字节上算 sha256。
+
+**但派生不能靠注释担保。** `Fetcher.fetch` 现在接受 `upstream_digest`，且会检查
+两个来源的发布方声明：manifest 里策展时记下的那个，以及驱动 `resolve` 时从平台
+API 实时拿到的那个。任一不符即拒绝并换下一个 locator——**即使 molhub 自己的
+sha256 是对的**。
+
+这条把 sha256 从「我某次下载到的东西」变成「发布方声明的东西的另一种表述」。
+若哪天上游真的换了内容，报警的是 md5 不符，而不是等到有人发现结果不对。

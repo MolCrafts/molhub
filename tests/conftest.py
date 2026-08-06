@@ -8,6 +8,7 @@ import pytest
 
 MAIN_BODY = b"main artifact bytes"
 MAIN_SHA = hashlib.sha256(MAIN_BODY).hexdigest()
+MAIN_MD5 = hashlib.md5(MAIN_BODY).hexdigest()
 SIDE_BODY = b"side artifact bytes"
 SIDE_SHA = hashlib.sha256(SIDE_BODY).hexdigest()
 
@@ -48,7 +49,7 @@ def manifest_yaml(
         "    filename: qm9.tar.bz2\n"
         f'    sha256: "{MAIN_SHA}"\n'
         "    size: 19\n"
-        '    upstream_digest: "md5:ce2c7b2a879450cbbfff4d7ccea648f9"\n'
+        f'    upstream_digest: "md5:{MAIN_MD5}"\n'
         "    locators:\n"
         "      - fake://main          # preferred mirror\n"
         "      - fake://main-backup\n"

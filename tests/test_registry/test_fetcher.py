@@ -142,3 +142,64 @@ class TestFetcherExtensibility:
         )
         path = fetcher.fetch(["dataverse://doi/10.1/x"], _GOOD_DIGEST)
         assert path.read_bytes() == _GOOD
+
+
+class TestUpstreamDigestEnforcement:
+    """molhub's sha256 is derived, not quoted — Figshare and Zenodo publish
+    only md5. Re-checking the publisher's own number on every fetch is what
+    stops that derivation from being a self-referential note about one
+    download."""
+
+    def test_matching_upstream_digest_passes(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        upstream = f"md5:{hashlib.md5(_GOOD).hexdigest()}"
+        path = _fetcher(fake, molhub_home).fetch(
+            ["fake://a"], _GOOD_DIGEST, upstream_digest=upstream
+        )
+        assert path.read_bytes() == _GOOD
+
+    def test_wrong_upstream_digest_is_rejected(self, molhub_home):
+        """Even when the sha256 matches: the publisher disagrees, so stop."""
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        with pytest.raises(AllLocatorsFailed):
+            _fetcher(fake, molhub_home).fetch(
+                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
+            )
+
+    def test_rejected_bytes_are_not_stored(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        with pytest.raises(AllLocatorsFailed):
+            _fetcher(fake, molhub_home).fetch(
+                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
+            )
+        assert [p for p in molhub_home.rglob("*") if p.is_file()] == []
+
+    def test_failure_names_the_algorithm_and_both_values(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        with pytest.raises(AllLocatorsFailed) as excinfo:
+            _fetcher(fake, molhub_home).fetch(
+                ["fake://a"], _GOOD_DIGEST, upstream_digest=f"md5:{'0' * 32}"
+            )
+        message = str(excinfo.value)
+        assert "md5" in message and "0" * 32 in message
+        assert hashlib.md5(_GOOD).hexdigest() in message
+
+    def test_absent_upstream_digest_skips_the_check(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        assert _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST).exists()
+
+    def test_a_driver_reported_digest_is_checked_too(self, molhub_home):
+        """The API's live number counts even when the caller supplied none."""
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        fake.upstream_digest = f"md5:{'0' * 32}"
+        with pytest.raises(AllLocatorsFailed, match="publisher"):
+            _fetcher(fake, molhub_home).fetch(["fake://a"], _GOOD_DIGEST)
+
+    def test_upstream_check_accepts_a_digest_object(self, molhub_home):
+        fake = FakeRegistry(bodies={"a": _GOOD})
+        upstream = Digest.parse(f"md5:{hashlib.md5(_GOOD).hexdigest()}")
+        assert (
+            _fetcher(fake, molhub_home)
+            .fetch(["fake://a"], _GOOD_DIGEST, upstream_digest=upstream)
+            .exists()
+        )

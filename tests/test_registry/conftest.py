@@ -39,6 +39,7 @@ class FakeRegistry:
 
     scheme: str = "fake"
     bodies: dict[str, bytes | int] = field(default_factory=dict)
+    upstream_digest: str | None = None
     resolve_calls: list[Locator] = field(default_factory=list)
     fetch_calls: list[str] = field(default_factory=list)
 
@@ -48,7 +49,13 @@ class FakeRegistry:
 
     def resolve(self, locator: Locator) -> list[RemoteFile]:
         self.resolve_calls.append(locator)
-        return [RemoteFile(url=f"{self.scheme}://{locator.path}", filename=locator.path)]
+        return [
+            RemoteFile(
+                url=f"{self.scheme}://{locator.path}",
+                filename=locator.path,
+                upstream_digest=self.upstream_digest,
+            )
+        ]
 
     def fetch(self, remote: RemoteFile, dest: Path) -> Path:
         self.fetch_calls.append(remote.url)

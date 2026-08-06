@@ -47,7 +47,13 @@ class Fetcher:
         """The store verified bytes are written to."""
         return self._blobs
 
-    def fetch(self, locators: Sequence[str | Locator], digest: Digest) -> Path:
+    def fetch(
+        self,
+        locators: Sequence[str | Locator],
+        digest: Digest,
+        *,
+        upstream_digest: str | Digest | None = None,
+    ) -> Path:
         """Return a local path holding the bytes matching *digest*.
 
         Tries each locator in order and returns as soon as one yields bytes
@@ -56,7 +62,13 @@ class Fetcher:
 
         Args:
             locators: Candidate sources, most-preferred first.
-            digest: The digest the bytes must have.
+            digest: molhub's own sha256. Every stored blob matches this.
+            upstream_digest: What the publisher says the file hashes to, in
+                ``algorithm:hex`` form. When given, the transferred bytes must
+                satisfy **this as well**. Figshare and Zenodo publish only md5,
+                so molhub's sha256 is necessarily derived rather than quoted —
+                checking the publisher's own number on every fetch is what
+                keeps that derivation honest instead of self-referential.
 
         Returns:
             Path to the verified blob inside the store.
@@ -68,28 +80,33 @@ class Fetcher:
         if self._blobs.has(digest):
             return self._blobs.path_for(digest)
 
+        expected_upstream = (
+            Digest.parse(upstream_digest) if isinstance(upstream_digest, str) else upstream_digest
+        )
         reasons: list[tuple[str, BaseException]] = []
         for candidate in locators:
             locator = Locator.coerce(candidate)
             try:
-                return self._fetch_one(locator, digest)
+                return self._fetch_one(locator, digest, expected_upstream)
             except RegistryError as error:
                 reasons.append((str(locator), error))
             except OSError as error:
                 reasons.append((str(locator), error))
         raise AllLocatorsFailed(reasons)
 
-    def _fetch_one(self, locator: Locator, digest: Digest) -> Path:
+    def _fetch_one(self, locator: Locator, digest: Digest, upstream: Digest | None) -> Path:
         """Resolve, transfer, verify, and store one locator's bytes."""
         driver = self._drivers.for_scheme(locator.scheme)
         remotes = driver.resolve(locator)
         if not remotes:
             raise RegistryError(f"{locator} resolved to no files.")
+        remote = remotes[0]
 
         partial = self._blobs.temp_path(digest)
         partial.parent.mkdir(parents=True, exist_ok=True)
         try:
-            driver.fetch(remotes[0], partial)
+            driver.fetch(remote, partial)
+            self._verify_upstream(locator, partial, upstream, remote.upstream_digest)
             actual = Digest.of_file(partial)
             if not actual.matches(digest):
                 raise DigestMismatch(
@@ -99,3 +116,28 @@ class Fetcher:
             return self._blobs.put(partial, digest)
         finally:
             partial.unlink(missing_ok=True)
+
+    def _verify_upstream(
+        self,
+        locator: Locator,
+        path: Path,
+        *expectations: str | Digest | None,
+    ) -> None:
+        """Check *path* against every digest the publisher asserted.
+
+        Two can be in play and both are checked: what the manifest recorded
+        when the entry was curated, and what the platform's API reports right
+        now. Agreement between them and the bytes is what makes molhub's own
+        sha256 a restatement of the publisher's claim rather than a note about
+        one particular download.
+        """
+        for expectation in expectations:
+            if expectation is None:
+                continue
+            expected = Digest.parse(expectation) if isinstance(expectation, str) else expectation
+            actual = Digest.of_file(path, algorithm=expected.algorithm)
+            if not actual.matches(expected):
+                raise DigestMismatch(
+                    f"{locator} served bytes whose {expected.algorithm} is {actual.hexdigest}, "
+                    f"but the publisher declares {expected.hexdigest}. Not retrying this mirror."
+                )
