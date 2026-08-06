@@ -7,7 +7,6 @@ suite never touches Figshare.
 from __future__ import annotations
 
 import io
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -16,13 +15,11 @@ from molpy import Frame
 from molhub.dataset import Targets
 from molhub.dataset.qm9 import (
     QM9Source,
-    _download,
     _filter_targets,
     _is_cached,
     _load_exclusion_list,
     _parse_xyz,
 )
-from molhub.registry.errors import BadStatus
 
 # One real-shaped QM9 record: 5 atoms, tag + index + 15 scalar properties.
 # The coordinate lines carry a trailing Mulliken charge column, which the
@@ -131,60 +128,6 @@ class TestIsCached:
         p = tmp_path / "ok.bin"
         p.write_bytes(b"x")
         assert _is_cached(p) is True
-
-
-class _FakeResponse(io.BytesIO):
-    """Minimal stand-in for the object ``urlopen`` yields."""
-
-    def __init__(self, status: int, body: bytes = b"") -> None:
-        super().__init__(body)
-        self.status = status
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-        return False
-
-
-class TestDownload:
-    def test_writes_body_on_200(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.bin"
-        monkeypatch.setattr(
-            urllib.request, "urlopen", lambda *a, **k: _FakeResponse(200, b"payload")
-        )
-        _download("https://example.invalid/f", dest)
-        assert dest.read_bytes() == b"payload"
-
-    def test_202_raises_and_leaves_no_file(self, tmp_path, monkeypatch):
-        """The exact Figshare failure that used to cache a 0-byte file."""
-        dest = tmp_path / "out.bin"
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(BadStatus, match="HTTP 202"):
-            _download("https://example.invalid/f", dest)
-        assert not dest.exists()
-
-    def test_no_partial_file_survives_a_failed_transfer(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.bin"
-
-        class _Exploding(_FakeResponse):
-            def read(self, *a, **k):
-                raise OSError("connection reset")
-
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Exploding(200, b"abc"))
-        with pytest.raises(OSError):
-            _download("https://example.invalid/f", dest)
-        assert not dest.exists()
-        assert not (tmp_path / "out.bin.part").exists()
-
-    def test_existing_file_is_untouched_when_status_is_bad(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.bin"
-        dest.write_bytes(b"good cached bytes")
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(BadStatus):
-            _download("https://example.invalid/f", dest)
-        assert dest.read_bytes() == b"good cached bytes"
 
 
 class TestQM9SourceConstruction:

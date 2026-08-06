@@ -9,14 +9,15 @@ file changes.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from molhub.registry.locator import Locator
+from molhub.registry.publication import Publication
 from molhub.registry.remote import RemoteFile
 
-__all__ = ["Registry"]
+__all__ = ["Registry", "PublishingRegistry"]
 
 
 @runtime_checkable
@@ -63,6 +64,7 @@ class Registry(Protocol):
         ...
 
 
+@runtime_checkable
 class PublishingRegistry(Registry, Protocol):
     """A :class:`Registry` that can also accept uploads.
 
@@ -73,7 +75,27 @@ class PublishingRegistry(Registry, Protocol):
         self,
         files: Sequence[Path],
         target: str,
-        meta: Mapping[str, object],
+        publication: Publication,
     ) -> Locator:
-        """Upload *files* and return a locator addressing the result."""
+        """Upload *files* and return a locator addressing the result.
+
+        The returned locator is the point of the whole operation: it is what
+        goes into an artifact manifest, so publishing and fetching close a
+        loop rather than being two unrelated features.
+
+        Args:
+            files: Local files to upload. Must all exist.
+            target: Where to put them, in this platform's own terms — a
+                HuggingFace ``org/repo``, a Figshare article id, or the
+                literal ``"new"`` where the platform can mint a container.
+            publication: Descriptive metadata. Drivers document which fields
+                they cannot express.
+
+        Returns:
+            A :class:`Locator` addressing the uploaded result.
+
+        Raises:
+            FileNotFoundError: If any path in *files* does not exist.
+            RegistryError: If the platform rejects the upload.
+        """
         ...

@@ -24,12 +24,9 @@ import numpy as np
 from molpy import Block, Element, Frame
 from tqdm import tqdm
 
+from molhub.dataset.cache import DownloadCache
 from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
-from molhub.registry import HttpsRegistry, RemoteFile
-
-# One shared transfer object; it is stateless apart from its User-Agent.
-_TRANSPORT = HttpsRegistry()
 
 # All scalar properties exposed by raw QM9 records (excluding "tag" and "index").
 _QM9_GRAPH_TARGETS: frozenset[str] = frozenset(
@@ -62,20 +59,6 @@ _PROPERTY_NAMES = [
 
 _DEFAULT_URL = "https://ndownloader.figshare.com/files/3195389"
 _EXCLUDE_URL = "https://figshare.com/ndownloader/files/3195404"
-
-
-def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest* through the shared transport layer.
-
-    Kept as a thin seam while this module still addresses its inputs by raw
-    URL; :mod:`molhub.registry` owns the transfer contract (status check,
-    streaming, atomic rename). Both disappear once QM9 is addressed by
-    coordinate and fetched with a manifest digest.
-
-    Raises:
-        BadStatus: If the server responds with a status other than 200.
-    """
-    _TRANSPORT.fetch(RemoteFile(url=url, filename=dest.name), dest)
 
 
 def _is_cached(path: Path) -> bool:
@@ -148,13 +131,14 @@ def _ensure_downloaded(root: Path) -> None:
     Idempotent — safe to call unconditionally.
     """
     root.mkdir(parents=True, exist_ok=True)
+    transfer = DownloadCache(root)
     tarball = root / "qm9.tar.bz2"
     exclude_file = root / "qm9_exclude.txt"
     if not _is_cached(tarball):
         print("Downloading QM9 tarball...", flush=True)
-        _download(_DEFAULT_URL, tarball)
+        transfer.transfer_to(_DEFAULT_URL, tarball)
     if not _is_cached(exclude_file):
-        _download(_EXCLUDE_URL, exclude_file)
+        transfer.transfer_to(_EXCLUDE_URL, exclude_file)
 
 
 def _load_raw(root: Path, total: int | None) -> list[Frame]:

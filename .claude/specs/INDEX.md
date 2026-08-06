@@ -4,10 +4,9 @@
 
 ## chain: registry-core
 
-按依赖顺序实施。01 完全落在本仓且可独立验收；02 起需要 `molhub-index` 外仓；
+按依赖顺序实施。01 已完成并删除（见 commit 历史）。02 起需要 `molhub-index` 外仓；
 04–05 在 `molhub-app` / `molhub-js` 外仓；06 回到本仓。
 
-- [registry-core-01-transport](registry-core-01-transport.md) — 可继承的 `Registry` 驱动接口 + digest 强校验取回 + 内容寻址缓存 [approved]
 - [registry-core-02-coordinate-index](registry-core-02-coordinate-index.md) — 坐标语法、YAML manifest schema、`Molhub` 门面与独立静态索引仓 [approved]
 - [registry-core-03-conformance](registry-core-03-conformance.md) — 语言中立 YAML 测试向量 + mock registry，Python 端首个通过 [approved]
 - [registry-core-04-ts-client](registry-core-04-ts-client.md) — TypeScript 客户端，须通过同一批 conformance 向量 [approved]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -11,8 +10,9 @@ import pytest
 from molpy import Frame
 
 from molhub.dataset import CSVDataset, MapDataset, Targets
-from molhub.dataset.csv_dataset import _download, _filename_from_url, _infer_value
-from molhub.registry.errors import BadStatus
+from molhub.dataset.csv_dataset import _infer_value
+
+from ..test_registry.conftest import FakeResponse
 
 _SAMPLE_CSV = """PSMILES,labels.Exp_Tg(K),meta.source,meta.reliability
 *C#Cc1cccc(C#C[SiH2]*)c1,345.15,GREA,black
@@ -93,14 +93,6 @@ class TestCSVDataset:
         with pytest.raises(FileNotFoundError):
             CSVDataset("/nonexistent/data.csv")
 
-    def test_download_path_from_url(self, tmp_path):
-        """_filename_from_url and cache path resolution with explicit cache_dir."""
-        dest = CSVDataset._resolve_cache_path_static(
-            "https://example.com/test.csv",
-            cache_dir=tmp_path,
-        )
-        assert dest == tmp_path / "test.csv"
-
     def test_empty_csv(self, tmp_path):
         p = tmp_path / "empty.csv"
         p.write_text("")
@@ -128,74 +120,7 @@ class TestInferValue:
         assert _infer_value("  3.5  ") == pytest.approx(3.5)
 
 
-class TestFilenameFromUrl:
-    @pytest.mark.parametrize(
-        ("url", "expected"),
-        [
-            ("https://example.com/a/b/data.csv", "data.csv"),
-            ("https://example.com/data.csv?token=xyz", "data.csv"),
-            ("https://example.com/dir/", "dir"),
-        ],
-    )
-    def test_extraction(self, url, expected):
-        assert _filename_from_url(url) == expected
-
-
-class _FakeResponse(io.BytesIO):
-    """Minimal stand-in for the object ``urlopen`` yields."""
-
-    def __init__(self, status: int, body: bytes = b"") -> None:
-        super().__init__(body)
-        self.status = status
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-        return False
-
-
-class TestDownload:
-    def test_writes_body_on_200(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.csv"
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(200, b"a,b\n"))
-        _download("https://example.invalid/f.csv", dest)
-        assert dest.read_bytes() == b"a,b\n"
-
-    def test_non_200_raises_and_leaves_no_file(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.csv"
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(BadStatus, match="HTTP 202"):
-            _download("https://example.invalid/f.csv", dest)
-        assert not dest.exists()
-
-    def test_interrupted_transfer_leaves_no_partial(self, tmp_path, monkeypatch):
-        dest = tmp_path / "out.csv"
-
-        class _Exploding(_FakeResponse):
-            def read(self, *a, **k):
-                raise OSError("connection reset")
-
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Exploding(200, b"abc"))
-        with pytest.raises(OSError):
-            _download("https://example.invalid/f.csv", dest)
-        assert not dest.exists()
-        assert not (tmp_path / "out.csv.part").exists()
-
-
 class TestRemoteCsv:
-    def test_cache_dir_env_var_is_honoured(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
-        dest = CSVDataset._resolve_cache_path_static("https://example.com/x.csv")
-        assert dest == tmp_path / "x.csv"
-
-    def test_explicit_cache_dir_wins_over_env(self, tmp_path, monkeypatch):
-        other = tmp_path / "other"
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
-        dest = CSVDataset._resolve_cache_path_static("https://example.com/x.csv", cache_dir=other)
-        assert dest == other / "x.csv"
-
     def test_url_with_download_disabled_and_no_cache_raises(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
         with pytest.raises(FileNotFoundError):
@@ -204,7 +129,7 @@ class TestRemoteCsv:
     def test_url_is_downloaded_then_parsed(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
         body = b"a,b\n1,x\n2,y\n"
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(200, body))
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, body))
         ds = CSVDataset("https://example.invalid/remote.csv")
         assert len(ds) == 2
         assert ds.headers == ["a", "b"]

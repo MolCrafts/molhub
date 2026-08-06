@@ -19,7 +19,7 @@ file changes::
 
 from molhub.registry.blobs import BlobStore
 from molhub.registry.digest import Digest, Sha256Stream
-from molhub.registry.driver import Registry
+from molhub.registry.driver import PublishingRegistry, Registry
 from molhub.registry.drivers import (
     Drivers,
     FigshareRegistry,
@@ -39,6 +39,7 @@ from molhub.registry.errors import (
 )
 from molhub.registry.fetcher import Fetcher
 from molhub.registry.locator import Locator
+from molhub.registry.publication import Publication
 from molhub.registry.remote import RemoteFile
 
 __all__ = [
@@ -47,6 +48,8 @@ __all__ = [
     "Sha256Stream",
     "RemoteFile",
     "Registry",
+    "PublishingRegistry",
+    "Publication",
     "Drivers",
     "BlobStore",
     "Fetcher",

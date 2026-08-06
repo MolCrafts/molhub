@@ -21,17 +21,13 @@ Usage::
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
 from typing import Any
 
 from molpy import Frame
 
+from molhub.dataset.cache import DownloadCache
 from molhub.dataset.meta import Targets
-from molhub.registry import HttpsRegistry, RemoteFile
-
-# One shared transfer object; it is stateless apart from its User-Agent.
-_TRANSPORT = HttpsRegistry()
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -80,35 +76,6 @@ def _parse_csv(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
 
 
 # ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
-
-
-def _filename_from_url(url: str) -> str:
-    """Extract a plausible filename from a URL."""
-    path = url.split("?")[0]
-    name = path.rstrip("/").rsplit("/", 1)[-1]
-    return name or "data.csv"
-
-
-def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest* through the shared transport layer.
-
-    Kept as a thin seam while this module still addresses its input by raw URL;
-    :mod:`molhub.registry` owns the transfer contract (status check, streaming,
-    atomic rename).
-
-    Args:
-        url: Source URL.
-        dest: Final destination path.
-
-    Raises:
-        BadStatus: If the server responds with a status other than 200.
-    """
-    _TRANSPORT.fetch(RemoteFile(url=url, filename=dest.name), dest)
-
-
-# ---------------------------------------------------------------------------
 # CSVDataset
 # ---------------------------------------------------------------------------
 
@@ -136,9 +103,8 @@ class CSVDataset:
 
         if path_or_url.startswith(("http://", "https://")):
             self._url = path_or_url
-            self._path = self._resolve_cache_path(cache_dir)
-            if download and not self._path.exists():
-                self._ensure_downloaded()
+            cache = DownloadCache(cache_dir)
+            self._path = cache.fetch(self._url) if download else cache.path_for(self._url)
             if not self._path.exists():
                 raise FileNotFoundError(
                     f"CSV not found at {self._path}. Set download=True or pre-download the file."
@@ -150,36 +116,10 @@ class CSVDataset:
 
         self._headers, self._rows = _parse_csv(self._path)
 
-    # -- cache path ----------------------------------------------------------
-
-    def _resolve_cache_path(self, cache_dir: str | Path | None) -> Path:
-        assert self._url is not None
-        return self._resolve_cache_path_static(self._url, cache_dir)
-
-    # -- download ------------------------------------------------------------
-
-    def _ensure_downloaded(self) -> None:
-        assert self._url is not None
-        _download(self._url, self._path)
-
     @classmethod
     def download(cls, url: str, cache_dir: str | Path | None = None) -> Path:
         """Download a CSV from *url* without parsing it."""
-        dest = cls._resolve_cache_path_static(url, cache_dir)
-        if not dest.exists():
-            _download(url, dest)
-        return dest
-
-    @staticmethod
-    def _resolve_cache_path_static(url: str, cache_dir: str | Path | None = None) -> Path:
-        if cache_dir is not None:
-            root = Path(cache_dir)
-        elif "MOLHUB_CACHE_DIR" in os.environ:
-            root = Path(os.environ["MOLHUB_CACHE_DIR"])
-        else:
-            root = Path.home() / ".cache" / "molhub"
-        root.mkdir(parents=True, exist_ok=True)
-        return root / _filename_from_url(url)
+        return DownloadCache(cache_dir).fetch(url)
 
     # -- MapDataset protocol -------------------------------------------------
 
