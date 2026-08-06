@@ -10,20 +10,18 @@ Usage::
     from molhub.dataset import RevMD17Source
 
     source = RevMD17Source(data_dir, molecule="aspirin")
-    frame = source[0]   # molpy Frame with atoms block + energy in metadata
+    frame = source[0]   # molpy Frame with atoms block + energy in frame.meta
 """
 
 from __future__ import annotations
 
-import ssl
 from pathlib import Path
 
 import numpy as np
-from molpy.core.frame import Block, Frame
+from molpy import Block, Frame
 
+from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
-
-ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
 
 # Canonical 10 molecules of revMD17 and their filenames on the mirror.
 _MOLECULES: dict[str, str] = {
@@ -50,9 +48,10 @@ _ELEMENT_SYMBOLS: dict[int, str] = {
 class RevMD17Source:
     """Map-style dataset for the revised MD17 trajectories.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.metadata``.
+    and ``energy`` in ``frame.meta`` (read it with
+    :class:`molhub.dataset.Targets`).
 
     Energies are in kcal/mol and forces in kcal/(mol·Å) as distributed.
 
@@ -137,5 +136,5 @@ class RevMD17Source:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.metadata["energy"] = float(self._energies[idx])
+        Targets(frame).write({"energy": float(self._energies[idx])})
         return frame

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from molhub.dataset import MapDataset, ThreeBPASource
+from molhub.dataset import MapDataset, Targets, ThreeBPASource
 
 # A minimal valid extended-XYZ file with two methane-like structures.
 _SAMPLE_EXTXYZ = """5
@@ -79,8 +79,8 @@ class TestThreeBPASource:
 
     def test_energy_in_metadata(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")
-        assert src[0].metadata["energy"] == pytest.approx(-40.50)
-        assert src[1].metadata["energy"] == pytest.approx(-40.45)
+        assert Targets(src[0]).read()["energy"] == pytest.approx(-40.50)
+        assert Targets(src[1]).read()["energy"] == pytest.approx(-40.45)
 
     def test_forces_shape(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")

@@ -10,22 +10,23 @@ Usage::
 
     source = QM9Source(data_dir)
     print(len(source))        # 130831
-    frame = source[0]         # molpy Frame with atoms block + metadata targets
+    frame = source[0]         # molpy Frame with atoms block + targets in frame.meta
 """
 
 from __future__ import annotations
 
 import random
+import shutil
 import sys
 import tarfile
 import urllib.request
 from pathlib import Path
 
 import numpy as np
-from molpy.core.element import Element
-from molpy.core.frame import Block, Frame
+from molpy import Block, Element, Frame
 from tqdm import tqdm
 
+from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
 
 # All scalar properties exposed by raw QM9 records (excluding "tag" and "index").
@@ -62,9 +63,40 @@ _EXCLUDE_URL = "https://figshare.com/ndownloader/files/3195404"
 
 
 def _download(url: str, dest: Path) -> None:
+    """Download *url* to *dest*, verifying the response before it lands.
+
+    The body is streamed to a sibling temporary file and renamed into place
+    only after a 200 response completes, so a non-OK status or an interrupted
+    transfer never leaves a file at *dest* that :func:`_is_cached` would
+    accept.
+
+    Raises:
+        RuntimeError: If the server responds with a status other than 200.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as r:
-        dest.write_bytes(r.read())
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        with urllib.request.urlopen(req) as r:
+            if r.status != 200:
+                raise RuntimeError(
+                    f"Download of {url} returned HTTP {r.status}, expected 200. "
+                    "Figshare answers 202 while preparing a file "
+                    "asynchronously — retry shortly."
+                )
+            with open(tmp, "wb") as fh:
+                shutil.copyfileobj(r, fh)
+        tmp.replace(dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _is_cached(path: Path) -> bool:
+    """True when *path* holds a non-empty file.
+
+    A zero-byte file counts as absent. Treating it as present is what let an
+    empty exclusion list silently pass through and inflate the dataset.
+    """
+    return path.exists() and path.stat().st_size > 0
 
 
 def _load_exclusion_list(path: Path) -> set[int]:
@@ -103,23 +135,22 @@ def _parse_xyz(content: str) -> Frame:
     atoms_blk["z"] = np.array(zs, dtype=np.float64)
     atoms_blk["number"] = np.array(numbers, dtype=np.int64)
 
-    targets: dict[str, float] = {}
+    values: dict[str, float] = {}
     for key in _PROPERTY_NAMES:
         if key in ("tag", "index"):
             continue
-        targets[key] = float(metadata[key])
+        values[key] = float(metadata[key])
 
     frame = Frame()
     frame["atoms"] = atoms_blk
-    frame.metadata.update(targets)
+    Targets(frame).write(values)
     return frame
 
 
 def _filter_targets(frame: Frame, kept: frozenset[str]) -> Frame:
     """Drop targets not in *kept* to shrink metadata when user wants a subset."""
-    filtered = {k: v for k, v in frame.metadata.items() if k in kept}
-    frame.metadata.clear()
-    frame.metadata.update(filtered)
+    filtered = {k: v for k, v in Targets(frame).read().items() if k in kept}
+    Targets(frame).write(filtered)
     return frame
 
 
@@ -131,10 +162,10 @@ def _ensure_downloaded(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     tarball = root / "qm9.tar.bz2"
     exclude_file = root / "qm9_exclude.txt"
-    if not tarball.exists():
+    if not _is_cached(tarball):
         print("Downloading QM9 tarball...", flush=True)
         _download(_DEFAULT_URL, tarball)
-    if not exclude_file.exists():
+    if not _is_cached(exclude_file):
         _download(_EXCLUDE_URL, exclude_file)
 
 
@@ -184,9 +215,10 @@ def _load_raw(root: Path, total: int | None) -> list[Frame]:
 class QM9Source:
     """Map-style dataset for QM9.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``) and scalar quantum
-    properties stored in ``frame.metadata``.
+    properties stored in ``frame.meta`` (read them with
+    :class:`molhub.dataset.Targets`).
 
     Args:
         root: Directory for the raw QM9 tarball (downloaded on first use).
@@ -239,12 +271,12 @@ class QM9Source:
         else:
             tarball = self.root / "qm9.tar.bz2"
             exclude_file = self.root / "qm9_exclude.txt"
-            if not tarball.exists():
+            if not _is_cached(tarball):
                 raise FileNotFoundError(
                     f"QM9 tarball not found at {tarball}. "
                     "Set download=True or call QM9Source.download() first."
                 )
-            if not exclude_file.exists():
+            if not _is_cached(exclude_file):
                 raise FileNotFoundError(
                     f"QM9 exclusion list not found at {exclude_file}. "
                     "Set download=True or call QM9Source.download() first."

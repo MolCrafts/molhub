@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from molpy.core.frame import Block, Frame
+from molpy import Block, Frame
 
 from molhub.dataset.protocol import (
     InMemoryDataset,

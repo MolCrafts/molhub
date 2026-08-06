@@ -3,16 +3,16 @@
 Zero extra dependencies — uses stdlib ``csv`` and ``urllib``.
 
 Each row of the CSV becomes one :class:`Frame` with all column values
-stored in ``frame.metadata``.  Numeric columns are auto-detected.
+stored in ``frame.meta``.  Numeric columns are auto-detected.
 
 Usage::
 
-    from molhub.dataset import CSVDataset
+    from molhub.dataset import CSVDataset, Targets
 
     ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
     print(len(ds))       # number of rows
     frame = ds[0]        # first row as a Frame
-    print(frame.metadata["labels.Exp_Tg(K)"])   # access a column
+    print(Targets(frame)["labels.Exp_Tg(K)"])   # access a column
 
     # Also works with local files:
     ds = CSVDataset("/path/to/data.csv")
@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from molpy.core.frame import Frame
+from molpy import Frame
+
+from molhub.dataset.meta import Targets
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -87,10 +90,35 @@ def _filename_from_url(url: str) -> str:
 
 
 def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest* with a User-Agent header."""
+    """Download *url* to *dest*, verifying the response before it lands.
+
+    The body is streamed to a sibling temporary file and renamed into place
+    only after a 200 response completes. A non-OK status or an interrupted
+    transfer therefore never leaves a file at *dest* that a later run would
+    mistake for a valid cache entry.
+
+    Args:
+        url: Source URL.
+        dest: Final destination path.
+
+    Raises:
+        RuntimeError: If the server responds with a status other than 200.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as r:
-        dest.write_bytes(r.read())
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        with urllib.request.urlopen(req) as r:
+            if r.status != 200:
+                raise RuntimeError(
+                    f"Download of {url} returned HTTP {r.status}, expected 200. "
+                    "Some hosts (e.g. Figshare) answer 202 while preparing a "
+                    "file asynchronously — retry shortly."
+                )
+            with open(tmp, "wb") as fh:
+                shutil.copyfileobj(r, fh)
+        tmp.replace(dest)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +212,7 @@ class CSVDataset:
     def __getitem__(self, idx: int) -> Frame:
         row = self._rows[idx]
         frame = Frame()
-        frame.metadata.update(row)
+        Targets(frame).write(row)
         return frame
 
     # -- introspection -------------------------------------------------------

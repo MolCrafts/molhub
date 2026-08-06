@@ -20,7 +20,10 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
 ]
 dependencies = [
-  "molcrafts-molpy>=0.3.0",
+  # Pinned to a minor range: molpy is pre-1.0 and moves public API between
+  # minors (0.3 -> 0.9 relocated Frame/Block/Element and renamed
+  # Frame.metadata -> Frame.meta). An open lower bound let that land silently.
+  "molcrafts-molpy>=0.12,<0.13",
   "tqdm",
   "requests>=2.28",
 ]

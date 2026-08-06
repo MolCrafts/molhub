@@ -37,7 +37,7 @@ molhub gives every molecular dataset the same interface — index by position, i
 | `HuggingFaceUploader` | Upload files, folders, and datasets to a HuggingFace Hub repository |
 | `FigshareUploader` | Create Figshare articles and upload files via the Figshare REST API |
 
-Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame`: the `atoms` block holds per-atom data (`element`, `x`, `y`, `z`, `number`, and optionally `fx`, `fy`, `fz`), while graph-level targets such as energy live in `frame.metadata`.
+Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame`: the `atoms` block holds per-atom data (`element`, `x`, `y`, `z`, `number`, and optionally `fx`, `fy`, `fz`), while graph-level targets such as energy live in `frame.meta`. molpy stores those as dtype-tagged `MetaValue` entries — use `molhub.dataset.Targets(frame)` to read them back as plain Python values.
 
 ## Install
 
@@ -47,24 +47,24 @@ pip install molhub[huggingface]    # + HuggingFace Hub upload support
 pip install molhub[dev]            # + dev tooling (pytest, pytest-cov, pytest-mock, ruff)
 ```
 
-Requires Python >= 3.10. Core dependencies: `molcrafts-molpy >= 0.3.0`, `tqdm`, `requests >= 2.28`.
+Requires Python >= 3.12. Core dependencies: `molcrafts-molpy >= 0.12, < 0.13`, `tqdm`, `requests >= 2.28`.
 
 ## Quick start
 
 ```python
-from molhub.dataset import QM9Source, CSVDataset
+from molhub.dataset import QM9Source, CSVDataset, Targets
 
 # Load QM9 — auto-downloads & caches the 130k-molecule tarball
 qm9 = QM9Source("./data/qm9")
 print(len(qm9))          # 130831
 frame = qm9[42]          # one sample carries atoms + computed properties
-print(frame.metadata)    # {'A': ..., 'B': ..., 'U0': ..., ...}
+print(Targets(frame).read())   # {'A': ..., 'B': ..., 'U0': ..., ...}
 
 # Load any CSV from a URL or local file
 ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
 print(ds.headers)        # ['labels.SMILES', 'labels.Exp_Tg(K)', ...]
 frame = ds[0]
-print(frame.metadata["labels.Exp_Tg(K)"])  # 373.0
+print(Targets(frame)["labels.Exp_Tg(K)"])  # 373.0
 ```
 
 ### Dataset protocols
@@ -102,7 +102,7 @@ assert isinstance(MyStream(), IterableDataset)
 
 | Target level | Location | Example |
 |---|---|---|
-| `graph_level` | `frame.metadata` | `energy`, `homo`, `lumo` |
+| `graph_level` | `frame.meta` (read via `Targets(frame)`) | `energy`, `homo`, `lumo` |
 | `atom_level` | `atoms` block columns | `fx`, `fy`, `fz` |
 
 `InMemoryDataset` / `SubsetDataset` — convenience helpers for wrapping and slicing:
@@ -135,7 +135,7 @@ from molhub.dataset import RevMD17Source
 source = RevMD17Source("./data/revmd17", molecule="aspirin")
 frame = source[100]
 # atoms block: element, x, y, z, number, fx, fy, fz
-# metadata: {'energy': ...}
+# Targets(frame).read() -> {'energy': ...}
 ```
 
 Available molecules: `aspirin`, `azobenzene`, `benzene`, `ethanol`, `malonaldehyde`, `naphthalene`, `paracetamol`, `salicylic`, `toluene`, `uracil`.

@@ -1,6 +1,7 @@
 """Dataset module — protocols and built-in dataset sources."""
 
 from molhub.dataset.csv_dataset import CSVDataset
+from molhub.dataset.meta import MetaCodec, Targets
 from molhub.dataset.protocol import (
     InMemoryDataset,
     IterableDataset,
@@ -24,4 +25,6 @@ __all__ = [
     "QM9Source",
     "RevMD17Source",
     "ThreeBPASource",
+    "Targets",
+    "MetaCodec",
 ]
