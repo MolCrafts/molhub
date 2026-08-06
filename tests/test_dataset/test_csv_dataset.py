@@ -12,6 +12,7 @@ from molpy import Frame
 
 from molhub.dataset import CSVDataset, MapDataset, Targets
 from molhub.dataset.csv_dataset import _download, _filename_from_url, _infer_value
+from molhub.registry.errors import BadStatus
 
 _SAMPLE_CSV = """PSMILES,labels.Exp_Tg(K),meta.source,meta.reliability
 *C#Cc1cccc(C#C[SiH2]*)c1,345.15,GREA,black
@@ -165,7 +166,7 @@ class TestDownload:
     def test_non_200_raises_and_leaves_no_file(self, tmp_path, monkeypatch):
         dest = tmp_path / "out.csv"
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(RuntimeError, match="HTTP 202"):
+        with pytest.raises(BadStatus, match="HTTP 202"):
             _download("https://example.invalid/f.csv", dest)
         assert not dest.exists()
 

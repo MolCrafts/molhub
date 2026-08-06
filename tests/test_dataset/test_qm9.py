@@ -22,6 +22,7 @@ from molhub.dataset.qm9 import (
     _load_exclusion_list,
     _parse_xyz,
 )
+from molhub.registry.errors import BadStatus
 
 # One real-shaped QM9 record: 5 atoms, tag + index + 15 scalar properties.
 # The coordinate lines carry a trailing Mulliken charge column, which the
@@ -160,7 +161,7 @@ class TestDownload:
         """The exact Figshare failure that used to cache a 0-byte file."""
         dest = tmp_path / "out.bin"
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(RuntimeError, match="HTTP 202"):
+        with pytest.raises(BadStatus, match="HTTP 202"):
             _download("https://example.invalid/f", dest)
         assert not dest.exists()
 
@@ -181,7 +182,7 @@ class TestDownload:
         dest = tmp_path / "out.bin"
         dest.write_bytes(b"good cached bytes")
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResponse(202, b""))
-        with pytest.raises(RuntimeError):
+        with pytest.raises(BadStatus):
             _download("https://example.invalid/f", dest)
         assert dest.read_bytes() == b"good cached bytes"
 

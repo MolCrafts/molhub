@@ -16,10 +16,8 @@ Usage::
 from __future__ import annotations
 
 import random
-import shutil
 import sys
 import tarfile
-import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +26,10 @@ from tqdm import tqdm
 
 from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
+from molhub.registry import HttpsRegistry, RemoteFile
+
+# One shared transfer object; it is stateless apart from its User-Agent.
+_TRANSPORT = HttpsRegistry()
 
 # All scalar properties exposed by raw QM9 records (excluding "tag" and "index").
 _QM9_GRAPH_TARGETS: frozenset[str] = frozenset(
@@ -63,31 +65,17 @@ _EXCLUDE_URL = "https://figshare.com/ndownloader/files/3195404"
 
 
 def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest*, verifying the response before it lands.
+    """Download *url* to *dest* through the shared transport layer.
 
-    The body is streamed to a sibling temporary file and renamed into place
-    only after a 200 response completes, so a non-OK status or an interrupted
-    transfer never leaves a file at *dest* that :func:`_is_cached` would
-    accept.
+    Kept as a thin seam while this module still addresses its inputs by raw
+    URL; :mod:`molhub.registry` owns the transfer contract (status check,
+    streaming, atomic rename). Both disappear once QM9 is addressed by
+    coordinate and fetched with a manifest digest.
 
     Raises:
-        RuntimeError: If the server responds with a status other than 200.
+        BadStatus: If the server responds with a status other than 200.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    tmp = dest.with_name(dest.name + ".part")
-    try:
-        with urllib.request.urlopen(req) as r:
-            if r.status != 200:
-                raise RuntimeError(
-                    f"Download of {url} returned HTTP {r.status}, expected 200. "
-                    "Figshare answers 202 while preparing a file "
-                    "asynchronously — retry shortly."
-                )
-            with open(tmp, "wb") as fh:
-                shutil.copyfileobj(r, fh)
-        tmp.replace(dest)
-    finally:
-        tmp.unlink(missing_ok=True)
+    _TRANSPORT.fetch(RemoteFile(url=url, filename=dest.name), dest)
 
 
 def _is_cached(path: Path) -> bool:

@@ -1,6 +1,6 @@
 ---
 slug: registry-core-01-transport
-status: approved
+status: in-progress
 created: 2026-08-06
 chain: registry-core
 position: 1
@@ -219,21 +219,22 @@ fetcher = Fetcher(drivers=drivers)
 
 ## Tasks
 
-- [ ] Add `Locator` 值对象与 `scheme://path` 解析（含非法输入拒绝）
-- [ ] Add `Digest` 值对象（sha256 构造、流式更新、常数时间比对、`md5:`/`sha256:` 前缀解析）
-- [ ] Add `RemoteFile` 值对象
-- [ ] Add `BlobStore`：`$MOLHUB_HOME` 解析、`blobs/sha256/<ab>/<hex>` 路径、`has()`/`put()`/`path_for()`
-- [ ] Add `Registry` 协议
-- [ ] Add `Drivers` 不可变集合：`discover()` / `with_driver()` / `for_scheme()`
-- [ ] Add `HttpsRegistry`，实现 fetch 五步契约（status / 流式 / 边写边算 / 不符即弃 / 原子改名）
-- [ ] Add `ZenodoRegistry.resolve`（`/api/records/<id>` → files + checksum）
-- [ ] Add `FigshareRegistry.resolve`（`/v2/articles/<id>/files` → supplied_md5）
-- [ ] Add `HuggingFaceRegistry.resolve`（repo/revision/path → LFS OID）
-- [ ] Add `MolHubRegistry`（静态 JSON 清单 + CDN 直链），不得特例化
-- [ ] Add `Fetcher`：按序 fallback、失败聚合为 `AllLocatorsFailed`、缓存命中短路
-- [ ] Refactor `qm9.py` / `csv_dataset.py` 改用 `Fetcher`，删除两份 `_download` 与缓存路径重复
+- [x] Add `Locator` 值对象与 `scheme://path` 解析（含非法输入拒绝）
+- [x] Add `Digest` 值对象（sha256 构造、流式更新、常数时间比对、`md5:`/`sha256:` 前缀解析）
+- [x] Add `RemoteFile` 值对象
+- [x] Add `BlobStore`：`$MOLHUB_HOME` 解析、`blobs/sha256/<ab>/<hex>` 路径、`has()`/`put()`/`path_for()`
+- [x] Add `Registry` 协议
+- [x] Add `Drivers` 不可变集合：`discover()` / `with_driver()` / `for_scheme()`
+- [x] Add `HttpsRegistry`，实现 fetch 五步契约（status / 流式 / 边写边算 / 不符即弃 / 原子改名）
+- [x] Add `ZenodoRegistry.resolve`（`/api/records/<id>` → files + checksum）
+- [x] Add `FigshareRegistry.resolve`（`/v2/articles/<id>/files` → supplied_md5）
+- [x] Add `HuggingFaceRegistry.resolve`（repo/revision/path → LFS OID）
+- [x] Add `MolHubRegistry`（静态 JSON 清单 + CDN 直链），不得特例化
+- [x] Add `Fetcher`：按序 fallback、失败聚合为 `AllLocatorsFailed`、缓存命中短路
+- [x] Refactor `qm9.py` / `csv_dataset.py` 的重复 `_download` 收编到 `HttpsRegistry`
+- [ ] Refactor `qm9.py` / `csv_dataset.py` 改用 `Fetcher`（**阻塞于 02**：`Fetcher` 要求 digest，而 digest 来自 manifest）
 - [ ] Refactor `uploader/*` 搬入对应 driver 的 `publish()`，顶层保留 shim
-- [ ] Add `tests/test_registry/**` 单测，全部用 mock 驱动，零真实网络
+- [x] Add `tests/test_registry/**` 单测，全部用 mock 驱动，零真实网络
 
 ## Testing
 

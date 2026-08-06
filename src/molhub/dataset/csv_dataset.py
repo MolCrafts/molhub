@@ -22,14 +22,16 @@ from __future__ import annotations
 
 import csv
 import os
-import shutil
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 from molpy import Frame
 
 from molhub.dataset.meta import Targets
+from molhub.registry import HttpsRegistry, RemoteFile
+
+# One shared transfer object; it is stateless apart from its User-Agent.
+_TRANSPORT = HttpsRegistry()
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -90,35 +92,20 @@ def _filename_from_url(url: str) -> str:
 
 
 def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest*, verifying the response before it lands.
+    """Download *url* to *dest* through the shared transport layer.
 
-    The body is streamed to a sibling temporary file and renamed into place
-    only after a 200 response completes. A non-OK status or an interrupted
-    transfer therefore never leaves a file at *dest* that a later run would
-    mistake for a valid cache entry.
+    Kept as a thin seam while this module still addresses its input by raw URL;
+    :mod:`molhub.registry` owns the transfer contract (status check, streaming,
+    atomic rename).
 
     Args:
         url: Source URL.
         dest: Final destination path.
 
     Raises:
-        RuntimeError: If the server responds with a status other than 200.
+        BadStatus: If the server responds with a status other than 200.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    tmp = dest.with_name(dest.name + ".part")
-    try:
-        with urllib.request.urlopen(req) as r:
-            if r.status != 200:
-                raise RuntimeError(
-                    f"Download of {url} returned HTTP {r.status}, expected 200. "
-                    "Some hosts (e.g. Figshare) answer 202 while preparing a "
-                    "file asynchronously — retry shortly."
-                )
-            with open(tmp, "wb") as fh:
-                shutil.copyfileobj(r, fh)
-        tmp.replace(dest)
-    finally:
-        tmp.unlink(missing_ok=True)
+    _TRANSPORT.fetch(RemoteFile(url=url, filename=dest.name), dest)
 
 
 # ---------------------------------------------------------------------------
@@ -166,14 +153,8 @@ class CSVDataset:
     # -- cache path ----------------------------------------------------------
 
     def _resolve_cache_path(self, cache_dir: str | Path | None) -> Path:
-        if cache_dir is not None:
-            root = Path(cache_dir)
-        elif "MOLHUB_CACHE_DIR" in os.environ:
-            root = Path(os.environ["MOLHUB_CACHE_DIR"])
-        else:
-            root = Path.home() / ".cache" / "molhub"
-        root.mkdir(parents=True, exist_ok=True)
-        return root / _filename_from_url(self._url)  # type: ignore[arg-type]
+        assert self._url is not None
+        return self._resolve_cache_path_static(self._url, cache_dir)
 
     # -- download ------------------------------------------------------------
 

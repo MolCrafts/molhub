@@ -6,67 +6,80 @@ criteria:
     summary: "非 200 响应不留下任何文件"
     type: runtime
     pass_when: "对返回 HTTP 202 且 body 为空的 URL 调用 fetch，抛出异常，且目标路径与 .part 临时路径均不存在"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-002
     summary: "digest 不符即弃并换下一个 locator"
     type: runtime
     pass_when: "两个 locator 中第一个返回内容与声明 sha256 不符时，第一个的字节不落盘，第二个成功且返回其路径"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-003
     summary: "传输中断不留半截文件"
     type: runtime
     pass_when: "读取流中途抛 OSError 后，目标路径与 .part 路径均不存在"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-004
     summary: "缓存布局与冻结契约逐字一致"
     type: runtime
     pass_when: "digest 为 sha256:abcd… 的制品落盘路径等于 $MOLHUB_HOME/blobs/sha256/ab/abcd…"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-005
     summary: "缓存命中不发起网络请求"
     type: runtime
     pass_when: "同一 (locators, digest) 第二次 fetch 时，被替换的 urlopen 桩记录到零次调用，且返回同一路径"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-006
     summary: "第三方驱动可经 entry point 扩展"
     type: runtime
     pass_when: "测试内注册一个自定义 scheme 的驱动后，Fetcher 能用该 scheme 的 locator 成功取回，未修改任何 molhub 源文件"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-007
     summary: "自建 registry 不被特例化"
     type: code
     pass_when: "fetcher.py 与 driver.py 中不存在对字面量 \"molhub\" 的 scheme 分支判断"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-008
     summary: "全部 locator 失败时报告每一个的原因"
     type: runtime
     pass_when: "三个 locator 全失败时抛出的 AllLocatorsFailed 消息中同时含三个 locator 字符串及各自失败原因"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-009
     summary: "重复的下载与缓存路径实现被消除"
     type: code
     pass_when: "src/molhub/dataset/ 下不再定义任何 _download 函数，_resolve_cache_path_static 已删除"
-    status: pending
+    status: failed
+    last_checked: 2026-08-06
   - id: ac-010
     summary: "uploader 公开 API 保持可用"
     type: runtime
     pass_when: "现有 tests/test_uploader/ 全部通过且未修改断言，HuggingFaceUploader 与 FigshareUploader 仍可从 molhub.uploader 导入"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-011
     summary: "既有数据集行为不回归"
     type: runtime
     pass_when: "tests/test_dataset/ 全部 148 项通过，QM9Source/CSVDataset 的公开签名未变"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-012
     summary: "传输层不依赖语义层"
     type: code
     pass_when: "src/molhub/registry/ 下任何文件都不 import molhub.dataset"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-013
     summary: "Drivers 是不可变集合"
     type: runtime
     pass_when: "对一个 Drivers 调用 with_driver 后，原对象的 for_scheme 仍拒绝该新 scheme，返回的新对象接受它"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
 out_of_scope:
   - "坐标语法与 manifest 解析（registry-core-02）"
   - "语言中立 conformance 套件（registry-core-03）"

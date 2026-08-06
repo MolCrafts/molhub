@@ -41,6 +41,11 @@ huggingface = ["huggingface_hub>=0.20"]
 [project.urls]
 Repository = "https://github.com/molcrafts/molhub"
 
+# Third-party packages add a hosting platform by publishing a Registry driver
+# into this group; molhub discovers it with no source change on our side.
+[project.entry-points."molhub.registries"]
+
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
