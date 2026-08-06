@@ -5,10 +5,15 @@ contract: it answers ``202 Accepted`` with an empty body while preparing a
 file. Resolving through the API instead of hard-coding a download URL is what
 lets molhub see the real file list and its published md5.
 
+A Figshare article id is **not** version-specific — article 1057646 has both a
+v1 and a v2 — so a locator that omits the version silently follows whatever
+upstream publishes next. Pin it.
+
 Locator forms::
 
-    figshare://978904                 every file in the article
-    figshare://978904/qm9.tar.bz2     one named file
+    figshare://1057646/v2                     every file in version 2
+    figshare://1057646/v2/qm9.tar.bz2         one named file in version 2
+    figshare://1057646                        latest version (discouraged)
 """
 
 from __future__ import annotations
@@ -218,16 +223,23 @@ class FigshareRegistry:
     # -- reading -------------------------------------------------------------
 
     def resolve(self, locator: Locator) -> list[RemoteFile]:
-        """Resolve an article id, optionally narrowed to one filename.
+        """Resolve a pinned article version, optionally narrowed to one filename.
 
         Raises:
-            RegistryError: If the article has no files, or the requested
-                filename is absent from it.
+            RegistryError: If the article or version has no files, or the
+                requested filename is absent from it.
         """
-        article_id, _, wanted = locator.path.partition("/")
-        entries = fetch_json(f"{self._api_base}/articles/{article_id}/files")
+        article_id, version, wanted = self._split(locator.path)
+        endpoint = (
+            f"{self._api_base}/articles/{article_id}/versions/{version}"
+            if version
+            else f"{self._api_base}/articles/{article_id}/files"
+        )
+        payload = fetch_json(endpoint)
+        entries = payload.get("files", []) if isinstance(payload, dict) else payload
         if not entries:
-            raise RegistryError(f"Figshare article {article_id} lists no files.")
+            where = f"article {article_id}" + (f" version {version}" if version else "")
+            raise RegistryError(f"Figshare {where} lists no files.")
 
         remotes = [self._to_remote(entry) for entry in entries]
         if not wanted:
@@ -239,6 +251,15 @@ class FigshareRegistry:
                 f"Figshare article {article_id} has no file {wanted!r}. Available: {available}"
             )
         return matched
+
+    @staticmethod
+    def _split(path: str) -> tuple[str, str | None, str]:
+        """Split ``<article>[/v<n>][/<filename>]`` into its three parts."""
+        article_id, _, rest = path.partition("/")
+        if rest.startswith("v") and rest[1:].split("/", 1)[0].isdigit():
+            version, _, wanted = rest[1:].partition("/")
+            return article_id, version, wanted
+        return article_id, None, rest
 
     def fetch(self, remote: RemoteFile, dest: Path) -> Path:
         """Delegate the transfer, which is plain HTTPS."""

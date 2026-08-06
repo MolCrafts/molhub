@@ -84,8 +84,8 @@ def info(
         typer.echo(f"  about      {manifest.description}")
     if manifest.license:
         typer.echo(f"  license    {manifest.license}")
-    if manifest.citation:
-        typer.echo(f"  cite       {manifest.citation}")
+    if manifest.doi:
+        typer.echo(f"  doi        {manifest.doi}")
     if manifest.targets.graph_level:
         typer.echo(f"  graph      {', '.join(manifest.targets.graph_level)}")
     if manifest.targets.atom_level:

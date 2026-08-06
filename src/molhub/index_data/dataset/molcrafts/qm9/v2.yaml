@@ -1,14 +1,16 @@
 # QM9, from the Springer Nature Figshare collection 978904.
 #
-# The locators are resolved through the Figshare API rather than pinned to a
-# raw ndownloader URL. That distinction is not cosmetic: the raw endpoint
-# answers 202 with an empty body while it prepares a file, and molhub's own
-# history includes that response being cached as a valid 0-byte exclusion
-# list -- which silently turned 130,831 characterised molecules into 133,885.
+# The locators pin an article *version*. A bare `figshare://1057646` resolves to
+# whatever is current -- that article already has a v1 and a v2 -- so an
+# unpinned manifest would start serving a new release the day one appears, with
+# nothing to show for it. The per-article DOIs noted below identify exactly the
+# versions pinned here.
 #
-# The digests below are Figshare's own published md5, copied verbatim. They
-# say which version of each file this manifest names; if a fetch stops matching
-# one, upstream published something new and this manifest needs a new version.
+# They also resolve through the Figshare API rather than a raw ndownloader URL.
+# That endpoint answers 202 with an empty body while preparing a file, and this
+# project's own history includes that response being cached as a valid 0-byte
+# exclusion list -- silently turning 130,831 characterised molecules into
+# 133,885.
 schema_version: 1
 kind: dataset
 namespace: molcrafts
@@ -22,22 +24,24 @@ description: >-
   uncharacterized list names the 3,054 molecules that failed the geometry
   consistency check, leaving 130,831 usable entries.
 license: CC0-1.0
-citation: 10.1038/sdata.2014.22
+doi: 10.1038/sdata.2014.22
 
 artifacts:
   - role: main
+    # doi:10.6084/m9.figshare.978904_D12 — article 1057646, version 2
     filename: dsgdb9nsd.xyz.tar.bz2
     digest: md5:ad1ebd51ee7f5b3a6e32e974e5d54012
     size: 86144227
     locators:
-      - figshare://1057646/dsgdb9nsd.xyz.tar.bz2
+      - figshare://1057646/v2/dsgdb9nsd.xyz.tar.bz2
 
   - role: exclude
+    # doi:10.6084/m9.figshare.978904_D10 — article 1057644, version 1
     filename: uncharacterized.txt
     digest: md5:a361887bacb427b8a0ce7903d92a53b4
     size: 486752
     locators:
-      - figshare://1057644/uncharacterized.txt
+      - figshare://1057644/v1/uncharacterized.txt
 
 targets:
   graph_level:

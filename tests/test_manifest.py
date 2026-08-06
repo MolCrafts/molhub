@@ -22,7 +22,7 @@ class TestManifestFields:
     def test_descriptive_fields(self, manifest):
         assert manifest.title.startswith("QM9")
         assert manifest.license == "CC0-1.0"
-        assert manifest.citation == "10.1038/sdata.2014.22"
+        assert manifest.doi == "10.1038/sdata.2014.22"
 
     def test_targets(self, manifest):
         assert manifest.targets.graph_level == ("U0", "gap", "homo")
@@ -136,7 +136,7 @@ class TestManifestSearchMatching:
     def manifest(self):
         return Manifest.from_yaml(manifest_yaml())
 
-    @pytest.mark.parametrize("query", ["qm9", "QM9", "molecules", "U0", "molcrafts"])
+    @pytest.mark.parametrize("query", ["qm9", "QM9", "molecules", "U0", "molcrafts", "sdata"])
     def test_matches_across_the_searchable_fields(self, manifest, query):
         assert manifest.matches(query)
 

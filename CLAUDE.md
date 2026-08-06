@@ -171,8 +171,10 @@ For non-trivial work, prefer:
   破坏性变更须走 `schema_version` 升级，不得原地改语义。
 - **传输契约** — fetch 必须「查 status → 流式写临时文件 → 原子改名」；最终路径上
   永不出现半截或错误响应的文件。这条不依赖 digest，是数据正确性的最后防线。
-- **digest 的定位** — manifest 记的是上游原样公布的值（Figshare/Zenodo 是 md5，
-  HF 是 sha256 LFS OID），用途是确认上游是否仍供应该版本；上游不公布就不记、不校验。
+- **locator 必须钉版本** — Figshare 的 article id 不分版本，写 `figshare://<id>/v<n>/<file>`；
+  Zenodo 的 record id 本身即版本；HF 用 `repo@<rev>`。不钉版本的 manifest 会在上游
+  发新版时静默改变含义。manifest 另记该版本的 `doi`。
+- **digest 是可选的次要交叉检查** — 上游公布什么照抄什么，不公布就不记。
   **molhub 绝不自行计算 digest** —— 自算的值只能证明「我那次下载到了什么」，且会让
   编目必须先下载整个制品。
 - **`Registry` 驱动接口** — 第三方据此扩展；MolCrafts 自建 registry 亦不得特例化。

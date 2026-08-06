@@ -61,6 +61,9 @@ class TestPolymerTgEntry:
     def test_declares_a_zenodo_locator(self, manifest):
         assert str(manifest.artifact("main").locators[0]).startswith("zenodo://")
 
+    def test_records_the_version_doi(self, manifest):
+        assert manifest.doi == "10.5281/zenodo.14980914"
+
     def test_digest_is_zenodos_own_published_md5(self, manifest):
         assert manifest.artifact("main").digest.algorithm == "md5"
 
@@ -105,3 +108,32 @@ class TestQM9AgainstRealUpstream:
 
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
         assert len(QM9Source(tmp_path / "unused", hub=Molhub(BUNDLED))) == 130831
+
+
+class TestLocatorsPinAVersion:
+    """A locator that does not pin a version silently follows upstream's next
+    release. Figshare article ids are the trap: they are not version-specific."""
+
+    def _locators(self):
+        for path in IndexSource(BUNDLED).manifest_paths():
+            manifest = Manifest.from_path(path)
+            for role, artifact in manifest.artifacts.items():
+                for locator in artifact.locators:
+                    yield manifest.coordinate.canonical, role, locator
+
+    def test_no_bare_figshare_article_id(self):
+        offenders = [
+            f"{coord} [{role}] {locator}"
+            for coord, role, locator in self._locators()
+            if locator.scheme == "figshare"
+            and not any(p.startswith("v") and p[1:].isdigit() for p in locator.path.split("/"))
+        ]
+        assert offenders == [], f"unpinned Figshare locators: {offenders}"
+
+    def test_every_bundled_manifest_records_a_doi(self):
+        missing = [
+            Manifest.from_path(p).coordinate.canonical
+            for p in IndexSource(BUNDLED).manifest_paths()
+            if Manifest.from_path(p).doi is None
+        ]
+        assert missing == [], f"manifests without a DOI: {missing}"

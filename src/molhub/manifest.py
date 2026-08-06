@@ -9,19 +9,27 @@ Parsing is typed and strict rather than schema-driven at runtime: the shipped
 CI and for non-Python clients, while this module produces precise, actionable
 errors without dragging a validator into every install.
 
-A manifest names **one version** of an artifact. The ``digest`` field is how a
-fetch confirms upstream still serves that version: it is whatever the platform
-publishes, copied verbatim -- Figshare and Zenodo publish md5, HuggingFace
-publishes a sha256 LFS OID. When a platform publishes nothing, the field is
-absent and nothing is checked. molhub never invents a digest of its own; a
-number it computed from its own download would only attest to that download,
-and writing a manifest would absurdly require fetching the whole artifact
-first.
+A manifest names **one version** of an artifact, and the thing that makes that
+precise is the **locator**, which must pin a version upstream understands:
+a Zenodo record id, a Figshare article *plus* its version number, a HuggingFace
+commit. Persistent identifiers do this job already — that is what they are for
+— so a manifest records the ``doi`` and pins the locator, and does not need to
+invent an identity of its own.
 
-A digest that stops matching means upstream changed, so the manifest needs a
-new version -- it is a version check, not a trust anchor. Corrupt or truncated
-transfers are caught by the transport contract in :mod:`molhub.registry`
-(status check, temp file, atomic rename), which does not depend on digests.
+Getting this wrong is quiet. ``figshare://1057646`` resolves to whatever is
+current, so a manifest written against v2 starts serving v3 the day upstream
+publishes one, with nothing to indicate it.
+
+``digest`` is optional and secondary: whatever the platform publishes for the
+file, copied verbatim (Figshare and Zenodo publish md5, HuggingFace a sha256
+LFS OID). It catches a platform breaking its own immutability promise. molhub
+never invents one — a number computed from its own download attests only to
+that download, and requiring it would mean fetching an entire artifact just to
+write a catalogue entry.
+
+Corrupt and truncated transfers are caught by the transport contract in
+:mod:`molhub.registry` (status check, temp file, atomic rename), which depends
+on none of this.
 """
 
 from __future__ import annotations
@@ -139,7 +147,11 @@ class Manifest:
     artifacts: Mapping[str, Artifact]
     description: str = ""
     license: str | None = None
-    citation: str | None = None
+    doi: str | None = None
+    """The persistent identifier for exactly this version, when upstream mints
+    one. Zenodo gives a per-version DOI alongside a concept DOI for "latest";
+    Figshare gives one per article. It is both the citation and the assurance
+    that the pinned locator means what the manifest says."""
     targets: TargetDeclaration = field(default_factory=TargetDeclaration)
 
     @classmethod
@@ -192,7 +204,7 @@ class Manifest:
             artifacts=artifacts,
             description=str(data.get("description") or ""),
             license=str(data["license"]) if data.get("license") else None,
-            citation=str(data["citation"]) if data.get("citation") else None,
+            doi=str(data["doi"]) if data.get("doi") else None,
             targets=TargetDeclaration.from_mapping(data.get("targets")),
         )
 
@@ -236,6 +248,12 @@ class Manifest:
         """Whether *query* occurs in the fields a person would search on."""
         needle = query.casefold()
         haystack = " ".join(
-            [self.coordinate.canonical, self.title, self.description, *self.targets.graph_level]
+            [
+                self.coordinate.canonical,
+                self.title,
+                self.description,
+                self.doi or "",
+                *self.targets.graph_level,
+            ]
         ).casefold()
         return needle in haystack

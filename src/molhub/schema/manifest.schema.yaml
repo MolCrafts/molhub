@@ -43,9 +43,13 @@ properties:
     description: SPDX identifier, e.g. CC0-1.0.
     type: string
 
-  citation:
-    description: DOI or free-form citation.
+  doi:
+    description: >-
+      The persistent identifier for exactly this version, when upstream mints
+      one. This is what makes "which version" precise; the locators must pin
+      the same version, and a digest is a secondary cross-check.
     type: string
+    pattern: "^10[.][0-9]{4,}/.+$"
 
   artifacts:
     type: array
@@ -97,7 +101,10 @@ $defs:
         minimum: 0
 
       locators:
-        description: Ordered candidate sources; earlier entries are preferred.
+        description: >-
+          Ordered candidate sources; earlier entries are preferred. Each must
+          pin a version upstream understands -- a Figshare article id alone
+          follows whatever becomes current, so use ``figshare://<id>/v<n>``.
         type: array
         minItems: 1
         items:

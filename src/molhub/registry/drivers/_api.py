@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -24,12 +25,16 @@ def fetch_json(url: str, *, user_agent: str = _USER_AGENT) -> Any:
 
     Raises:
         BadStatus: If the response status is not 200, or the body is not JSON.
+            A 404 usually means a pinned version does not exist.
     """
     request = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    with urllib.request.urlopen(request) as response:
-        if response.status != 200:
-            raise BadStatus(f"{url} returned HTTP {response.status}, expected 200.")
-        body = response.read(_MAX_BYTES)
+    try:
+        with urllib.request.urlopen(request) as response:
+            if response.status != 200:
+                raise BadStatus(f"{url} returned HTTP {response.status}, expected 200.")
+            body = response.read(_MAX_BYTES)
+    except urllib.error.HTTPError as error:
+        raise BadStatus(f"{url} returned HTTP {error.code}, expected 200.") from error
     try:
         return json.loads(body)
     except json.JSONDecodeError as error:

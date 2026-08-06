@@ -107,32 +107,36 @@ def publish(self, files: Sequence[Path], target: str,
 凭据只在发布时索取：`resolve` 是匿名的，token 缺失要到真正 publish 时才报错。
 `molhub.uploader` 降级为 shim，保两个小版本。
 
-## digest 的定位：版本标识，不是信任锚
+## 版本标识靠 DOI 与钉版本的 locator，不靠 digest
 
-**manifest 规定的是数据集的哪一版。** digest 的唯一用途是确认上游现在供应的还是
-不是那一版；对不上说明上游换了内容，该做的是**更新 manifest**，与"下载到的东西
-可不可信"无关。
+**manifest 规定的是数据集的哪一版。** 让"哪一版"精确的是 **locator 必须钉住上游
+理解的版本**，以及记下该版本的 **DOI**——持久标识符本来就是干这个的，不需要
+molhub 另造一套身份。
 
-因此规则很简单：**上游公布什么就照抄什么，不公布就不记、不校验。**
+**踩过的坑**：`figshare://1057646` 解析到的是"当前版"。article 1057646 已经有
+v1 和 v2；上游哪天发 v3，这份 manifest 就开始供应 v3，且毫无迹象。必须写成
+`figshare://1057646/v2/<file>`。有一条测试遍历内置索引，禁止出现不钉版本的
+Figshare locator。
 
-| 平台 | 公布的 |
+各平台的版本表达：
+
+| 平台 | 版本怎么钉 |
 |---|---|
-| Figshare | `supplied_md5` / `computed_md5`（页面上连这个都不显示，只有文件名和大小） |
-| Zenodo | `checksum: "md5:..."` |
-| HuggingFace | LFS OID 是 sha256，仅覆盖 LFS 跟踪的文件 |
+| Zenodo | record id 本身就是版本；另有 concept DOI 指向"最新" |
+| Figshare | article id **不**分版本，必须带 `/v<n>`；每个 article 有自己的 DOI |
+| HuggingFace | commit SHA（locator 里写 `repo@<rev>`） |
+
+**digest 是次要的交叉检查，可选。** 上游公布什么就照抄什么（Figshare/Zenodo 是
+md5，HF 是 sha256 LFS OID），不公布就不记。它防的是平台违背自己的不可变承诺，
+不是版本标识的主力。
 
 **molhub 绝不自行计算 digest。** 曾经的设计是「sha256 必填、由 molhub 取回后
-算出」，那是错的，两个后果：
+算出」，两个后果都很糟：自算的值只能证明"我那次下载到了什么"；而且写一份 manifest
+要先把整个制品下载一遍——revMD17 十个分子就要 1.2 GB 才能写出十个 YAML。
+**目录不该需要先把货搬一遍才能编目。**
 
-1. 自算的值只能证明「我那一次下载到了什么」，对「是不是那一版」不多提供任何信息——
-   上游给的 md5 已经回答了这个问题。
-2. 写一份 manifest 变成必须先把整个制品下载一遍。revMD17 十个分子因此要 1.2 GB。
-   **目录不该需要先把货搬一遍才能编目。**
+**传输正确性与以上全部无关。** 202、半截、错误响应由传输契约拦住（查 status →
+流式写临时文件 → 原子改名）。
 
-**传输正确性不靠 digest。** 202、半截、错误响应由传输契约拦住（查 status →
-流式写临时文件 → 原子改名），这条与 digest 完全无关，去掉必填 digest 不会把当初
-那个 0 字节排除表的 bug 放回来。
-
-缓存因此也不需要内容寻址：按 manifest 已经给出的坐标 + role 存放
-（`$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>`），不用为了决定存放位置而
-去哈希任何东西。
+缓存因此也不需要内容寻址：按 manifest 已给出的坐标 + role 存放
+（`$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>`）。

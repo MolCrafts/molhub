@@ -15,7 +15,7 @@ description: >-
   Experimentally measured glass-transition temperatures for polymers, given as
   PSMILES plus Tg in kelvin, curated by LAMALAB.
 license: CC-BY-4.0
-citation: 10.5281/zenodo.14980914
+doi: 10.5281/zenodo.14980914
 
 artifacts:
   - role: main

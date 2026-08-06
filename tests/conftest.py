@@ -43,7 +43,7 @@ def manifest_yaml(
         "title: QM9 — 134k small organic molecules\n"
         "description: Quantum-chemical properties for small organic molecules.\n"
         "license: CC0-1.0\n"
-        "citation: 10.1038/sdata.2014.22\n"
+        "doi: 10.1038/sdata.2014.22\n"
         "\n"
         "artifacts:\n"
         "  - role: main\n"
