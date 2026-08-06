@@ -20,7 +20,9 @@
 
 </div>
 
-molhub gives every molecular dataset the same interface — index by position, iterate sample by sample, or slice with subsets — and ships uploaders for publishing your own data to HuggingFace Hub and Figshare. Samples carry atomic coordinates, forces, and computed properties in a consistent structure, so downstream code works identically across QM9, revMD17, 3BPA, or your own CSV files.
+molhub gives molecular datasets, models, and plugins one stable name and one way to get them. A coordinate like `dataset:molcrafts/polymer-tg@1` resolves through a catalogue of YAML manifests to an ordered list of mirrors, and every byte is checked against a declared sha256 before it reaches your disk. Adding a dataset is a manifest, not a release.
+
+On top of that, `molhub.dataset` gives every dataset the same interface — index by position, iterate sample by sample, or slice with subsets — so downstream code works identically across QM9, revMD17, 3BPA, or your own CSV files.
 
 > **Under active development.** Public APIs may change between minor releases.
 
@@ -50,6 +52,34 @@ pip install molhub[dev]            # + dev tooling (pytest, pytest-cov, pytest-m
 Requires Python >= 3.12. Core dependencies: `molcrafts-molpy >= 0.12, < 0.13`, `tqdm`, `requests >= 2.28`.
 
 ## Quick start
+
+```python
+from molhub import Molhub
+
+hub = Molhub()
+paths = hub.fetch("dataset:molcrafts/polymer-tg@1")
+# {'main': PosixPath('~/.cache/molhub/blobs/sha256/c6/c68ac2…')}
+# digest-verified, content-addressed, and free on every later call
+
+info = hub.resolve("polymer-tg@1")     # shorthand for the same coordinate
+print(info.title, info.license, info.citation)
+for locator in info.artifact("main").locators:
+    print(locator)                     # zenodo://14980914/LAMALAB_CURATED_Tg_structured.csv
+
+for manifest in hub.search(query="polymer"):
+    print(manifest.coordinate.canonical, "—", manifest.title)
+```
+
+From the shell:
+
+```bash
+molhub search polymer
+molhub info dataset:molcrafts/polymer-tg@1
+molhub fetch polymer-tg@1 --into ./data
+molhub cache verify            # re-hash every cached blob, report corruption
+```
+
+### Dataset sources
 
 ```python
 from molhub.dataset import QM9Source, CSVDataset, Targets

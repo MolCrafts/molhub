@@ -1,0 +1,83 @@
+"""The bundled index must be loadable, schema-valid, and actually resolvable.
+
+Everything here is offline. The one test that would touch Zenodo is marked
+``network`` and deselected by default — CI must not go red because a data
+repository is having a slow morning.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+import molhub
+from molhub import Molhub
+from molhub.index import Index, IndexSource
+from molhub.manifest import Manifest
+
+BUNDLED = Path(molhub.__file__).parent / "index_data"
+SCHEMA = Path(molhub.__file__).parent / "schema" / "manifest.schema.yaml"
+
+
+class TestBundledIndexIsUsable:
+    def test_it_ships(self):
+        assert BUNDLED.is_dir()
+
+    def test_every_manifest_parses(self):
+        for path in IndexSource(BUNDLED).manifest_paths():
+            Manifest.from_path(path)
+
+    def test_it_is_not_empty(self):
+        assert len(Index.load(BUNDLED)) >= 1
+
+    def test_a_fresh_hub_finds_it_without_configuration(self, monkeypatch):
+        monkeypatch.delenv("MOLHUB_INDEX", raising=False)
+        assert len(Molhub()) >= 1
+
+    def test_manifest_paths_match_their_coordinates(self):
+        """A misfiled manifest resolves under a name nobody will guess."""
+        for path in IndexSource(BUNDLED).manifest_paths():
+            manifest = Manifest.from_path(path)
+            assert path.relative_to(BUNDLED).as_posix() == manifest.coordinate.relative_path()
+
+    def test_every_manifest_validates_against_the_shipped_schema(self):
+        jsonschema = pytest.importorskip("jsonschema")
+        schema = yaml.safe_load(SCHEMA.read_text(encoding="utf-8"))
+        validator = jsonschema.Draft202012Validator(schema)
+        for path in IndexSource(BUNDLED).manifest_paths():
+            validator.validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+class TestPolymerTgEntry:
+    @pytest.fixture
+    def manifest(self):
+        return Molhub(BUNDLED).resolve("dataset:molcrafts/polymer-tg@1")
+
+    def test_resolves(self, manifest):
+        assert manifest.title.startswith("LAMALAB")
+
+    def test_declares_a_zenodo_locator(self, manifest):
+        assert str(manifest.artifact("main").locators[0]).startswith("zenodo://")
+
+    def test_records_the_upstream_md5_separately_from_its_own_sha256(self, manifest):
+        artifact = manifest.artifact("main")
+        assert artifact.digest.algorithm == "sha256"
+        assert artifact.upstream_digest.startswith("md5:")
+
+    def test_size_is_declared(self, manifest):
+        assert manifest.artifact("main").size == 6024335
+
+
+@pytest.mark.network
+class TestAgainstRealUpstream:
+    def test_fetching_the_bundled_dataset_verifies(self, tmp_path, monkeypatch):
+        """End-to-end against Zenodo: resolve, transfer, verify, cache.
+
+        Run with ``pytest -m network``.
+        """
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/polymer-tg@1")
+        assert paths["main"].stat().st_size == 6024335
+        assert paths["main"].read_text(encoding="utf-8").startswith("PSMILES")

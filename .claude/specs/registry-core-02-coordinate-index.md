@@ -1,6 +1,6 @@
 ---
 slug: registry-core-02-coordinate-index
-status: approved
+status: in-progress
 created: 2026-08-06
 chain: registry-core
 position: 2
@@ -247,20 +247,22 @@ print(Targets(qm9[42])["U0"])
 
 ## Tasks
 
-- [ ] Add `Coordinate`（`parse` / `canonical` / 简写展开 / 非法输入拒绝）
-- [ ] Add `manifest.schema.yaml` 与 `index.schema.yaml`，坐标 pattern 内嵌
-- [ ] Add `Artifact` 与 `Manifest.from_yaml`（缺 sha256 直接拒绝加载）
-- [ ] Add `IndexSource.resolve`：`$MOLHUB_INDEX` → CDN → 内置快照
-- [ ] Add `Index.load` / `Index.get` / `Index.search`
-- [ ] Add `Molhub` 门面（`resolve` / `fetch` / `search`），组合 01 的 `Fetcher`
-- [ ] Add typer CLI：`search` / `info` / `fetch` / `cache verify`
+- [x] Add `Coordinate`（`parse` / `canonical` / 简写展开 / 非法输入拒绝）
+- [x] Add `manifest.schema.yaml`（随包发布，jsonschema 双向一致性测试）
+- [ ] Add `index.schema.yaml`（聚合索引尚不存在，待外仓）
+- [x] Add `Artifact` 与 `Manifest.from_yaml`（缺 sha256 直接拒绝加载）
+- [x] Add `IndexSource.resolve`：`$MOLHUB_INDEX` → CDN → 内置快照
+- [x] Add `Index.load` / `Index.get` / `Index.search`
+- [x] Add `Molhub` 门面（`resolve` / `fetch` / `search`），组合 01 的 `Fetcher`
+- [x] Add typer CLI：`search` / `info` / `fetch` / `cache verify`
 - [ ] Add 外仓 `molhub-index` 骨架 + schema + validate 工作流
 - [ ] Add `build_index.py` — 同时产出 `dist/index.yaml` 与 `dist/index.json`
-- [ ] Add QM9 / revMD17(×10) / 3BPA(×4) 的 manifest
+- [x] Add 首份真实 manifest：`dataset:molcrafts/polymer-tg@1`（Zenodo，端到端已验证）
+- [ ] Add QM9 / revMD17(×10) / 3BPA(×4) 的 manifest（**阻塞**：需先取回各制品算 sha256；QM9 的 Figshare 端点当前返回 202）
 - [ ] Add CI bot：digest 自动抓取回填 PR
 - [ ] Add CI bot：夜间 locator 巡检 + digest 比对
-- [ ] Refactor 4 个数据源改经 `Molhub`，删除 `_DEFAULT_URL`/`_EXCLUDE_URL`/`BASE_URL`
-- [ ] Refactor `source_id` 改为返回规范坐标字符串
+- [ ] Refactor 4 个数据源改经 `Molhub`（**阻塞于上一条**：没有 manifest 就没有 digest）
+- [ ] Refactor `source_id` 改为返回规范坐标字符串（**阻塞于上一条**）
 
 ## Testing
 

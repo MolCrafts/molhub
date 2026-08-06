@@ -6,17 +6,20 @@ criteria:
     summary: "坐标全称与简写解析一致"
     type: runtime
     pass_when: "qm9@v2 与 dataset:molcrafts/qm9@v2 解析为同一 Coordinate，且规范化字符串相等"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-002
     summary: "缺版本的坐标被拒绝"
     type: runtime
     pass_when: "解析 dataset:molcrafts/qm9 抛出错误，消息指出缺少 @version"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-003
     summary: "无 sha256 的 manifest 无法加载"
     type: runtime
     pass_when: "加载一份 artifacts[0] 缺 sha256 的 manifest fixture 时抛出校验错误"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-004
     summary: "索引 CI 拒绝无 digest 的条目"
     type: runtime
@@ -26,17 +29,20 @@ criteria:
     summary: "新增数据集不需要改 molhub 源码"
     type: runtime
     pass_when: "向 $MOLHUB_INDEX 目录新增一个 manifest 文件后，Molhub().resolve 与 Molhub().fetch 能处理该坐标，且 src/molhub/ 未被修改"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-006
     summary: "fetch 按 role 返回全部制品路径"
     type: runtime
     pass_when: "对含 main 与 exclude 两个 artifact 的 manifest 调用 Molhub().fetch，返回字典含且仅含这两个 role 键，值均为已存在的文件路径"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-007
     summary: "manifest 的 digest 被传递到传输层"
     type: runtime
     pass_when: "假驱动返回与 manifest sha256 不符的字节时，Molhub().fetch 抛错且不落盘"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-008
     summary: "硬编码上游 URL 已从源码消失"
     type: code
@@ -56,12 +62,14 @@ criteria:
     summary: "离线可用"
     type: runtime
     pass_when: "设置 $MOLHUB_INDEX 指向本地目录并预置缓存后，整个测试套件在断网环境下通过"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-012
     summary: "typer CLI 四个子命令可用"
     type: runtime
     pass_when: "typer CliRunner 调用 search / info / fetch / cache verify 四个子命令在本地索引下均退出码为 0 并产出非空输出"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-013
     summary: "构建同时产出 index.yaml 与 index.json"
     type: runtime
@@ -71,12 +79,14 @@ criteria:
     summary: "manifest 支持注释且注释不影响解析"
     type: runtime
     pass_when: "带 # 注释的 manifest YAML 加载成功，且得到的 Manifest 与去掉注释的同一文件相等"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
   - id: ac-015
     summary: "schema 可被非 Python 消费者独立校验"
     type: docs
     pass_when: "manifest.schema.yaml 是自包含的 JSON Schema（以 YAML 书写），用任一通用校验器对示例 manifest YAML 校验通过，不依赖 molhub 代码"
-    status: pending
+    status: verified
+    last_checked: 2026-08-06
 out_of_scope:
   - "字节内容解析与 Frame 构造（L3）"
   - "TypeScript 客户端（registry-core-04）"

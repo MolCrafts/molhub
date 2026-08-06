@@ -1,0 +1,110 @@
+# JSON Schema for a molhub artifact manifest, written in YAML.
+#
+# JSON Schema is a data model, not a serialisation syntax, so writing it in YAML
+# costs nothing and buys comments. Any conforming validator reads this after a
+# YAML load -- it is the contract for the index CI and for non-Python clients,
+# and it is deliberately not what the Python runtime parses with.
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://molcrafts.org/schema/molhub/manifest/1"
+title: molhub artifact manifest
+type: object
+additionalProperties: false
+
+required: [schema_version, kind, namespace, name, version, title, artifacts]
+
+properties:
+  schema_version:
+    const: 1
+
+  kind:
+    enum: [dataset, model, plugin]
+
+  namespace:
+    $ref: "#/$defs/segment"
+
+  name:
+    $ref: "#/$defs/segment"
+
+  version:
+    description: >-
+      Required. A coordinate without a version cannot name an immutable
+      artifact, so molhub rejects one rather than guessing "latest".
+    type: string
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
+  title:
+    type: string
+    minLength: 1
+
+  description:
+    type: string
+
+  license:
+    description: SPDX identifier, e.g. CC0-1.0.
+    type: string
+
+  citation:
+    description: DOI or free-form citation.
+    type: string
+
+  artifacts:
+    type: array
+    minItems: 1
+    items: { $ref: "#/$defs/artifact" }
+
+  targets:
+    description: >-
+      Declarative only. Nothing in the transport or resolution layers parses
+      bytes according to this; it is for display and for downstream consumers.
+    type: object
+    additionalProperties: false
+    properties:
+      graph_level: { type: array, items: { type: string } }
+      atom_level: { type: array, items: { type: string } }
+
+$defs:
+  segment:
+    type: string
+    pattern: "^[a-z0-9][a-z0-9-]*$"
+
+  artifact:
+    type: object
+    additionalProperties: false
+    required: [role, filename, sha256, locators]
+    properties:
+      role:
+        description: How consumers refer to this file -- main, exclude, weights...
+        type: string
+        minLength: 1
+
+      filename:
+        type: string
+        minLength: 1
+
+      sha256:
+        description: >-
+          Mandatory, and molhub's only authority on whether transferred bytes
+          are correct. Without it there is nothing to check a response against,
+          which is how an HTTP 202 with an empty body once got cached as a
+          valid file. The index CI fills this in; it is not hand-written.
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+
+      size:
+        type: integer
+        minimum: 0
+
+      upstream_digest:
+        description: >-
+          What upstream publishes, kept for reconciliation. Often md5, which is
+          why it is not the authority.
+        type: string
+        pattern: "^(md5|sha1|sha256|sha512):[0-9a-f]+$"
+
+      locators:
+        description: Ordered candidate sources; earlier entries are preferred.
+        type: array
+        minItems: 1
+        items:
+          type: string
+          pattern: "^[a-z][a-z0-9+.-]*://.+$"

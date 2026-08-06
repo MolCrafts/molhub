@@ -26,17 +26,25 @@ dependencies = [
   "molcrafts-molpy>=0.12,<0.13",
   "tqdm",
   "requests>=2.28",
+  "pyyaml>=6.0",
+  "typer>=0.12",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=7.0",
+  # Proves the shipped JSON Schema is valid and enforces what it claims;
+  # the runtime parser does not depend on it.
+  "jsonschema>=4.0",
   "pytest-cov>=4.0",
   "pytest-mock>=3.15",
   "ruff>=0.15",
   "tox>=4.23",
 ]
 huggingface = ["huggingface_hub>=0.20"]
+
+[project.scripts]
+molhub = "molhub.cli:app"
 
 [project.urls]
 Repository = "https://github.com/molcrafts/molhub"
@@ -49,9 +57,16 @@ Repository = "https://github.com/molcrafts/molhub"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+molhub = ["schema/*.yaml", "index_data/**/*.yaml"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 python_files = ["test_*"]
+# Network tests are opt-in: CI must not go red because an upstream data
+# repository is slow. Run them with `pytest -m network`.
+addopts = "-m 'not network'"
+markers = ["network: touches a real upstream registry"]
 
 [tool.ruff]
 line-length = 100

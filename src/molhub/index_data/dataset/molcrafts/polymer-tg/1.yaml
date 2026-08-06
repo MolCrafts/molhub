@@ -1,0 +1,32 @@
+# Curated entry for the LAMALAB polymer glass-transition dataset.
+#
+# sha256 was computed by fetching the file once through molhub itself; the md5
+# below is what Zenodo publishes and is kept only to reconcile with upstream.
+# Zenodo files are immutable after publication, so neither value should ever
+# change for this record id.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: polymer-tg
+version: "1"
+
+title: LAMALAB curated polymer glass-transition temperatures
+description: >-
+  Experimentally measured glass-transition temperatures for polymers, given as
+  PSMILES plus Tg in kelvin, curated by LAMALAB.
+license: CC-BY-4.0
+citation: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: LAMALAB_CURATED_Tg_structured.csv
+    sha256: c68ac28d00674b8ef708973d6967fe848b958942b32e6591ee2b5f2150efd586
+    size: 6024335
+    upstream_digest: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+    locators:
+      - zenodo://14980914/LAMALAB_CURATED_Tg_structured.csv
+
+targets:
+  graph_level:
+    - labels.Exp_Tg(K)
+  atom_level: []
