@@ -30,6 +30,15 @@
 每份 spec 都有同名 `.acceptance.md`。Acceptance status 比 spec 顶层状态更细；不得为了
 让整份 spec 看起来完成而把 production、visual 或 cross-repo criteria 提前标绿。
 
+## Implementation chain: molhub-delivery
+
+这是 2026-08-09 对 product 01–06 审计后产生的一次性实施链；完成后由 `mol:close`
+删除，不替代上面的 durable product contracts。
+
+| Position | Spec | Status | Outcome |
+|---:|---|---|---|
+| 02 | [Inspector 生命周期证据](molhub-delivery-02-guard-inspector.md) | approved | 自动证明 role/route 取消与 dispose；扩充 keyboard/mobile-light 证据 |
+
 ## Feature coverage
 
 | 之前讨论的能力 | 规范位置 |

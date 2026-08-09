@@ -18,10 +18,12 @@ Locator forms::
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 from molhub.sources.drivers._api import fetch_json
 from molhub.sources.drivers.https import HttpsSource
@@ -92,27 +94,39 @@ class FigshareSource:
         target: str,
         publication: Publication,
     ) -> Locator:
-        """Upload *files* to a Figshare article and return its locator.
+        """Publish one public file and return its immutable Figshare locator.
+
+        The file is validated before an authenticated session is created. The
+        upload is completed, the article is published, and its authoritative
+        version is read before a locator is returned.
 
         Args:
-            files: Local files to upload.
+            files: A sequence containing exactly one local regular file.
             target: ``"new"`` to create an article, or an existing article id.
-            publication: Descriptive metadata. ``private`` is not expressible —
-                Figshare articles start unpublished and are made public by a
-                separate action, so a private publication is the normal state
-                and the flag is ignored.
+            publication: Descriptive metadata for a public article. Private
+                publication is rejected because the returned locator must be
+                anonymously resolvable.
 
         Returns:
-            ``figshare://<article_id>``.
+            ``figshare://<article_id>/v<version>/<filename>`` pinned to the
+            exact published version and file.
 
         Raises:
-            FileNotFoundError: If any path in *files* does not exist.
-            SourceError: If no token is configured.
+            FileNotFoundError: If the file does not exist.
+            SourceError: If the input is not one public regular file, no token
+                is configured, or Figshare omits usable file, name, or version
+                metadata.
         """
         paths = [Path(f) for f in files]
-        for path in paths:
-            if not path.exists():
-                raise FileNotFoundError(f"File not found: {path}")
+        if len(paths) != 1:
+            raise SourceError("Figshare publish requires exactly one file.")
+        path = paths[0]
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        if not path.is_file():
+            raise SourceError(f"Figshare publish requires a regular file: {path}")
+        if publication.private:
+            raise SourceError("Figshare publish only supports public publications.")
 
         if target == "new":
             article_id = int(
@@ -125,9 +139,39 @@ class FigshareSource:
         else:
             article_id = int(target)
 
-        for path in paths:
-            self.upload_file(path, article_id)
-        return Locator(scheme=self.scheme, path=str(article_id))
+        file_info = self.upload_file(path, article_id)
+        filename = file_info.get("name")
+        if not isinstance(filename, str) or not filename or filename != path.name:
+            raise SourceError(
+                "Figshare did not return a matching usable filename for the uploaded file."
+            )
+
+        try:
+            published = self._session.post(
+                f"{self._api_base}/account/articles/{article_id}/publish"
+            )
+            published.raise_for_status()
+        except Exception as exc:
+            raise SourceError("Figshare article publish/finalize failed.") from exc
+
+        version = self._version_from_response(published)
+        if version is None:
+            location = self._response_location(published)
+            if location:
+                detail = self._session.get(location)
+                detail.raise_for_status()
+                version = self._version_from_response(detail)
+        if version is None:
+            detail = self._session.get(f"{self._api_base}/account/articles/{article_id}")
+            detail.raise_for_status()
+            version = self._version_from_response(detail)
+        if version is None:
+            raise SourceError("Figshare did not return an authoritative article version.")
+
+        return Locator(
+            scheme=self.scheme,
+            path=f"{article_id}/v{version}/{filename}",
+        )
 
     def create_article(
         self,
@@ -163,7 +207,16 @@ class FigshareSource:
 
         response = self._session.post(f"{self._api_base}/account/articles", json=payload)
         response.raise_for_status()
-        return response.json()
+        article = self._response_json(response)
+        if "id" not in article:
+            location = self._response_location(response)
+            if location:
+                detail = self._session.get(location)
+                detail.raise_for_status()
+                article = self._response_json(detail)
+        if "id" not in article:
+            raise SourceError("Figshare did not return a usable article id.")
+        return article
 
     def upload_file(
         self,
@@ -172,10 +225,11 @@ class FigshareSource:
         *,
         filename: str | None = None,
     ) -> dict:
-        """Upload one file to an existing article.
+        """Upload and complete one regular file on an existing article.
 
-        Figshare's upload is a four-step dance: announce the file, read back
-        the part layout, PUT each part, then confirm.
+        Figshare first announces the file, exposes the upload-part layout,
+        accepts the bytes, and finally requires completion through the
+        authenticated account file endpoint.
 
         Args:
             local_path: File to upload.
@@ -183,42 +237,108 @@ class FigshareSource:
             filename: Name to use upstream; defaults to the local name.
 
         Returns:
-            The file metadata Figshare returned when the upload was announced.
+            The upstream metadata for the announced file.
 
         Raises:
             FileNotFoundError: If *local_path* does not exist.
+            SourceError: If *local_path* is not a regular file or Figshare does
+                not return a usable integer file id, filename, or upload URL,
+                or the required file-completion request fails.
         """
         local_path = Path(local_path)
         if not local_path.exists():
             raise FileNotFoundError(f"File not found: {local_path}")
+        if not local_path.is_file():
+            raise SourceError(f"Figshare upload requires a regular file: {local_path}")
+
+        size = int(local_path.stat().st_size)
+        digest = hashlib.md5()
+        with local_path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
 
         announcement = self._session.post(
             f"{self._api_base}/account/articles/{article_id}/files",
-            json={"name": filename or local_path.name, "size": int(local_path.stat().st_size)},
+            json={
+                "name": filename or local_path.name,
+                "size": size,
+                "md5": digest.hexdigest(),
+            },
         )
         announcement.raise_for_status()
-        file_info = announcement.json()
+        file_info = self._response_json(announcement)
+        if "id" not in file_info:
+            location = self._response_location(announcement)
+            if location:
+                detail = self._session.get(location)
+                detail.raise_for_status()
+                file_info = self._response_json(detail)
 
-        upload_url = file_info.get("upload_url") or file_info["location"]
+        file_id = file_info.get("id")
+        if isinstance(file_id, bool) or not isinstance(file_id, int) or file_id <= 0:
+            raise SourceError("Figshare did not return a usable integer file id.")
+        upstream_name = file_info.get("name")
+        if not isinstance(upstream_name, str) or not upstream_name:
+            raise SourceError("Figshare did not return a usable uploaded filename.")
+
+        upload_url = file_info.get("upload_url") or file_info.get("location")
+        if not isinstance(upload_url, str) or not upload_url:
+            raise SourceError("Figshare did not return a usable file upload URL.")
         layout = self._session.get(upload_url)
         layout.raise_for_status()
-        parts = layout.json().get("parts", [])
+        parts = self._response_json(layout).get("parts", [])
 
         if not parts:
             with open(local_path, "rb") as handle:
                 self._session.put(upload_url, data=handle.read()).raise_for_status()
         else:
-            uploaded = []
             with open(local_path, "rb") as handle:
                 for part in parts:
+                    handle.seek(part["startOffset"])
                     chunk = handle.read(part["endOffset"] - part["startOffset"] + 1)
                     self._session.put(
                         f"{upload_url}/{part['partNo']}", data=chunk
                     ).raise_for_status()
-                    uploaded.append({"partNo": part["partNo"], "etag": "uploaded"})
-            self._session.post(upload_url, json={"parts": uploaded}).raise_for_status()
+
+        try:
+            completion = self._session.post(
+                f"{self._api_base}/account/articles/{article_id}/files/{file_id}"
+            )
+            completion.raise_for_status()
+        except Exception as exc:
+            raise SourceError("Figshare file completion failed.") from exc
 
         return file_info
+
+    @staticmethod
+    def _response_json(response: Any) -> dict[str, Any]:
+        """Return an object-shaped response body, tolerating empty responses."""
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _response_location(self, response: Any) -> str | None:
+        """Return an absolute resource location from a header or JSON body."""
+        headers = getattr(response, "headers", None)
+        location = headers.get("Location") if headers is not None else None
+        if not isinstance(location, str) or not location:
+            location = self._response_json(response).get("location")
+        if not isinstance(location, str) or not location:
+            return None
+        return urljoin(f"{self._api_base}/", location)
+
+    @classmethod
+    def _version_from_response(cls, response: Any) -> int | None:
+        """Read and strictly validate an article version from a response."""
+        payload = cls._response_json(response)
+        if "version" not in payload:
+            return None
+        version = payload["version"]
+        if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+            raise SourceError("Figshare returned an invalid article version.")
+        return version
 
     # -- reading -------------------------------------------------------------
 

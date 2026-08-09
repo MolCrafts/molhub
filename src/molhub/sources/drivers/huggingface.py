@@ -13,12 +13,13 @@ Locator forms::
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from molhub.sources.drivers.https import HttpsSource
-from molhub.sources.errors import InvalidLocator
+from molhub.sources.errors import InvalidLocator, SourceError
 from molhub.sources.locator import Locator
 from molhub.sources.publication import Publication
 from molhub.sources.remote import RemoteFile
@@ -27,10 +28,11 @@ __all__ = ["HuggingFaceSource"]
 
 _DEFAULT_ENDPOINT = "https://huggingface.co"
 _REPO_PREFIX = {"datasets": "datasets/", "models": "", "spaces": "spaces/"}
+_FULL_COMMIT_OID = re.compile(r"(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})\Z")
 
 
 class HuggingFaceSource:
-    """Turns a HuggingFace repo path into a resolve URL.
+    """Resolve and publish files in a HuggingFace Hub repository.
 
     Args:
         endpoint: Hub base URL. Point at ``https://hf-mirror.com`` to use a
@@ -68,33 +70,43 @@ class HuggingFaceSource:
         target: str,
         publication: Publication,
     ) -> Locator:
-        """Upload *files* to a Hub repository and return its locator.
+        """Publish one public file at an immutable Hub commit.
 
         Args:
-            files: Local files or directories to upload.
+            files: A sequence containing exactly one existing regular file.
             target: Repository id, ``"org/name"``.
-            publication: Descriptive metadata. Only ``private`` reaches the
-                Hub API here; title, description and license belong in the
-                repository card, which molhub does not write.
+            publication: Descriptive metadata for a public publication. This
+                driver does not write the title, description, license, or
+                keywords to a repository card.
 
         Returns:
-            ``hf://<org>/<repo>/<name of the last uploaded item>``.
+            ``hf://<org>/<repo>@<full commit OID>/<filename>``.
 
         Raises:
-            FileNotFoundError: If any path in *files* does not exist.
+            FileNotFoundError: If the selected file does not exist.
+            SourceError: If the input is not one public regular file, or the
+                Hub does not return a full immutable commit OID.
+
+        All input-validation failures occur before the driver accesses the
+        Hub.
         """
         paths = [Path(f) for f in files]
-        for path in paths:
-            if not path.exists():
-                raise FileNotFoundError(f"File not found: {path}")
+        if len(paths) != 1:
+            raise SourceError("HuggingFace publication requires exactly one regular file.")
+        path = paths[0]
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        if not path.is_file():
+            raise SourceError("HuggingFace publication requires exactly one regular file.")
+        if publication.private:
+            raise SourceError("HuggingFace publication must be public, not private.")
 
-        self.create_repo(target, private=publication.private)
-        for path in paths:
-            if path.is_dir():
-                self.upload_folder(path, target, path_in_repo=path.name)
-            else:
-                self.upload_file(path, target, path_in_repo=path.name)
-        return Locator(scheme=self.scheme, path=f"{target}/{paths[-1].name}")
+        self.create_repo(target, private=False)
+        result = self.upload_file(path, target, path_in_repo=path.name)
+        oid = getattr(result, "oid", None)
+        if not isinstance(oid, str) or _FULL_COMMIT_OID.fullmatch(oid) is None:
+            raise SourceError("HuggingFace upload did not return a full immutable commit OID.")
+        return Locator(scheme=self.scheme, path=f"{target}@{oid.lower()}/{path.name}")
 
     def create_repo(
         self,
@@ -122,8 +134,20 @@ class HuggingFaceSource:
         *,
         commit_message: str | None = None,
         **kwargs: Any,
-    ) -> str:
-        """Upload a single file, returning its URL."""
+    ) -> object:
+        """Upload a single file and preserve the Hub response.
+
+        Args:
+            local_path: Existing local file to upload.
+            repo_id: Destination repository id, ``"org/name"``.
+            path_in_repo: Destination path inside the repository.
+            commit_message: Optional commit message. By default, the message
+                names the uploaded file.
+            **kwargs: Additional arguments forwarded to the Hub client.
+
+        Returns:
+            The exact object returned by ``huggingface_hub.upload_file``.
+        """
         from huggingface_hub import upload_file as _upload_file
 
         return _upload_file(
@@ -144,8 +168,20 @@ class HuggingFaceSource:
         *,
         commit_message: str | None = None,
         **kwargs: Any,
-    ) -> str:
-        """Upload a whole directory, returning its URL."""
+    ) -> object:
+        """Upload a directory and preserve the Hub response.
+
+        Args:
+            local_dir: Existing local directory to upload.
+            repo_id: Destination repository id, ``"org/name"``.
+            path_in_repo: Destination path inside the repository.
+            commit_message: Optional commit message. By default, the message
+                names the uploaded directory.
+            **kwargs: Additional arguments forwarded to the Hub client.
+
+        Returns:
+            The exact object returned by ``huggingface_hub.upload_folder``.
+        """
         from huggingface_hub import upload_folder as _upload_folder
 
         return _upload_folder(

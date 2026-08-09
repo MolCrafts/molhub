@@ -57,10 +57,14 @@ class TestFigshareUploader:
 
         init_resp = mock.MagicMock()
         init_resp.json.return_value = {
-            "location": "https://api.figshare.com/v2/account/articles/1/files/1",
+            "id": 1,
+            "name": "test.txt",
             "upload_url": "https://uploads.figshare.com/upload/abc",
         }
         init_resp.raise_for_status = mock.MagicMock()
+
+        completion_resp = mock.MagicMock()
+        completion_resp.raise_for_status = mock.MagicMock()
 
         get_resp = mock.MagicMock()
         get_resp.json.return_value = {"parts": []}
@@ -69,11 +73,22 @@ class TestFigshareUploader:
         put_resp = mock.MagicMock()
         put_resp.raise_for_status = mock.MagicMock()
 
-        u._session.post = mock.MagicMock(return_value=init_resp)
+        u._session.post = mock.MagicMock(side_effect=[init_resp, completion_resp])
         u._session.get = mock.MagicMock(return_value=get_resp)
         u._session.put = mock.MagicMock(return_value=put_resp)
 
-        u.upload_file(test_file, article_id=1)
+        result = u.upload_file(test_file, article_id=1)
+
+        assert result == {
+            "id": 1,
+            "name": "test.txt",
+            "upload_url": "https://uploads.figshare.com/upload/abc",
+        }
+        assert [call.args[0] for call in u._session.post.call_args_list] == [
+            "https://api.figshare.com/v2/account/articles/1/files",
+            "https://api.figshare.com/v2/account/articles/1/files/1",
+        ]
+        completion_resp.raise_for_status.assert_called_once_with()
         u._session.put.assert_called_once()
 
     def test_upload_dataset_combined(self, tmp_path):
@@ -90,10 +105,14 @@ class TestFigshareUploader:
 
         init_resp = mock.MagicMock()
         init_resp.json.return_value = {
-            "location": "https://api.figshare.com/v2/upload/xyz",
+            "id": 501,
+            "name": "dataset.txt",
             "upload_url": "https://uploads.figshare.com/upload/abc",
         }
         init_resp.raise_for_status = mock.MagicMock()
+
+        completion_resp = mock.MagicMock()
+        completion_resp.raise_for_status = mock.MagicMock()
 
         get_resp = mock.MagicMock()
         get_resp.json.return_value = {"parts": []}
@@ -102,7 +121,7 @@ class TestFigshareUploader:
         put_resp = mock.MagicMock()
         put_resp.raise_for_status = mock.MagicMock()
 
-        u._session.post = mock.MagicMock(side_effect=[create_resp, init_resp])
+        u._session.post = mock.MagicMock(side_effect=[create_resp, init_resp, completion_resp])
         u._session.get = mock.MagicMock(return_value=get_resp)
         u._session.put = mock.MagicMock(return_value=put_resp)
 
@@ -114,4 +133,14 @@ class TestFigshareUploader:
         )
 
         assert result["article"]["id"] == 99
-        assert "file" in result
+        assert result["file"] == {
+            "id": 501,
+            "name": "dataset.txt",
+            "upload_url": "https://uploads.figshare.com/upload/abc",
+        }
+        assert [call.args[0] for call in u._session.post.call_args_list] == [
+            "https://api.figshare.com/v2/account/articles",
+            "https://api.figshare.com/v2/account/articles/99/files",
+            "https://api.figshare.com/v2/account/articles/99/files/501",
+        ]
+        completion_resp.raise_for_status.assert_called_once_with()

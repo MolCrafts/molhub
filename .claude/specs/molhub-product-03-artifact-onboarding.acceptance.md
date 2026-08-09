@@ -60,7 +60,7 @@ criteria:
     summary: "PublishingSource 闭环"
     type: runtime
     pass_when: "Figshare/HF fake integration 证明 publish 返回的 Locator 能被同一 driver resolve/fetch"
-    status: pending
+    status: passed
     last_checked: 2026-08-09
 out_of_scope:
   - "自动批准和自动 merge"
@@ -75,4 +75,5 @@ out_of_scope:
 
 ac-007 的旧缺口已经关闭：表单支持动态增删 artifacts/locators，并把 shared validator 的
 逐字段 issues 映射回同一个 `ManifestDraft`。ac-008 仍等待 production public POST 证据；
-ac-010 仍等待 publish 返回 pinned locator 并由同一 driver 完成 resolve/fetch 闭环。
+ac-010 已由 Figshare/HF 的 pinned locator、官方上传响应形状和同 driver
+`publish → resolve → fetch` 硬编码回归关闭。

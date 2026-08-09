@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from unittest import mock
+
+
+@dataclass(frozen=True)
+class _CommitInfo:
+    oid: str
+    url: str
 
 
 def _inject_fake_huggingface_hub():
@@ -13,11 +20,15 @@ def _inject_fake_huggingface_hub():
     swapping the module entry is enough to intercept every call.
     """
     fake = mock.MagicMock()
-    fake.upload_file = mock.MagicMock(
-        return_value="https://huggingface.co/datasets/test/ds/resolve/main/f.txt"
+    fake.upload_file.return_value = _CommitInfo(
+        oid="0123456789abcdef0123456789abcdef01234567",
+        url="https://huggingface.co/datasets/test/ds/commit/0123456",
     )
-    fake.upload_folder = mock.MagicMock(return_value="https://huggingface.co/datasets/test/ds")
-    fake.create_repo = mock.MagicMock(return_value="https://huggingface.co/datasets/test/ds")
+    fake.upload_folder.return_value = _CommitInfo(
+        oid="89abcdef0123456789abcdef0123456789abcdef",
+        url="https://huggingface.co/datasets/test/ds/commit/89abcde",
+    )
+    fake.create_repo.return_value = "https://huggingface.co/datasets/test/ds"
     sys.modules["huggingface_hub"] = fake
     return fake
 
@@ -34,28 +45,28 @@ class TestHuggingFaceUploader:
         from molhub.uploader import HuggingFaceUploader
 
         u = HuggingFaceUploader(token="hf_test")
-        url = u.upload_file(
+        result = u.upload_file(
             local_path="/tmp/test.txt",
             repo_id="test/ds",
             path_in_repo="f.txt",
         )
 
         fake_hf.upload_file.assert_called_once()
-        assert url.startswith("https://")
+        assert result is fake_hf.upload_file.return_value
 
     def test_upload_folder_calls_hf(self):
         fake_hf = _inject_fake_huggingface_hub()
         from molhub.uploader import HuggingFaceUploader
 
         u = HuggingFaceUploader(token="hf_test")
-        url = u.upload_folder(
+        result = u.upload_folder(
             local_dir="/tmp/dir",
             repo_id="test/ds",
             path_in_repo="data/",
         )
 
         fake_hf.upload_folder.assert_called_once()
-        assert url.startswith("https://")
+        assert result is fake_hf.upload_folder.return_value
 
     def test_create_repo(self):
         fake_hf = _inject_fake_huggingface_hub()
@@ -77,10 +88,11 @@ class TestHuggingFaceUploader:
         from molhub.uploader import HuggingFaceUploader
 
         u = HuggingFaceUploader(token="hf_test")
-        u.upload_dataset(
+        result = u.upload_dataset(
             local_path="/tmp/file.txt",
             repo_id="test/ds",
         )
 
         fake_hf.create_repo.assert_called_once()
         fake_hf.upload_file.assert_called_once()
+        assert result is fake_hf.upload_file.return_value
