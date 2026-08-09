@@ -1,0 +1,27 @@
+# The positive control. Every other fixture is this file with one thing broken,
+# so a fixture failing for an unrelated reason shows up as this one failing too.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — a manifest that satisfies every rule
+description: >-
+  Not a real dataset. Filed at the path its coordinate names, records a DOI,
+  pins its locator to a Zenodo record id (which is itself a version), and gives
+  the artifact both cross-checks.
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: example.csv
+    digest: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+    size: 6024335
+    locators:
+      - zenodo://14980914/example.csv
+
+targets:
+  graph_level: [energy]
+  atom_level: []

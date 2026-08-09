@@ -51,7 +51,7 @@ class TestTargetSchema:
     def test_frozen(self):
         ts = TargetSchema(graph_level=frozenset({"energy"}))
         with pytest.raises(Exception):
-            ts.graph_level = frozenset({"other"})  # type: ignore[misc]
+            ts.graph_level = frozenset({"other"})  # ty: ignore[invalid-assignment]
 
 
 # ---------------------------------------------------------------------------

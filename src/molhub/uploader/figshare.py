@@ -1,11 +1,11 @@
-"""Compatibility shim for the pre-registry Figshare uploader.
+"""Compatibility shim for the pre-source Figshare uploader.
 
 The implementation now lives in
-:class:`molhub.registry.drivers.figshare.FigshareRegistry`, where uploading is
+:class:`molhub.sources.drivers.figshare.FigshareSource`, where uploading is
 the write half of the same driver that resolves and fetches. This class stays
 so existing callers keep working; prefer the driver directly::
 
-    from molhub.registry import Drivers, Publication
+    from molhub.sources import Drivers, Publication
 
     figshare = Drivers.discover().for_scheme("figshare")
     locator = figshare.publish([Path("data.csv")], "new", Publication(title="…"))
@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from molhub.registry.drivers.figshare import FigshareRegistry
+from molhub.sources.drivers.figshare import FigshareSource
 
 __all__ = ["FigshareUploader"]
 
@@ -44,12 +44,12 @@ class FigshareUploader:
             raise ValueError("Figshare token required. Pass token= or set FIGSHARE_TOKEN env var.")
         self._token = token
         self._base_url = base_url or self.BASE_URL
-        self._registry = FigshareRegistry(api_base=self._base_url, token=token)
+        self._source = FigshareSource(api_base=self._base_url, token=token)
 
     @property
     def _session(self) -> Any:
         """The driver's authenticated session, exposed for backwards compatibility."""
-        return self._registry._session
+        return self._source._session
 
     def create_article(
         self,
@@ -61,7 +61,7 @@ class FigshareUploader:
         **kwargs: Any,
     ) -> dict:
         """Create a new Figshare article (item)."""
-        return self._registry.create_article(
+        return self._source.create_article(
             title, description=description, category=category, tags=tags, **kwargs
         )
 
@@ -73,7 +73,7 @@ class FigshareUploader:
         filename: str | None = None,
     ) -> dict:
         """Upload a file to an existing Figshare article."""
-        return self._registry.upload_file(local_path, article_id, filename=filename)
+        return self._source.upload_file(local_path, article_id, filename=filename)
 
     def upload_dataset(
         self,

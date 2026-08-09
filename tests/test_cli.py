@@ -15,8 +15,8 @@ runner = CliRunner()
 
 
 @pytest.fixture
-def idx(index_dir):
-    return ["--index", str(index_dir)]
+def idx(registry_dir):
+    return ["--registry", str(registry_dir)]
 
 
 class TestSearch:
@@ -71,18 +71,18 @@ class TestInfo:
 
 class TestFetch:
     @pytest.fixture(autouse=True)
-    def offline_registry(self, monkeypatch, bodies, tmp_path):
+    def offline_source(self, monkeypatch, bodies, tmp_path):
         """Serve the fixture bytes through a fake driver; never touch the network."""
-        from molhub.registry import BlobStore, Drivers, Fetcher
+        from molhub.sources import BlobStore, Drivers, Fetcher
 
-        from .test_registry.conftest import FakeRegistry
+        from .test_sources.conftest import FakeSource
 
         real_init = Fetcher.__init__
 
         def _patched(self, *, drivers=None, blobs=None):
             real_init(
                 self,
-                drivers=drivers or Drivers.of(FakeRegistry(bodies=bodies)),
+                drivers=drivers or Drivers.of(FakeSource(bodies=bodies)),
                 blobs=blobs or BlobStore(root=tmp_path / "home"),
             )
 
@@ -108,9 +108,14 @@ class TestCacheVerify:
     """Verify re-checks cached files against the digests their manifests name."""
 
     def _cache(self, home, body: bytes) -> None:
-        from molhub.registry import BlobStore
+        from molhub.coordinate import Coordinate
+        from molhub.sources import BlobStore
 
-        path = BlobStore(root=home).path_for("dataset:molcrafts/qm9@v2/main")
+        # Build the key the way production does. Spelling it out by hand here
+        # is what let `cache verify` and `fetch` agree on a path that violated
+        # the documented layout.
+        key = f"{Coordinate.parse('qm9@v2').cache_path()}/main"
+        path = BlobStore(root=home).path_for(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
 
@@ -133,25 +138,29 @@ class TestCacheVerify:
         assert result.exit_code == 1
         assert "1 stale" in result.stdout
 
-    def test_counts_files_whose_manifest_has_no_digest(self, tmp_path, index_dir):
+    def test_counts_files_whose_manifest_has_no_digest(self, tmp_path, registry_dir):
         """Nothing published means nothing to check — say so, do not pretend."""
-        manifest = index_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml"
-        manifest.write_text(
-            "\n".join(line for line in manifest.read_text().splitlines() if "digest:" not in line)
-        )
+        from .conftest import MAIN_MD5
+
+        # Only `main` loses its digest — it is the role `_cache` writes, and it
+        # carries a `size`, which every artifact needs when no digest is
+        # published. Stripping every digest in the file would leave `exclude`
+        # with no cross-check at all, and the manifest would not load.
+        manifest = registry_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml"
+        manifest.write_text(manifest.read_text().replace(f'    digest: "md5:{MAIN_MD5}"\n', ""))
         self._cache(tmp_path, b"anything at all")
         result = runner.invoke(
-            app, ["cache", "verify", "--home", str(tmp_path), "--index", str(index_dir)]
+            app, ["cache", "verify", "--home", str(tmp_path), "--registry", str(registry_dir)]
         )
         assert result.exit_code == 0
         assert "1 without a published digest" in result.stdout
 
 
-class TestBrokenIndex:
+class TestBrokenRegistry:
     def test_a_malformed_manifest_is_a_clean_error(self, tmp_path):
         bad = tmp_path / "dataset" / "molcrafts" / "x" / "1.yaml"
         bad.parent.mkdir(parents=True)
         bad.write_text("schema_version: 1\n")
-        result = runner.invoke(app, ["search", "--index", str(tmp_path)])
+        result = runner.invoke(app, ["search", "--registry", str(tmp_path)])
         assert result.exit_code != 0
         assert "Traceback" not in result.stdout

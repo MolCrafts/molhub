@@ -1,11 +1,11 @@
 """Manifest — the record that says where an artifact's bytes actually are.
 
 A manifest is data, not code. Adding a dataset to molhub is a YAML file in the
-index, not a Python module and not a release. That is the whole reason this
+registry, not a Python module and not a release. That is the whole reason this
 layer exists.
 
 Parsing is typed and strict rather than schema-driven at runtime: the shipped
-``schema/manifest.schema.yaml`` is the language-neutral contract for the index
+``schema/manifest.schema.yaml`` is the language-neutral contract for the registry
 CI and for non-Python clients, while this module produces precise, actionable
 errors without dragging a validator into every install.
 
@@ -25,15 +25,22 @@ file, copied verbatim (Figshare and Zenodo publish md5, HuggingFace a sha256
 LFS OID). It catches a platform breaking its own immutability promise. molhub
 never invents one — a number computed from its own download attests only to
 that download, and requiring it would mean fetching an entire artifact just to
-write a catalogue entry.
+write a registry entry.
+
+``size`` is optional in the same way, but **not both at once**: an artifact
+must record a ``digest``, a ``size``, or both, or a completed transfer has
+nothing whatsoever to be checked against. Requiring one of the two keeps
+cataloguing cheap — a size comes from a HEAD request's content-length, which
+hauls no bytes — while requiring a digest outright would not.
 
 Corrupt and truncated transfers are caught by the transport contract in
-:mod:`molhub.registry` (status check, temp file, atomic rename), which depends
+:mod:`molhub.sources` (status check, temp file, atomic rename), which depends
 on none of this.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,11 +49,13 @@ from typing import Any
 import yaml
 
 from molhub.coordinate import Coordinate, InvalidCoordinate
-from molhub.registry import Digest, InvalidDigest, Locator
+from molhub.sources import Digest, InvalidDigest, Locator
 
 __all__ = ["Artifact", "TargetDeclaration", "Manifest", "InvalidManifest"]
 
 SCHEMA_VERSION = 1
+FORMAT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
+MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
 
 
 class InvalidManifest(ValueError):
@@ -67,19 +76,29 @@ def _require(data: Mapping[str, Any], key: str, where: str) -> Any:
 class Artifact:
     """One downloadable file belonging to an artifact.
 
+    At least one of ``digest`` and ``size`` is always present: either alone is
+    a usable cross-check on a completed transfer, but neither leaves one
+    unverifiable.
+
     Attributes:
         role: How the consumer refers to this file — ``main``, ``exclude``, …
         filename: Name to give the file locally.
+        format: Stable identifier for the artifact's byte format. Consumers
+            use this instead of inferring a format from the filename.
+        media_type: Optional IANA-style media type without parameters.
         locators: Ordered candidate sources; earlier ones are preferred.
         digest: What the platform publishes for this file, copied verbatim, or
             ``None`` when it publishes nothing. Used to confirm upstream still
             serves the version this manifest names.
-        size: Byte count when the platform reports one.
+        size: Byte count, from what the platform reports or a HEAD request.
+            ``None`` only when a ``digest`` is present to check against.
     """
 
     role: str
     filename: str
     locators: tuple[Locator, ...]
+    format: str | None = None
+    media_type: str | None = None
     digest: Digest | None = None
     size: int | None = None
 
@@ -106,13 +125,47 @@ class Artifact:
             raise InvalidManifest(f"{scope} lists no locators.")
         locators = tuple(Locator.parse(str(entry)) for entry in raw_locators)
 
-        size = data.get("size")
+        raw_size = data.get("size")
+        size = int(raw_size) if raw_size is not None else None
+        if size is not None and size <= 0:
+            raise InvalidManifest(
+                f"{scope} declares size {size}, but zero is not a smaller artifact — "
+                f"it is the shape of a failed transfer. Since a size may be the only "
+                f"cross-check an artifact carries, accepting it would let an empty "
+                f"download verify as correct, which is the failure this registry "
+                f"exists to prevent."
+            )
+        if digest is None and size is None:
+            raise InvalidManifest(
+                f"{scope} records neither a digest nor a size, leaving nothing to "
+                f"check a completed transfer against. Copy whatever checksum the "
+                f"platform publishes; when it publishes none, a 'size' is an "
+                f"acceptable answer and a HEAD request's content-length will give "
+                f"you one without downloading the file. Never compute a digest "
+                f"yourself — it would only attest to your own download."
+            )
+
+        artifact_format = str(data["format"]) if data.get("format") else None
+        if artifact_format is not None and not FORMAT_PATTERN.fullmatch(artifact_format):
+            raise InvalidManifest(
+                f"{scope} has invalid format {artifact_format!r}; use a stable lowercase "
+                "identifier such as 'extxyz' instead of a display label."
+            )
+        media_type = str(data["media_type"]) if data.get("media_type") else None
+        if media_type is not None and not MEDIA_TYPE_PATTERN.fullmatch(media_type):
+            raise InvalidManifest(
+                f"{scope} has invalid media_type {media_type!r}; use a type/subtype "
+                "without response parameters."
+            )
+
         return cls(
             role=role,
             filename=str(_require(data, "filename", scope)),
             locators=locators,
+            format=artifact_format,
+            media_type=media_type,
             digest=digest,
-            size=int(size) if size is not None else None,
+            size=size,
         )
 
 
@@ -140,7 +193,7 @@ class TargetDeclaration:
 
 @dataclass(frozen=True)
 class Manifest:
-    """Everything the index knows about one version of one artifact."""
+    """Everything the registry knows about one version of one artifact."""
 
     coordinate: Coordinate
     title: str

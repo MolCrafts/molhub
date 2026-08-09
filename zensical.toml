@@ -1,0 +1,92 @@
+[project]
+site_name = "MolHub"
+site_description = "Coordinates, manifests, clients, Inspector, and operations for MolHub."
+site_author = "MolCrafts"
+site_url = "https://docs.molcrafts.org/molhub/"
+docs_dir = "docs"
+site_dir = "site"
+copyright = "Copyright &copy; 2026 MolCrafts"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Concepts" = [
+    { "Positioning" = "concepts/positioning.md" },
+    { "Coordinates" = "concepts/coordinates.md" },
+    { "Manifests" = "concepts/manifests.md" },
+    { "Integrity and cache" = "concepts/integrity-and-cache.md" },
+    { "Repository boundaries" = "concepts/repository-boundaries.md" },
+  ] },
+  { "Guides" = [
+    { "Finding and fetching" = "guides/finding-and-fetching.md" },
+    { "Submitting" = "guides/submitting.md" },
+    { "Publishing" = "guides/publishing.md" },
+    { "Extending sources" = "guides/extending-sources.md" },
+    { "Using TypeScript" = "guides/using-typescript.md" },
+    { "Migrating" = "guides/migrating.md" },
+  ] },
+  { "Inspector" = [
+    { "Opening an artifact" = "inspector/opening-an-artifact.md" },
+    { "Properties and selection" = "inspector/properties-and-selection.md" },
+    { "Derived data" = "inspector/derived-data.md" },
+  ] },
+  { "Operations" = [
+    { "Registry review" = "operations/registry-review.md" },
+    { "Deployment" = "operations/deployment.md" },
+    { "Schema evolution" = "operations/schema-evolution.md" },
+    { "Incident response" = "operations/incident-response.md" },
+  ] },
+  { "Reference" = [
+    { "Python" = "reference/python.md" },
+    { "TypeScript" = "reference/typescript.md" },
+    { "REST API" = "reference/rest-api.md" },
+    { "Manifest schema" = "reference/manifest-schema.md" },
+  ] },
+]
+
+[project.plugins.mkdocstrings]
+default_handler = "python"
+
+[project.plugins.mkdocstrings.handlers.python.options]
+show_root_heading = true
+show_source = false
+members_order = "source"
+separate_signature = true
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx]
+betterem = {}
+details = {}
+highlight = { anchor_linenums = true, line_spans = "__span", pygments_lang_class = true }
+inlinehilite = {}
+keys = {}
+magiclink = {}
+smartsymbols = {}
+tabbed = { alternate_style = true, combine_header_slug = true }
+tasklist = { custom_checkbox = true }
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid" },
+]
+
+[project.theme]
+name = "molcrafts"
+
+[project.extra.molcrafts]
+product = "molhub"
+accent = "#18432b"
+accent_soft = "rgba(24, 67, 43, 0.14)"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/MolCrafts/molhub"

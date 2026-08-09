@@ -1,0 +1,17 @@
+# Broken: the artifact records neither `digest` nor `size`, so a transfer that
+# reports success has nothing at all to be compared against.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — artifact with no cross-check at all
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: example.csv
+    locators:
+      - zenodo://14980914/example.csv

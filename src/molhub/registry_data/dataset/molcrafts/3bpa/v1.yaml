@@ -1,0 +1,72 @@
+# 3BPA, from davkovacs/BOTNet-datasets — the repository the authors of the
+# benchmark publish it in.
+#
+# There is no archival record to point at. Zenodo has nothing for 3BPA, Figshare
+# has nothing, and the ColabFit mirrors on HuggingFace republish the benchmark
+# re-encoded as Parquet rather than the extended-XYZ files this dataset is
+# defined by. GitHub is where the four files exist as published, so that is what
+# the locators name.
+#
+# The locators therefore pin the **commit** 29e6d46, not `main`. A branch URL
+# would start serving different bytes the day the authors push, with nothing to
+# show for it; a commit id is a git content hash and names exactly these bytes
+# for good. That pin is the version guarantee here — it is strictly stronger
+# than a digest, since it covers the whole tree the files were published in.
+#
+# No `digest`: GitHub publishes no content checksum for a blob. Its API gives a
+# git object id, which is sha1("blob <n>\0" + content) and so is *not* the sha1
+# of the file, and raw.githubusercontent's ETag is an opaque HTTP cache
+# validator with no published contract. Copying either as a `digest` would be
+# asserting a promise upstream never made, and molhub never computes one of its
+# own — so these entries carry none, which the schema allows. `size` is the byte
+# count GitHub's own tree API reports.
+#
+# Upstream also ships train_mixedT.xyz, test_dih.xyz and iso_atoms.xyz in the
+# same directory. They are deliberately not indexed here yet; adding them is
+# three more entries under `artifacts` and no code change.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: 3bpa
+version: v1
+
+title: 3BPA — temperature-transferability benchmark for machine-learned potentials
+description: >-
+  DFT energies and forces for 3-(benzyloxy)pyridin-2-amine (C13H14N2O), a large
+  flexible drug-like molecule. 500 training geometries sampled from 300 K
+  molecular dynamics, plus held-out sets sampled at 300 K, 600 K and 1200 K, so
+  a potential fitted in-domain can be scored well out of it. Distances in
+  angstrom, energies in eV, forces in eV/angstrom.
+# The repository distributing these files ships an MIT LICENSE. The article the
+# data first appeared in, doi:10.1021/acs.jctc.1c00647, is CC BY 4.0.
+license: MIT
+doi: 10.1021/acs.jctc.1c00647
+
+artifacts:
+  - role: train_300K
+    filename: train_300K.xyz
+    size: 1504880
+    locators:
+      - https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/29e6d467317e4b5967b7ea5cbee54de953fa0d45/dataset_3BPA/train_300K.xyz
+
+  - role: test_300K
+    filename: test_300K.xyz
+    size: 5023260
+    locators:
+      - https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/29e6d467317e4b5967b7ea5cbee54de953fa0d45/dataset_3BPA/test_300K.xyz
+
+  - role: test_600K
+    filename: test_600K.xyz
+    size: 6434399
+    locators:
+      - https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/29e6d467317e4b5967b7ea5cbee54de953fa0d45/dataset_3BPA/test_600K.xyz
+
+  - role: test_1200K
+    filename: test_1200K.xyz
+    size: 6437539
+    locators:
+      - https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/29e6d467317e4b5967b7ea5cbee54de953fa0d45/dataset_3BPA/test_1200K.xyz
+
+targets:
+  graph_level: [energy]
+  atom_level: [forces]

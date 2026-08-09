@@ -19,6 +19,7 @@ jobs:
       - run: |
           uv run ruff check src/ tests/
           uv run ruff format --check src/ tests/
+          uv run ty check src/
 
   test:
     needs: lint
@@ -38,3 +39,69 @@ jobs:
         with:
           files: ./coverage.xml
           flags: python${{ matrix.python-version }}
+
+  node:
+    name: TypeScript, registry, API, and Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out MolHub
+        uses: actions/checkout@v4
+      - name: Check out the registry database
+        uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molhub-registry
+          path: .registry-source
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Set up Python for cross-language conformance
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev
+      - name: Install the workspace
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm run security:audit
+      - name: Enforce the registry data-only boundary
+        run: npm run registry:layout -- "$GITHUB_WORKSPACE/.registry-source"
+      - name: Validate and build the registry database
+        run: |
+          npm run registry:validate -- "$GITHUB_WORKSPACE/.registry-source/artifacts"
+          npm run registry:build -- "$GITHUB_WORKSPACE/.registry-source/artifacts" "$GITHUB_WORKSPACE/.registry-source/dist"
+      - name: Record the registry source revision
+        run: echo "PUBLIC_MOLHUB_REGISTRY_REVISION=$(git -C .registry-source rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Run every Node quality gate
+        env:
+          MOLHUB_REGISTRY_JSON: ${{ github.workspace }}/.registry-source/dist/registry.json
+        run: npm run check
+      - name: Build publishable outputs
+        env:
+          MOLHUB_REGISTRY_JSON: ${{ github.workspace }}/.registry-source/dist/registry.json
+        run: |
+          npm run build --workspace @molcrafts/molhub
+          npm run deploy:dry --workspace @molcrafts/molhub-api
+          npm run build --workspace @molcrafts/molhub-web
+
+  docs-and-packages:
+    name: Docs and package contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:check
+      - run: npm run package:audit

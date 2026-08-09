@@ -12,8 +12,10 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
         args: ['--unsafe']
+        exclude: ^packages/registry-tools/test/fixtures/malformed-yaml/
       - id: check-added-large-files
         args: ['--maxkb=1024']
+        exclude: ^vendor/molcrafts-molvis-stage-0\.2\.0\.tgz$
       - id: check-merge-conflict
       - id: mixed-line-ending
       - id: check-toml
@@ -23,7 +25,7 @@ repos:
     hooks:
       - id: ci-lint
         name: "CI lint (same as ci.yml)"
-        entry: bash -c 'uv sync --extra dev && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/'
+        entry: bash -c 'uv sync --extra dev && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run ty check src/ && npm run check'
         language: system
         pass_filenames: false
         always_run: true

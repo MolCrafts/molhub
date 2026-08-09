@@ -1,7 +1,8 @@
 """MolHub — unified addressing and verified fetching for molecular artifacts.
 
-Datasets, models, and plugins share one stable coordinate syntax, one catalogue,
-and one transfer layer that refuses to hand you bytes it has not verified::
+Datasets, models, and plugins share one stable coordinate syntax, one registry,
+and one transfer layer that never leaves a half-written or wrong-status response
+at the path it hands you::
 
     from molhub import Molhub
 
@@ -10,18 +11,19 @@ and one transfer layer that refuses to hand you bytes it has not verified::
 
 Layers, each usable on its own:
 
-* :mod:`molhub.registry` — locators, drivers, digests, the content-addressed
-  cache. Bytes only; knows nothing about molecules or coordinates.
-* :mod:`molhub.index` / :mod:`molhub.manifest` — the catalogue that turns a
-  coordinate into locators plus a digest.
+* :mod:`molhub.sources` — locators, drivers, digests, and the on-disk cache
+  keyed by coordinate and role. Bytes only; knows nothing about molecules.
+* :mod:`molhub.registry` / :mod:`molhub.manifest` — the registry that turns a
+  coordinate into an ordered list of locators, plus whatever digest the
+  publishing platform declared.
 * :mod:`molhub.dataset` — molpy ``Frame`` views over fetched bytes.
 """
 
 from molhub._version import __version__
 from molhub.coordinate import Coordinate, InvalidCoordinate
-from molhub.index import Index, IndexSource, UnknownArtifact
 from molhub.manifest import Artifact, InvalidManifest, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
+from molhub.registry import Registry, RegistrySource, UnknownArtifact
 
 __all__ = [
     "__version__",
@@ -32,7 +34,7 @@ __all__ = [
     "Artifact",
     "TargetDeclaration",
     "InvalidManifest",
-    "Index",
-    "IndexSource",
+    "Registry",
+    "RegistrySource",
     "UnknownArtifact",
 ]

@@ -1,6 +1,12 @@
 """CSV dataset: download + parse CSV files into :class:`Frame` objects.
 
-Zero extra dependencies — uses stdlib ``csv`` and ``urllib``.
+Parsing is stdlib ``csv``; remote files go through
+:class:`~molhub.dataset.cache.DownloadCache`, which inherits the source's
+transfer contract. No third-party parser is involved.
+
+A URL passed here is not a molhub coordinate — there is no manifest behind it
+and therefore no published digest to check. It is cached by a name derived
+from the URL, under ``urls/`` in the shared cache root.
 
 Each row of the CSV becomes one :class:`Frame` with all column values
 stored in ``frame.meta``.  Numeric columns are auto-detected.
@@ -85,7 +91,8 @@ class CSVDataset:
 
     Args:
         path_or_url: Local file path or remote URL to a CSV file.
-        cache_dir: Directory for downloaded CSVs.  Defaults to
+        cache_dir: Cache root for downloaded CSVs, which land in its ``urls/``
+            subdirectory. Defaults to ``$MOLHUB_HOME``, then the deprecated
             ``$MOLHUB_CACHE_DIR``, then ``~/.cache/molhub``.
         download: If True (default), download the file when *path_or_url*
             is a remote URL and the file is not already cached.
@@ -118,13 +125,23 @@ class CSVDataset:
 
     @classmethod
     def download(cls, url: str, cache_dir: str | Path | None = None) -> Path:
-        """Download a CSV from *url* without parsing it."""
+        """Download a CSV from *url* without parsing it.
+
+        Args:
+            url: Remote CSV to fetch.
+            cache_dir: Cache root; see the constructor.
+        """
         return DownloadCache(cache_dir).fetch(url)
 
     # -- MapDataset protocol -------------------------------------------------
 
     @property
     def source_id(self) -> str:
+        """Identifies this view of the data — a filename and a row count.
+
+        Not a molhub coordinate: a raw path or URL has no namespace, name or
+        version to report. Do not parse it as one.
+        """
         return f"csv:{self._path.name}:n={len(self._rows)}"
 
     def __len__(self) -> int:

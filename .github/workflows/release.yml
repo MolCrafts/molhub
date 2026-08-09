@@ -1,0 +1,59 @@
+name: Release SDKs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish after auditing (false only builds artifacts)"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run security:audit
+      - run: uv sync --extra dev
+      - run: npm run check
+      - run: uv run pytest -q
+      - run: npm run docs:check
+      - run: npm run package:audit
+      - name: Build isolated release artifacts
+        run: |
+          mkdir -p dist/python dist/npm
+          uv build --out-dir dist/python
+          npm pack --workspace @molcrafts/molhub --pack-destination dist/npm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: molhub-release-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+      - name: Publish Python distribution
+        if: github.event_name == 'release' || inputs.publish == true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/python/
+      - name: Publish TypeScript distribution
+        if: github.event_name == 'release' || inputs.publish == true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace @molcrafts/molhub --access public --provenance

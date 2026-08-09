@@ -1,12 +1,12 @@
 ---
 mol_project:
   name: molhub
-  language: python
+  language: polyglot
   stage: experimental
   build:
-    install: "uv sync --extra dev"
-    check: "uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/"
-    test: "uv run pytest -v"
+    install: "uv sync --extra dev && npm ci"
+    check: "uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && npm run check"
+    test: "uv run pytest -v && npm run test --workspaces --if-present"
     test_single: "uv run pytest {path} -v"
     coverage: "uv run pytest --cov=src/molhub --cov-report=term-missing -v"
   arch:
@@ -18,7 +18,7 @@ mol_project:
     required: false
   ci:
     config: .github/workflows/ci.yml
-    local: "uv sync --extra dev && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run pytest --cov=src/molhub --cov-report=term-missing -v"
+    local: "uv sync --extra dev && npm ci && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run pytest -v && npm run check"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/
 ---
@@ -31,16 +31,21 @@ mol_project:
 
 ## What this repo is
 
-molhub 是 MolCrafts 生态的分子制品 hub：给数据集、模型、插件一套统一的寻址与获取
-接口。核心职责是**坐标解析 → 从多个 registry 择一下载 → 校验 digest**；字节内容的
-解析与归一化（molpy `Frame`、`TargetSchema`）建立在这个核心之上，属于消费侧。
-Python 3.12+，setuptools + uv 构建，ruff 单一工具链，pytest 测试。未来另有
-TypeScript 客户端与静态前端仓，三方共读同一份语言中立的静态索引。
+molhub 是 MolCrafts 生态的分子制品产品仓：给数据集、模型、插件一套统一的寻址、
+发现、获取与提交接口。本仓拥有 Python SDK、TypeScript SDK、TanStack Start Web、
+Cloudflare REST API、语言中立 contract 与 registry 工具。独立的 `molhub-registry`
+只拥有 approved manifests，不拥有 schema、代码或产品界面。
 
 ## Where things live
 
 - Source code: `src/molhub/`
 - Tests: `tests/` (mirrors source: `src/molhub/dataset/qm9.py` → `tests/test_dataset/test_qm9.py`)
+- Product Web: `apps/web/`（TanStack Start + Rsbuild + Rstest）
+- Submission API: `apps/api/`（Cloudflare Worker + D1）
+- TypeScript SDK: `packages/typescript/`
+- Registry validator/builder: `packages/registry-tools/`
+- Language-neutral contract and conformance vectors: `spec/`
+- Registry database: sibling `molhub-registry` repository; approved YAML only
 - Public documentation: `README.md`（本仓暂无 `docs/`）
 - Passive project knowledge (notes, decisions, debt, blueprint): `.claude/notes/`
 - Active runtime specs (alive, deleted on completion): `.claude/specs/`
@@ -99,7 +104,7 @@ Do not "fix it with more integration tests."
 ### Prefer
 
 - **OOP by default.** Domain concepts are types with methods
-  (`ZenodoRegistry.resolve`, `BlobStore.put`), not free-floating
+  (`ZenodoSource.resolve`, `BlobStore.put`), not free-floating
   helpers. Module-level functions only for true free operations (pure
   math with no natural owner) or thin package re-exports.
 - **Primitive, single-responsibility public APIs.** Callers compose:
@@ -167,7 +172,7 @@ For non-trivial work, prefer:
   它存在的全部意义就是让上游 locator 变动时用户代码不动。改语法等于毁约。
 - **磁盘缓存布局** `$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>` —
   Python 与 TypeScript 客户端同机共享此缓存，任何变更必须两端同步且升 schema 版本。
-- **manifest / index 的 JSON Schema** — 语言中立契约，前端与两个客户端共读；
+- **manifest / registry 的 JSON Schema** — 语言中立契约，前端与两个客户端共读；
   破坏性变更须走 `schema_version` 升级，不得原地改语义。
 - **传输契约** — fetch 必须「查 status → 流式写临时文件 → 原子改名」；最终路径上
   永不出现半截或错误响应的文件。这条不依赖 digest，是数据正确性的最后防线。
@@ -177,7 +182,7 @@ For non-trivial work, prefer:
 - **digest 是可选的次要交叉检查** — 上游公布什么照抄什么，不公布就不记。
   **molhub 绝不自行计算 digest** —— 自算的值只能证明「我那次下载到了什么」，且会让
   编目必须先下载整个制品。
-- **`Registry` 驱动接口** — 第三方据此扩展；MolCrafts 自建 registry 亦不得特例化。
+- **`Source` 驱动接口** — 第三方据此扩展；MolCrafts 自建 source 亦不得特例化。
 - **`molhub.dataset` 的公开协议** — `MapDataset` / `IterableDataset` /
   `TargetSchema` 已被下游消费，变更需走 stage 策略。
 

@@ -1,11 +1,11 @@
-"""Compatibility shim for the pre-registry HuggingFace uploader.
+"""Compatibility shim for the pre-source HuggingFace uploader.
 
 The implementation now lives in
-:class:`molhub.registry.drivers.huggingface.HuggingFaceRegistry`, where
+:class:`molhub.sources.drivers.huggingface.HuggingFaceSource`, where
 uploading is the write half of the same driver that resolves and fetches. This
 class stays so existing callers keep working; prefer the driver directly::
 
-    from molhub.registry import Drivers, Publication
+    from molhub.sources import Drivers, Publication
 
     hub = Drivers.discover().for_scheme("hf")
     locator = hub.publish([Path("data.csv")], "my-org/my-dataset",
@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from molhub.registry.drivers.huggingface import HuggingFaceRegistry
+from molhub.sources.drivers.huggingface import HuggingFaceSource
 
 __all__ = ["HuggingFaceUploader"]
 
@@ -40,7 +40,7 @@ class HuggingFaceUploader:
         self._token = token
         self._endpoint = endpoint
 
-    def _registry(self, repo_type: str) -> HuggingFaceRegistry:
+    def _source(self, repo_type: str) -> HuggingFaceSource:
         """Build a driver for *repo_type* (``"dataset"``, ``"model"``, ``"space"``)."""
         kwargs: dict[str, Any] = {
             "repo_type": _DRIVER_REPO_TYPE[repo_type],
@@ -48,7 +48,7 @@ class HuggingFaceUploader:
         }
         if self._endpoint:
             kwargs["endpoint"] = self._endpoint
-        return HuggingFaceRegistry(**kwargs)
+        return HuggingFaceSource(**kwargs)
 
     def upload_file(
         self,
@@ -61,7 +61,7 @@ class HuggingFaceUploader:
         **kwargs: Any,
     ) -> str:
         """Upload a single file to a HF Hub repository."""
-        return self._registry(repo_type).upload_file(
+        return self._source(repo_type).upload_file(
             local_path, repo_id, path_in_repo, commit_message=commit_message, **kwargs
         )
 
@@ -76,7 +76,7 @@ class HuggingFaceUploader:
         **kwargs: Any,
     ) -> str:
         """Upload an entire folder to a HF Hub repository."""
-        return self._registry(repo_type).upload_folder(
+        return self._source(repo_type).upload_folder(
             local_dir, repo_id, path_in_repo, commit_message=commit_message, **kwargs
         )
 
@@ -89,7 +89,7 @@ class HuggingFaceUploader:
         exist_ok: bool = True,
     ) -> str:
         """Create a new repository on HuggingFace Hub."""
-        return self._registry(repo_type).create_repo(repo_id, private=private, exist_ok=exist_ok)
+        return self._source(repo_type).create_repo(repo_id, private=private, exist_ok=exist_ok)
 
     def upload_dataset(
         self,

@@ -1,0 +1,18 @@
+# Broken: no `doi`. The locator pins a version, but nothing says which published
+# release it is, and there is nothing for a user to cite.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — manifest with no DOI
+license: CC0-1.0
+
+artifacts:
+  - role: main
+    filename: example.csv
+    digest: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+    size: 6024335
+    locators:
+      - zenodo://14980914/example.csv

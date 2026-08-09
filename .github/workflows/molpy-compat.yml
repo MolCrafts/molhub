@@ -1,0 +1,28 @@
+name: MolPy compatibility
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install MolHub and the newest available MolPy, including prereleases
+        run: |
+          uv sync --extra dev
+          uv pip install --upgrade --prerelease=allow molcrafts-molpy
+          uv pip freeze | grep '^molcrafts-molpy=='
+      - name: Exercise the compatibility surface without changing the supported bound
+        run: |
+          uv run ty check src/
+          uv run pytest -q

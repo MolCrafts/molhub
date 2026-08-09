@@ -1,0 +1,20 @@
+# Broken three ways at the schema level: an unknown top-level key, a digest that
+# is not `algorithm:hex`, and a `kind` outside the enum.
+schema_version: 1
+kind: datasets
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — several schema violations at once
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+maintainer: someone@example.org
+
+artifacts:
+  - role: main
+    filename: example.csv
+    digest: ce2c7b2a879450cbbfff4d7ccea648f9
+    size: 6024335
+    locators:
+      - zenodo://14980914/example.csv

@@ -1,0 +1,18 @@
+description: Digest parsing, normalization, and hashing
+cases:
+  - name: md5 input is normalized
+    input: MD5:CE2C7B2A879450CBBFFF4D7CCEA648F9
+    expect:
+      canonical: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+  - name: sha256 input is normalized
+    input: SHA256:BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD
+    expect:
+      canonical: sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+  - name: malformed digest is rejected
+    input: sha256:abc
+    expect: { error: invalid_digest }
+  - name: sha256 hashes the same bytes
+    body_utf8: abc
+    algorithm: sha256
+    expect:
+      canonical: sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad

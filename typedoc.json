@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "packages/typescript/src/browser.ts",
+    "packages/typescript/src/node.ts",
+    "packages/typescript/src/index.ts"
+  ],
+  "tsconfig": "packages/typescript/tsconfig.json",
+  "out": "site/typescript-api",
+  "name": "MolHub TypeScript API",
+  "readme": "none",
+  "excludeInternal": true,
+  "githubPages": false,
+  "navigationLinks": {
+    "MolHub docs": "../"
+  }
+}

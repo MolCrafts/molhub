@@ -49,7 +49,7 @@ class TargetSchema:
     ``atoms`` block (``fx``, ``fy``, ``fz``).
 
     Dataset source classes expose their schema as a class attribute
-    (e.g. :attr:`QM9Source.TARGET_SCHEMA`) so downstream batching logic
+    (e.g. :attr:`QM9Dataset.TARGET_SCHEMA`) so downstream batching logic
     knows how to collate each target key.
     """
 

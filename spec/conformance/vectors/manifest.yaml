@@ -1,0 +1,69 @@
+description: Manifest structural validation
+cases:
+  - name: valid manifest
+    document:
+      schema_version: 1
+      kind: dataset
+      namespace: molcrafts
+      name: example
+      version: v1
+      title: Example
+      doi: 10.0000/example
+      artifacts:
+        - role: main
+          filename: example.xyz
+          format: extxyz
+          media_type: chemical/x-xyz
+          locators: [zenodo://123/example.xyz]
+          size: 3
+    expect: { valid: true }
+  - name: malformed artifact format is rejected
+    document:
+      schema_version: 1
+      kind: dataset
+      namespace: molcrafts
+      name: example
+      version: v1
+      title: Example
+      doi: 10.0000/example
+      artifacts:
+        - role: main
+          filename: example.xyz
+          format: Extended XYZ
+          locators: [zenodo://123/example.xyz]
+          size: 3
+    expect: { error: invalid_manifest }
+  - name: unknown schema version is rejected
+    document:
+      schema_version: 99
+      kind: dataset
+      namespace: molcrafts
+      name: example
+      version: v1
+      title: Example
+      doi: 10.0000/example
+      artifacts:
+        - role: main
+          filename: example.xyz
+          locators: [zenodo://123/example.xyz]
+          size: 3
+    expect: { error: invalid_manifest }
+  - name: duplicate roles are rejected
+    document:
+      schema_version: 1
+      kind: dataset
+      namespace: molcrafts
+      name: example
+      version: v1
+      title: Example
+      doi: 10.0000/example
+      artifacts:
+        - role: main
+          filename: one.xyz
+          locators: [zenodo://123/one.xyz]
+          size: 3
+        - role: main
+          filename: two.xyz
+          locators: [zenodo://123/two.xyz]
+          size: 4
+    expect: { error: duplicate_role }

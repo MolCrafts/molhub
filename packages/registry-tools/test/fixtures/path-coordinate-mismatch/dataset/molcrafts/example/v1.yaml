@@ -1,0 +1,19 @@
+# Broken: filed at .../example/v1.yaml while declaring version v2. Clients build
+# the path from the coordinate, so this file resolves to nothing.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v2
+
+title: Fixture — manifest filed under the wrong version
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: example.csv
+    digest: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+    size: 6024335
+    locators:
+      - zenodo://14980914/example.csv

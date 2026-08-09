@@ -12,7 +12,7 @@ from molpy import Frame
 from molhub.dataset import CSVDataset, MapDataset, Targets
 from molhub.dataset.csv_dataset import _infer_value
 
-from ..test_registry.conftest import FakeResponse
+from ..test_sources.conftest import FakeResponse
 
 _SAMPLE_CSV = """PSMILES,labels.Exp_Tg(K),meta.source,meta.reliability
 *C#Cc1cccc(C#C[SiH2]*)c1,345.15,GREA,black
@@ -85,6 +85,11 @@ class TestCSVDataset:
         ds = CSVDataset(str(sample_csv_path))
         assert ds.source_id.startswith("csv:")
 
+    def test_source_id_is_not_a_coordinate(self, sample_csv_path):
+        """A raw path or URL has no coordinate — source_id must not fake one."""
+        ds = CSVDataset(str(sample_csv_path))
+        assert "@" not in ds.source_id
+
     def test_path(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         assert ds.path.samefile(sample_csv_path)
@@ -122,12 +127,12 @@ class TestInferValue:
 
 class TestRemoteCsv:
     def test_url_with_download_disabled_and_no_cache_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
         with pytest.raises(FileNotFoundError):
             CSVDataset("https://example.invalid/missing.csv", download=False)
 
     def test_url_is_downloaded_then_parsed(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
         body = b"a,b\n1,x\n2,y\n"
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, body))
         ds = CSVDataset("https://example.invalid/remote.csv")
@@ -135,8 +140,22 @@ class TestRemoteCsv:
         assert ds.headers == ["a", "b"]
         assert Targets(ds[1]).read()["a"] == 2
 
+    def test_download_honours_molhub_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, b"a\n1\n"))
+        ds = CSVDataset("https://example.invalid/remote.csv")
+        assert ds.path == tmp_path / "urls" / "remote.csv"
+
+    def test_download_never_writes_into_the_shared_files_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, b"a\n1\n"))
+        CSVDataset("https://example.invalid/remote.csv")
+        assert not (tmp_path / "files").exists()
+
     def test_download_classmethod_skips_existing_file(self, tmp_path, monkeypatch):
-        cached = tmp_path / "keep.csv"
+        cached = tmp_path / "urls" / "keep.csv"
+        cached.parent.mkdir(parents=True, exist_ok=True)
         cached.write_text("already,here\n")
 
         def _boom(*a, **k):

@@ -112,8 +112,13 @@ class Coordinate:
 
     @classmethod
     def coerce(cls, value: "str | Coordinate") -> "Coordinate":
-        """Return *value* as a :class:`Coordinate`, parsing it when it is a string."""
-        return value if isinstance(value, cls) else cls.parse(value)
+        """Return *value* as a :class:`Coordinate`, parsing it when it is a string.
+
+        The check is against :class:`Coordinate`, not ``cls``: narrowing on a
+        subclass would send an already-parsed base ``Coordinate`` down the
+        string branch and fail on ``text.strip()``.
+        """
+        return value if isinstance(value, Coordinate) else cls.parse(value)
 
     @property
     def canonical(self) -> str:
@@ -126,8 +131,20 @@ class Coordinate:
         return f"{self.kind}:{self.namespace}/{self.name}"
 
     def relative_path(self) -> str:
-        """Where this coordinate's manifest lives inside an index directory."""
+        """Where this coordinate's manifest lives inside a registry directory."""
         return f"{self.kind}/{self.namespace}/{self.name}/{self.version}.yaml"
+
+    def cache_path(self) -> str:
+        """Where this coordinate's files live inside the cache: ``<kind>/<ns>/<name>@<ver>``.
+
+        Deliberately not :attr:`canonical`. The canonical form contains a ``:``,
+        which is not a path separator, so filing bytes under it would collapse
+        ``dataset:molcrafts`` into one directory segment. The layout below
+        ``$MOLHUB_HOME/files/`` is a contract the TypeScript client reads on the
+        same machine — a client that built the path from its parts would never
+        find what a client that used the canonical string had written.
+        """
+        return f"{self.kind}/{self.namespace}/{self.name}@{self.version}"
 
     def __str__(self) -> str:
         return self.canonical

@@ -1,4 +1,4 @@
-"""Fixtures shared across the coordinate / manifest / index / hub tests."""
+"""Fixtures shared across the coordinate / manifest / registry / hub tests."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def manifest_yaml(
 ) -> str:
     """A valid manifest, with a comment in it so comment handling stays covered."""
     return (
-        "# Curated by hand; the bot fills in sha256 on first publish.\n"
+        "# Curated by hand; digests are copied from what the platform publishes.\n"
         f"schema_version: {schema_version}\n"
         f"kind: {kind}\n"
         f"namespace: {namespace}\n"
@@ -48,6 +48,8 @@ def manifest_yaml(
         "artifacts:\n"
         "  - role: main\n"
         "    filename: qm9.tar.bz2\n"
+        "    format: tar-bz2\n"
+        "    media_type: application/x-bzip2\n"
         f'    digest: "md5:{MAIN_MD5}"\n'
         "    size: 19\n"
         "    locators:\n"
@@ -62,9 +64,9 @@ def manifest_yaml(
 
 
 @pytest.fixture
-def index_dir(tmp_path):
-    """An index directory holding one dataset manifest."""
-    root = tmp_path / "index"
+def registry_dir(tmp_path):
+    """A registry directory holding one dataset manifest."""
+    root = tmp_path / "registry"
     path = root / "dataset" / "molcrafts" / "qm9" / "v2.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(manifest_yaml(), encoding="utf-8")
@@ -73,5 +75,5 @@ def index_dir(tmp_path):
 
 @pytest.fixture
 def bodies():
-    """The bytes the fake registry should serve for the fixture manifest."""
+    """The bytes the fake source should serve for the fixture manifest."""
     return {"main": MAIN_BODY, "main-backup": MAIN_BODY, "side": SIDE_BODY}

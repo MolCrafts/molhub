@@ -13,10 +13,10 @@ from typing import Annotated, Optional
 import typer
 
 from molhub.coordinate import InvalidCoordinate
-from molhub.index import UnknownArtifact
 from molhub.manifest import InvalidManifest
 from molhub.molhub import Molhub
-from molhub.registry import BlobStore, Digest, RegistryError
+from molhub.registry import UnknownArtifact
+from molhub.sources import BlobStore, Digest, SourceError
 
 app = typer.Typer(
     name="molhub",
@@ -24,19 +24,19 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=True,
 )
-cache_app = typer.Typer(name="cache", help="Inspect the local content-addressed cache.")
+cache_app = typer.Typer(name="cache", help="Inspect the local cache, keyed by coordinate and role.")
 app.add_typer(cache_app)
 
-_IndexOption = Annotated[
+_RegistryOption = Annotated[
     Optional[Path],
-    typer.Option("--index", help="Index directory to read. Defaults to $MOLHUB_INDEX."),
+    typer.Option("--registry", help="Registry directory to read. Defaults to $MOLHUB_REGISTRY."),
 ]
 
 
-def _hub(index: Path | None) -> Molhub:
-    """Build a hub, turning a broken index into a clean error rather than a traceback."""
+def _hub(registry: Path | None) -> Molhub:
+    """Build a hub, turning a broken registry into a clean error rather than a traceback."""
     try:
-        return Molhub(index)
+        return Molhub(registry)
     except InvalidManifest as error:
         raise typer.BadParameter(str(error)) from error
 
@@ -56,10 +56,10 @@ def search(
     kind: Annotated[
         Optional[str], typer.Option("--kind", help="dataset, model, or plugin.")
     ] = None,
-    index: _IndexOption = None,
+    registry: _RegistryOption = None,
 ) -> None:
     """List artifacts matching QUERY."""
-    matches = _hub(index).search(kind=kind, query=query)
+    matches = _hub(registry).search(kind=kind, query=query)
     if not matches:
         typer.secho("No artifacts matched.", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
@@ -74,10 +74,10 @@ def search(
 @app.command()
 def info(
     coordinate: Annotated[str, typer.Argument(help="Full or shorthand coordinate.")],
-    index: _IndexOption = None,
+    registry: _RegistryOption = None,
 ) -> None:
-    """Show everything the index knows about COORDINATE."""
-    manifest = _resolve(_hub(index), coordinate)
+    """Show everything the registry knows about COORDINATE."""
+    manifest = _resolve(_hub(registry), coordinate)
     typer.echo(manifest.coordinate.canonical)
     typer.echo(f"  title      {manifest.title}")
     if manifest.description:
@@ -105,14 +105,14 @@ def fetch(
     into: Annotated[
         Optional[Path], typer.Option("--into", help="Also copy the files into this directory.")
     ] = None,
-    index: _IndexOption = None,
+    registry: _RegistryOption = None,
 ) -> None:
-    """Download COORDINATE's files, verifying each against its digest."""
-    hub = _hub(index)
+    """Download COORDINATE's files, checking any digest the manifest records."""
+    hub = _hub(registry)
     manifest = _resolve(hub, coordinate)
     try:
         paths = hub.fetch(manifest.coordinate)
-    except RegistryError as error:
+    except SourceError as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -127,7 +127,7 @@ def fetch(
 
 @cache_app.command("verify")
 def cache_verify(
-    index: _IndexOption = None,
+    registry: _RegistryOption = None,
     home: Annotated[
         Optional[Path], typer.Option("--home", help="Cache root. Defaults to $MOLHUB_HOME.")
     ] = None,
@@ -138,12 +138,12 @@ def cache_verify(
     platform published nothing to check them against.
     """
     store = BlobStore(home)
-    hub = _hub(index)
+    hub = _hub(registry)
 
     checked = skipped = stale = 0
     for manifest in hub.search():
         for role, artifact in manifest.artifacts.items():
-            path = store.path_for(f"{manifest.coordinate.canonical}/{role}")
+            path = store.path_for(f"{manifest.coordinate.cache_path()}/{role}")
             if not path.is_file():
                 continue
             if artifact.digest is None:

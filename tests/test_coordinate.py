@@ -118,5 +118,14 @@ class TestCoordinateDerivations:
         a, b = Coordinate.parse("qm9@v2"), Coordinate.parse("qm9@v3")
         assert a.unversioned == b.unversioned
 
-    def test_relative_path_matches_the_index_layout(self):
+    def test_relative_path_matches_the_registry_layout(self):
         assert Coordinate.parse("qm9@v2").relative_path() == "dataset/molcrafts/qm9/v2.yaml"
+
+    def test_cache_path_matches_the_documented_layout(self):
+        assert Coordinate.parse("qm9@v2").cache_path() == "dataset/molcrafts/qm9@v2"
+
+    def test_cache_path_keeps_kind_and_namespace_apart(self):
+        # The canonical form joins them with ':', which is not a path separator;
+        # building the cache key from it collapsed both into one segment and
+        # broke the layout the TypeScript client shares on the same machine.
+        assert Coordinate.parse("qm9@v2").cache_path().split("/")[:2] == ["dataset", "molcrafts"]

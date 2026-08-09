@@ -39,26 +39,40 @@ dev = [
   "pytest-cov>=4.0",
   "pytest-mock>=3.15",
   "ruff>=0.15",
+  # ty reads types out of packages that ship no
+  # py.typed (molpy does not), which is the only way a checker can see the
+  # `Frame.metadata` -> `Frame.meta` class of upstream rename; mypy treats
+  # molpy as Any and sees nothing. Gate it (tox lint / ci.yml / pre-commit)
+  # CI gates `ty check src/`; keep a lower bound because ty is still 0.0.x and
+  # diagnostics can move between releases.
+  "ty>=0.0.69",
   "tox>=4.23",
 ]
 huggingface = ["huggingface_hub>=0.20"]
+
+[dependency-groups]
+docs = [
+  "zensical>=0.0.45",
+  "molcrafts-zensical-theme>=0.2.9,<0.3",
+  "mkdocstrings-python>=1.16",
+]
 
 [project.scripts]
 molhub = "molhub.cli:app"
 
 [project.urls]
-Repository = "https://github.com/molcrafts/molhub"
+Repository = "https://github.com/MolCrafts/molhub"
 
-# Third-party packages add a hosting platform by publishing a Registry driver
+# Third-party packages add a hosting platform by publishing a Source driver
 # into this group; molhub discovers it with no source change on our side.
-[project.entry-points."molhub.registries"]
+[project.entry-points."molhub.sources"]
 
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-molhub = ["schema/*.yaml", "index_data/**/*.yaml"]
+molhub = ["schema/*.yaml", "registry_data/**/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -66,7 +80,7 @@ python_files = ["test_*"]
 # Network tests are opt-in: CI must not go red because an upstream data
 # repository is slow. Run them with `pytest -m network`.
 addopts = "-m 'not network'"
-markers = ["network: touches a real upstream registry"]
+markers = ["network: touches a real upstream source"]
 
 [tool.ruff]
 line-length = 100
@@ -83,6 +97,20 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+# `huggingface_hub` lives in the optional `huggingface` extra and is imported
+# function-locally so molhub works without it. The lint environment
+# deliberately does not install it, so its import is unresolvable there. This
+# silences the missing third-party module only — every other rule still
+# applies to this file.
+[[tool.ty.overrides]]
+include = ["src/molhub/sources/drivers/huggingface.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
 
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py
 [tool.tox]

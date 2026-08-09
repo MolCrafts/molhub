@@ -6,9 +6,9 @@ Reference:
 
 Usage::
 
-    from molhub.dataset import QM9Source
+    from molhub.dataset import QM9Dataset
 
-    source = QM9Source(data_dir)
+    source = QM9Dataset(data_dir)
     print(len(source))        # 130831
     frame = source[0]         # molpy Frame with atoms block + targets in frame.meta
 """
@@ -24,12 +24,13 @@ import numpy as np
 from molpy import Block, Element, Frame
 from tqdm import tqdm
 
+from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
 COORDINATE = "dataset:molcrafts/qm9@v2"
-"""Where QM9 lives in the index. Its manifest carries the locators and the
+"""Where QM9 lives in the registry. Its manifest carries the locators and the
 digests; this module holds no upstream URL of its own."""
 
 # Names the source has always used on disk in offline mode.
@@ -130,18 +131,19 @@ def _filter_targets(frame: Frame, kept: frozenset[str]) -> Frame:
     return frame
 
 
-def _locate_files(root: Path, download: bool, hub: Molhub | None = None) -> tuple[Path, Path]:
+def _locate_files(root: Path, download: bool, hub: ArtifactHub | None = None) -> tuple[Path, Path]:
     """Return paths to the QM9 tarball and exclusion list.
 
-    With *download*, the files come from the index: resolved by coordinate,
-    transferred, and checked against the sha256 in the manifest before they are
-    usable. Without it, they must already sit in *root* under the names this
-    source has always used.
+    With *download*, the files come from the registry: resolved by coordinate,
+    transferred under the source's transport contract, and checked against
+    the md5 Figshare publishes for the pinned article version. Without it, they
+    must already sit in *root* under the names this source has always used.
 
     Args:
         root: Directory holding pre-downloaded files in offline mode.
         download: Whether to fetch through the hub.
-        hub: Hub to fetch with; defaults to a freshly constructed one.
+        hub: Any :class:`~molhub.dataset.hub.ArtifactHub`; defaults to a
+            freshly constructed :class:`Molhub`.
 
     Returns:
         ``(tarball, exclusion_list)``.
@@ -168,7 +170,7 @@ def _locate_files(root: Path, download: bool, hub: Molhub | None = None) -> tupl
 
 
 def _load_raw(
-    root: Path, total: int | None, *, download: bool = False, hub: Molhub | None = None
+    root: Path, total: int | None, *, download: bool = False, hub: ArtifactHub | None = None
 ) -> list[Frame]:
     """Return all raw QM9 samples as ``list[Frame]``."""
     tarball, exclude_file = _locate_files(root, download, hub)
@@ -206,11 +208,11 @@ def _load_raw(
 
 
 # ---------------------------------------------------------------------------
-# QM9Source
+# QM9Dataset
 # ---------------------------------------------------------------------------
 
 
-class QM9Source:
+class QM9Dataset:
     """Map-style dataset for QM9.
 
     Each sample is a :class:`molpy.Frame` with an ``atoms`` block
@@ -222,9 +224,11 @@ class QM9Source:
         root: Directory for the raw QM9 tarball (downloaded on first use).
         total: Subsample to at most this many molecules (reproducible seed).
         targets: If given, keep only these scalar properties in each sample.
-            ``None`` keeps all of :attr:`QM9Source.ALL_TARGETS`.
+            ``None`` keeps all of :attr:`QM9Dataset.ALL_TARGETS`.
         download: Download raw files if missing. Set to ``False`` in
             offline / test environments.
+        hub: Anything satisfying :class:`~molhub.dataset.hub.ArtifactHub`.
+            Defaults to a freshly constructed :class:`~molhub.molhub.Molhub`.
 
     Class attributes:
         TARGET_SCHEMA: :class:`TargetSchema` covering every scalar target
@@ -245,7 +249,7 @@ class QM9Source:
         total: int | None = None,
         targets: list[str] | tuple[str, ...] | None = None,
         download: bool = True,
-        hub: Molhub | None = None,
+        hub: ArtifactHub | None = None,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
         self._download = download
@@ -279,16 +283,18 @@ class QM9Source:
         self._frames = frames
 
     @classmethod
-    def download(cls, root: str | Path | None = None, *, hub: Molhub | None = None) -> Path:
+    def download(cls, root: str | Path | None = None, *, hub: ArtifactHub | None = None) -> Path:
         """Fetch the QM9 files and return the directory holding them.
 
         Args:
             root: Ignored; retained so existing calls keep working. Files land
-                in the shared content-addressed cache, not here.
-            hub: Hub to fetch with.
+                in the shared cache under ``$MOLHUB_HOME``, filed by coordinate
+                and role, not here.
+            hub: Anything satisfying :class:`~molhub.dataset.hub.ArtifactHub`.
+                Defaults to a freshly constructed :class:`Molhub`.
 
         Returns:
-            The cache directory the verified files now live in.
+            The cache directory the fetched files now live in.
         """
         paths = (hub or Molhub()).fetch(COORDINATE)
         return paths["main"].parent

@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from molhub.manifest import InvalidManifest, Manifest
+from molhub.manifest import Artifact, InvalidManifest, Manifest
 
 from .conftest import MAIN_MD5, manifest_yaml
 
@@ -45,6 +45,16 @@ class TestManifestFields:
     def test_size_is_optional(self, manifest):
         assert manifest.artifact("exclude").size is None
 
+    def test_format_metadata_is_explicit(self, manifest):
+        artifact = manifest.artifact("main")
+        assert artifact.format == "tar-bz2"
+        assert artifact.media_type == "application/x-bzip2"
+
+    def test_format_metadata_is_optional_for_legacy_manifests(self, manifest):
+        artifact = manifest.artifact("exclude")
+        assert artifact.format is None
+        assert artifact.media_type is None
+
     def test_comments_do_not_reach_the_parsed_result(self, manifest):
         """Manifests are reviewed by people; explaining a mirror must be free."""
         without_comments = "\n".join(
@@ -57,10 +67,80 @@ class TestManifestFields:
             manifest.artifact("nope")
 
 
-class TestManifestRejection:
-    def test_a_digest_is_optional(self):
-        """Some platforms publish none; molhub does not invent one."""
-        without = textwrap.dedent("""
+class TestArtifactCrossCheck:
+    """An artifact must record at least one thing to check a transfer against.
+
+    Neither field is required on its own: a platform may publish no checksum,
+    and molhub never computes one of its own. But an artifact carrying neither
+    leaves a completed download with nothing at all to be compared to. A
+    ``size`` comes from a HEAD request's content-length, so requiring one of
+    the two never forces the registry to haul an artifact in order to list it.
+    """
+
+    def _artifact(self, **extra) -> Artifact:
+        entry = {"role": "main", "filename": "qm9.tar.bz2", "locators": ["fake://main"]}
+        return Artifact.from_mapping({**entry, **extra}, where="manifest")
+
+    def test_a_digest_alone_is_enough(self):
+        artifact = self._artifact(digest=f"md5:{MAIN_MD5}")
+        assert artifact.digest.hexdigest == MAIN_MD5
+        assert artifact.size is None
+
+    def test_a_size_alone_is_enough(self):
+        """Platforms publishing no checksum stay describable; molhub does not
+        invent one, and a HEAD request answers for size without downloading."""
+        artifact = self._artifact(size=19)
+        assert artifact.digest is None
+        assert artifact.size == 19
+
+    def test_both_together_are_accepted(self):
+        artifact = self._artifact(digest=f"md5:{MAIN_MD5}", size=19)
+        assert artifact.digest.hexdigest == MAIN_MD5
+        assert artifact.size == 19
+
+    def test_a_zero_size_is_refused(self):
+        """`size: 0` would satisfy the cross-check rule while checking nothing.
+
+        This repo's own history is a 202 response with an empty body cached as
+        a valid exclusion list. Since a size may be the only cross-check an
+        artifact carries, `size: 0` would let that exact empty download verify
+        as correct — the wire failure reintroduced through the registry.
+        """
+        with pytest.raises(InvalidManifest) as error:
+            self._artifact(size=0)
+        assert "failed transfer" in str(error.value)
+
+    def test_a_zero_size_is_refused_even_alongside_a_digest(self):
+        """The digest does not launder it: a declared size must still be real."""
+        with pytest.raises(InvalidManifest):
+            self._artifact(digest=f"md5:{MAIN_MD5}", size=0)
+
+    def test_a_negative_size_is_refused(self):
+        with pytest.raises(InvalidManifest):
+            self._artifact(size=-1)
+
+    def test_neither_is_refused(self):
+        with pytest.raises(InvalidManifest, match="neither a digest nor a size"):
+            self._artifact()
+
+    def test_display_label_is_not_a_format_identifier(self):
+        with pytest.raises(InvalidManifest, match="stable lowercase identifier"):
+            self._artifact(size=19, format="Extended XYZ")
+
+    def test_media_type_has_no_response_parameters(self):
+        with pytest.raises(InvalidManifest, match="without response parameters"):
+            self._artifact(size=19, media_type="text/csv; charset=utf-8")
+
+    def test_the_refusal_names_the_artifact_and_the_way_out(self):
+        """The message is the deliverable a contributor actually reads."""
+        with pytest.raises(InvalidManifest) as caught:
+            self._artifact()
+        message = str(caught.value)
+        assert "'main'" in message
+        assert "HEAD" in message
+
+    def test_a_manifest_carrying_such_an_artifact_is_refused(self):
+        bad = textwrap.dedent("""
             schema_version: 1
             kind: dataset
             namespace: molcrafts
@@ -72,8 +152,11 @@ class TestManifestRejection:
                 filename: qm9.tar.bz2
                 locators: [fake://main]
         """)
-        assert Manifest.from_yaml(without).artifact("main").digest is None
+        with pytest.raises(InvalidManifest, match="neither a digest nor a size"):
+            Manifest.from_yaml(bad)
 
+
+class TestManifestRejection:
     def test_malformed_digest_is_refused(self):
         bad = manifest_yaml().replace(f'"md5:{MAIN_MD5}"', '"not-a-digest"')
         with pytest.raises(InvalidManifest, match="digest"):

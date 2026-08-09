@@ -12,14 +12,33 @@ from pathlib import Path
 import pytest
 from molpy import Frame
 
-from molhub.dataset import Targets
+from molhub.dataset import ArtifactHub, Targets
 from molhub.dataset.qm9 import (
-    QM9Source,
+    COORDINATE,
+    QM9Dataset,
     _filter_targets,
     _is_cached,
     _load_exclusion_list,
     _parse_xyz,
 )
+
+
+class FakeHub:
+    """An :class:`~molhub.dataset.hub.ArtifactHub` serving files already on disk.
+
+    Records what was asked for, so the download path can be exercised with no
+    registry, no driver, and no network.
+    """
+
+    def __init__(self, paths: dict[str, Path]) -> None:
+        self._paths = paths
+        self.calls: list[tuple[str, list[str] | None]] = []
+
+    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
+        self.calls.append((coordinate, roles))
+        wanted = list(self._paths) if roles is None else roles
+        return {role: self._paths[role] for role in wanted}
+
 
 # One real-shaped QM9 record: 5 atoms, tag + index + 15 scalar properties.
 # The coordinate lines carry a trailing Mulliken charge column, which the
@@ -59,7 +78,7 @@ class TestParseXyz:
 
     def test_all_fifteen_targets_present(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert set(Targets(frame).read()) == set(QM9Source.ALL_TARGETS)
+        assert set(Targets(frame).read()) == set(QM9Dataset.ALL_TARGETS)
 
     def test_tag_and_index_are_not_targets(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
@@ -130,50 +149,50 @@ class TestIsCached:
         assert _is_cached(p) is True
 
 
-class TestQM9SourceConstruction:
+class TestQM9DatasetConstruction:
     def test_offline_missing_tarball_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="tarball not found"):
-            QM9Source(tmp_path, download=False)
+            QM9Dataset(tmp_path, download=False)
 
     def test_offline_zero_byte_tarball_is_rejected(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"")
         with pytest.raises(FileNotFoundError, match="tarball not found"):
-            QM9Source(tmp_path, download=False)
+            QM9Dataset(tmp_path, download=False)
 
     def test_offline_missing_exclusion_list_raises(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"not really a tarball")
         with pytest.raises(FileNotFoundError, match="exclusion list"):
-            QM9Source(tmp_path, download=False)
+            QM9Dataset(tmp_path, download=False)
 
     def test_unknown_target_raises(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
         with pytest.raises(ValueError, match="Unknown QM9 targets"):
-            QM9Source(tmp_path, targets=["U0", "not_a_property"], download=False)
+            QM9Dataset(tmp_path, targets=["U0", "not_a_property"], download=False)
 
     def test_source_id_is_stable_and_descriptive(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        src = QM9Source(tmp_path, total=100, targets=["U0", "gap"], download=False)
+        src = QM9Dataset(tmp_path, total=100, targets=["U0", "gap"], download=False)
         assert src.source_id == "dataset:molcrafts/qm9@v2#total=100,targets=U0+gap"
 
     def test_source_id_without_options(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        assert QM9Source(tmp_path, download=False).source_id == "dataset:molcrafts/qm9@v2"
+        assert QM9Dataset(tmp_path, download=False).source_id == "dataset:molcrafts/qm9@v2"
 
     def test_unmodified_source_id_parses_as_a_coordinate(self, tmp_path):
         from molhub.coordinate import Coordinate
 
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        source_id = QM9Source(tmp_path, download=False).source_id
+        source_id = QM9Dataset(tmp_path, download=False).source_id
         assert Coordinate.parse(source_id).canonical == source_id
 
     def test_root_is_expanded_to_absolute(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
         (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        src = QM9Source(tmp_path, download=False)
+        src = QM9Dataset(tmp_path, download=False)
         assert src.root.is_absolute()
         assert isinstance(src.root, Path)
 
@@ -219,25 +238,25 @@ class TestQM9EndToEnd:
 
     def test_loads_every_molecule(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4])
-        assert len(QM9Source(tmp_path, download=False)) == 4
+        assert len(QM9Dataset(tmp_path, download=False)) == 4
 
     def test_excluded_molecules_are_dropped(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4], excluded=[2, 4])
-        src = QM9Source(tmp_path, download=False)
+        src = QM9Dataset(tmp_path, download=False)
         assert len(src) == 2
         assert sorted(Targets(src[i]).read()["U0"] for i in range(len(src))) == [-3.0, -1.0]
 
     def test_empty_exclusion_list_keeps_everything(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3], excluded=[])
-        assert len(QM9Source(tmp_path, download=False)) == 3
+        assert len(QM9Dataset(tmp_path, download=False)) == 3
 
     def test_non_xyz_members_are_skipped(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2])
-        assert len(QM9Source(tmp_path, download=False)) == 2
+        assert len(QM9Dataset(tmp_path, download=False)) == 2
 
     def test_getitem_returns_a_frame_with_atoms(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
-        frame = QM9Source(tmp_path, download=False)[0]
+        frame = QM9Dataset(tmp_path, download=False)[0]
         assert isinstance(frame, Frame)
         assert list(frame["atoms"]["element"]) == ["C"]
 
@@ -245,7 +264,7 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=list(range(1, 21)))
 
         def _sample() -> list[float]:
-            src = QM9Source(tmp_path, total=5, download=False)
+            src = QM9Dataset(tmp_path, total=5, download=False)
             return [Targets(src[i]).read()["U0"] for i in range(len(src))]
 
         first, second = _sample(), _sample()
@@ -254,11 +273,11 @@ class TestQM9EndToEnd:
 
     def test_total_larger_than_corpus_is_a_no_op(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2])
-        assert len(QM9Source(tmp_path, total=999, download=False)) == 2
+        assert len(QM9Dataset(tmp_path, total=999, download=False)) == 2
 
     def test_targets_filter_applies_to_every_sample(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2])
-        src = QM9Source(tmp_path, targets=["U0"], download=False)
+        src = QM9Dataset(tmp_path, targets=["U0"], download=False)
         for i in range(len(src)):
             assert set(Targets(src[i]).read()) == {"U0"}
 
@@ -266,17 +285,58 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=[1])
         from molhub.dataset import MapDataset
 
-        assert isinstance(QM9Source(tmp_path, download=False), MapDataset)
+        assert isinstance(QM9Dataset(tmp_path, download=False), MapDataset)
 
     def test_index_out_of_range(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
         with pytest.raises(IndexError):
-            QM9Source(tmp_path, download=False)[5]
+            QM9Dataset(tmp_path, download=False)[5]
+
+
+class TestQM9DatasetDownload:
+    """The ``download=True`` path, exercised through the source's one seam."""
+
+    @pytest.fixture
+    def hub(self, tmp_path) -> FakeHub:
+        """A hub serving a miniature QM9 from outside *root*."""
+        served = tmp_path / "served"
+        _build_qm9_root(served, indices=[1, 2, 3])
+        return FakeHub({"main": served / "qm9.tar.bz2", "exclude": served / "qm9_exclude.txt"})
+
+    def test_the_fake_still_matches_the_seam_it_stands_in_for(self, hub):
+        """A fake that drifts from the protocol proves nothing about the source."""
+        assert isinstance(hub, ArtifactHub)
+
+    def test_download_reads_what_the_hub_served(self, tmp_path, hub):
+        assert len(QM9Dataset(tmp_path / "empty", download=True, hub=hub)) == 3
+
+    def test_download_asks_for_the_pinned_coordinate(self, tmp_path, hub):
+        QM9Dataset(tmp_path / "empty", download=True, hub=hub)[0]
+        assert hub.calls == [(COORDINATE, None)]
+
+    def test_construction_alone_fetches_nothing(self, tmp_path, hub):
+        """Loading is lazy: constructing must not cost a download."""
+        QM9Dataset(tmp_path / "empty", download=True, hub=hub)
+        assert hub.calls == []
+
+    def test_download_ignores_root(self, tmp_path, hub):
+        """Fetched bytes land in the shared cache, not in *root*."""
+        root = tmp_path / "empty"
+        len(QM9Dataset(root, download=True, hub=hub))
+        assert not root.exists()
+
+    def test_classmethod_returns_the_directory_holding_the_files(self, tmp_path, hub):
+        assert QM9Dataset.download(hub=hub) == (tmp_path / "served")
+
+    def test_offline_never_touches_the_hub(self, tmp_path, hub):
+        _build_qm9_root(tmp_path, indices=[1])
+        assert len(QM9Dataset(tmp_path, download=False, hub=hub)) == 1
+        assert hub.calls == []
 
 
 class TestQM9TargetSchema:
     def test_all_targets_are_graph_level(self):
-        assert QM9Source.TARGET_SCHEMA.graph_level == QM9Source.ALL_TARGETS
+        assert QM9Dataset.TARGET_SCHEMA.graph_level == QM9Dataset.ALL_TARGETS
 
     def test_no_atom_level_targets(self):
-        assert QM9Source.TARGET_SCHEMA.atom_level == frozenset()
+        assert QM9Dataset.TARGET_SCHEMA.atom_level == frozenset()

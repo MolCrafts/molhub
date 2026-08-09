@@ -6,23 +6,25 @@ verify anything itself, or the digest guarantee would exist twice.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from molhub import Molhub
 from molhub.coordinate import InvalidCoordinate
-from molhub.index import UnknownArtifact
-from molhub.registry import AllLocatorsFailed, BlobStore, Drivers, Fetcher
+from molhub.registry import UnknownArtifact
+from molhub.sources import AllLocatorsFailed, BlobStore, Drivers, Fetcher
 
 from .conftest import MAIN_BODY, SIDE_BODY
-from .test_registry.conftest import FakeRegistry
+from .test_sources.conftest import FakeSource
 
 
 @pytest.fixture
-def hub(index_dir, bodies, tmp_path):
-    fake = FakeRegistry(bodies=bodies)
+def hub(registry_dir, bodies, tmp_path):
+    fake = FakeSource(bodies=bodies)
     fetcher = Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=tmp_path / "home"))
-    hub = Molhub(index_dir, fetcher=fetcher)
-    hub.registry_stub = fake  # type: ignore[attr-defined]
+    hub = Molhub(registry_dir, fetcher=fetcher)
+    hub.source_stub = fake  # type: ignore[attr-defined]
     return hub
 
 
@@ -43,7 +45,7 @@ class TestResolve:
 
     def test_resolve_does_not_download(self, hub):
         hub.resolve("qm9@v2")
-        assert hub.registry_stub.network_calls == 0
+        assert hub.source_stub.network_calls == 0
 
 
 class TestFetch:
@@ -60,7 +62,7 @@ class TestFetch:
 
     def test_narrowing_avoids_the_other_transfer(self, hub):
         hub.fetch("qm9@v2", roles=["main"])
-        assert hub.registry_stub.network_calls == 1
+        assert hub.source_stub.network_calls == 1
 
     def test_unknown_role(self, hub):
         with pytest.raises(KeyError, match="nope"):
@@ -68,41 +70,46 @@ class TestFetch:
 
     def test_second_fetch_uses_the_cache(self, hub):
         first = hub.fetch("qm9@v2")
-        calls = hub.registry_stub.network_calls
+        calls = hub.source_stub.network_calls
         assert hub.fetch("qm9@v2") == first
-        assert hub.registry_stub.network_calls == calls
+        assert hub.source_stub.network_calls == calls
 
-    def test_files_land_under_their_coordinate(self, hub):
+    def test_files_land_under_their_coordinate(self, hub, tmp_path):
+        # The exact relative path, not a substring. CLAUDE.md freezes this
+        # layout because the TypeScript client reads the same directory on the
+        # same machine; a substring check passed happily while kind and
+        # namespace were collapsed into one `dataset_molcrafts` segment.
         path = hub.fetch("qm9@v2")["main"]
-        assert "qm9@v2" in str(path) and path.name == "main"
+        relative = path.relative_to(tmp_path / "home")
+        assert relative == Path("files/dataset/molcrafts/qm9@v2/main")
 
 
 class TestFetchDelegatesVerification:
     """If Molhub checked digests itself, the rule would have two homes."""
 
-    def test_wrong_bytes_are_rejected(self, index_dir, tmp_path):
-        fake = FakeRegistry(bodies={"main": b"tampered", "main-backup": b"still wrong"})
+    def test_wrong_bytes_are_rejected(self, registry_dir, tmp_path):
+        fake = FakeSource(bodies={"main": b"tampered", "main-backup": b"still wrong"})
         hub = Molhub(
-            index_dir,
+            registry_dir,
             fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=tmp_path / "home")),
         )
         with pytest.raises(AllLocatorsFailed):
             hub.fetch("qm9@v2", roles=["main"])
 
-    def test_wrong_bytes_are_not_stored(self, index_dir, tmp_path):
+    def test_wrong_bytes_are_not_stored(self, registry_dir, tmp_path):
         home = tmp_path / "home"
-        fake = FakeRegistry(bodies={"main": b"tampered", "main-backup": b"still wrong"})
+        fake = FakeSource(bodies={"main": b"tampered", "main-backup": b"still wrong"})
         hub = Molhub(
-            index_dir, fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=home))
+            registry_dir, fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=home))
         )
         with pytest.raises(AllLocatorsFailed):
             hub.fetch("qm9@v2", roles=["main"])
         assert [p for p in home.rglob("*") if p.is_file()] == []
 
-    def test_falls_through_to_the_backup_locator(self, index_dir, tmp_path):
-        fake = FakeRegistry(bodies={"main": b"tampered", "main-backup": MAIN_BODY})
+    def test_falls_through_to_the_backup_locator(self, registry_dir, tmp_path):
+        fake = FakeSource(bodies={"main": b"tampered", "main-backup": MAIN_BODY})
         hub = Molhub(
-            index_dir,
+            registry_dir,
             fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=tmp_path / "home")),
         )
         assert hub.fetch("qm9@v2", roles=["main"])["main"].read_bytes() == MAIN_BODY
@@ -115,7 +122,7 @@ class TestSearch:
     def test_filters_by_kind(self, hub):
         assert hub.search(kind="model") == []
 
-    def test_len_reports_the_index_size(self, hub):
+    def test_len_reports_the_registry_size(self, hub):
         assert len(hub) == 1
 
     def test_repr_is_informative(self, hub):
@@ -123,26 +130,26 @@ class TestSearch:
 
 
 class TestExtensibility:
-    def test_a_new_manifest_needs_no_source_change(self, index_dir, bodies, tmp_path):
+    def test_a_new_manifest_needs_no_source_change(self, registry_dir, bodies, tmp_path):
         """The central claim of this layer: adding a dataset is data, not code."""
         import molhub
 
         source_root = __import__("pathlib").Path(molhub.__file__).parent
         before = {p: p.stat().st_mtime_ns for p in source_root.rglob("*.py")}
 
-        added = index_dir / "dataset" / "someone-else" / "mydata" / "1.yaml"
+        added = registry_dir / "dataset" / "someone-else" / "mydata" / "1.yaml"
         added.parent.mkdir(parents=True)
         added.write_text(
-            (index_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml")
+            (registry_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml")
             .read_text()
             .replace("namespace: molcrafts", "namespace: someone-else")
             .replace("name: qm9", "name: mydata")
             .replace("version: v2", "version: 1")
         )
 
-        fake = FakeRegistry(bodies=bodies)
+        fake = FakeSource(bodies=bodies)
         hub = Molhub(
-            index_dir,
+            registry_dir,
             fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=tmp_path / "home")),
         )
         assert hub.resolve("dataset:someone-else/mydata@1").coordinate.name == "mydata"

@@ -1,10 +1,11 @@
 """Molhub — the one class a user needs to know.
 
-It composes rather than implements: :class:`~molhub.index.Index` says where an
-artifact's bytes are, and :class:`~molhub.registry.fetcher.Fetcher` gets them
-and proves they are the right ones. This class sends no HTTP requests of its
-own and performs no verification of its own; if it did, the digest guarantee
-would have two implementations and only one of them would be tested.
+It composes rather than implements: :class:`~molhub.registry.Registry` says where an
+artifact's bytes are, and :class:`~molhub.sources.fetcher.Fetcher` gets them
+under the transport contract, checking the manifest's digest when it records
+one. This class sends no HTTP requests of its own and performs no checking of
+its own; if it did, the transport contract would have two implementations and
+only one of them would be tested.
 """
 
 from __future__ import annotations
@@ -12,9 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from molhub.coordinate import Coordinate
-from molhub.index import Index, IndexSource
 from molhub.manifest import Manifest
-from molhub.registry import Fetcher
+from molhub.registry import Registry, RegistrySource
+from molhub.sources import Fetcher
 
 __all__ = ["Molhub"]
 
@@ -23,11 +24,12 @@ class Molhub:
     """Resolve, search, and fetch artifacts by coordinate.
 
     Args:
-        index: Where manifests come from. Accepts an :class:`Index`, an
-            :class:`IndexSource`, a directory path, or ``None`` to use
-            ``$MOLHUB_INDEX`` and then the bundled snapshot.
+        registry: Where manifests come from. Accepts an :class:`Registry`, an
+            :class:`RegistrySource`, a directory path, or ``None`` to use
+            ``$MOLHUB_REGISTRY`` and then the bundled snapshot.
         fetcher: How bytes are retrieved. Defaults to a :class:`Fetcher` with
-            the discovered drivers and the shared content-addressed cache.
+            the discovered drivers and the shared cache under ``$MOLHUB_HOME``,
+            which files each artifact by coordinate and role.
 
     Example::
 
@@ -38,17 +40,17 @@ class Molhub:
 
     def __init__(
         self,
-        index: Index | IndexSource | str | Path | None = None,
+        registry: Registry | RegistrySource | str | Path | None = None,
         *,
         fetcher: Fetcher | None = None,
     ) -> None:
-        self._index = index if isinstance(index, Index) else Index.load(index)
+        self._registry = registry if isinstance(registry, Registry) else Registry.load(registry)
         self._fetcher = fetcher or Fetcher()
 
     @property
-    def index(self) -> Index:
-        """The loaded catalogue."""
-        return self._index
+    def registry(self) -> Registry:
+        """The loaded registry."""
+        return self._registry
 
     def resolve(self, coordinate: str | Coordinate) -> Manifest:
         """Return the manifest for *coordinate* without downloading anything.
@@ -61,9 +63,9 @@ class Molhub:
 
         Raises:
             InvalidCoordinate: If the coordinate is malformed.
-            UnknownArtifact: If the index has no such coordinate.
+            UnknownArtifact: If the registry has no such coordinate.
         """
-        return self._index.get(coordinate)
+        return self._registry.get(coordinate)
 
     def fetch(
         self, coordinate: str | Coordinate, *, roles: list[str] | None = None
@@ -83,7 +85,7 @@ class Molhub:
             Mapping of role to the local path holding that file's bytes.
 
         Raises:
-            UnknownArtifact: If the index has no such coordinate.
+            UnknownArtifact: If the registry has no such coordinate.
             KeyError: If a requested role is not declared by the manifest.
             AllLocatorsFailed: If no locator for some file yielded a usable
                 transfer.
@@ -95,7 +97,7 @@ class Molhub:
             artifact = manifest.artifact(role)
             fetched[role] = self._fetcher.fetch(
                 artifact.locators,
-                f"{manifest.coordinate.canonical}/{role}",
+                f"{manifest.coordinate.cache_path()}/{role}",
                 digest=artifact.digest,
             )
         return fetched
@@ -108,10 +110,10 @@ class Molhub:
             query: Case-insensitive substring over coordinate, title,
                 description and declared targets.
         """
-        return self._index.search(kind=kind, query=query)
+        return self._registry.search(kind=kind, query=query)
 
     def __len__(self) -> int:
-        return len(self._index)
+        return len(self._registry)
 
     def __repr__(self) -> str:
-        return f"Molhub({len(self._index)} artifacts)"
+        return f"Molhub({len(self._registry)} artifacts)"

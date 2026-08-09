@@ -1,0 +1,11 @@
+# Broken: not YAML. The unquoted `: ` inside the title opens a mapping where a
+# scalar was expected — the most common way a real manifest fails to parse.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+title: Fixture: a colon in an unquoted scalar
+artifacts:
+  - role: main
+   filename: example.csv

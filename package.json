@@ -1,0 +1,41 @@
+{
+	"name": "molhub-workspace",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"workspaces": ["apps/*", "packages/*"],
+	"scripts": {
+		"contract:sync": "tsx scripts/sync-contract.ts",
+		"contract:check": "tsx scripts/sync-contract.ts --check",
+		"registry:validate": "npm run validate --workspace @molcrafts/molhub-registry-tools --",
+		"registry:build": "npm run registry:build --workspace @molcrafts/molhub-registry-tools --",
+		"registry:test": "npm run test --workspace @molcrafts/molhub-registry-tools",
+		"registry:layout": "tsx scripts/check-registry-layout.ts",
+		"registry:health": "tsx scripts/check-registry-health.ts",
+		"typescript:test": "npm run test --workspace @molcrafts/molhub",
+		"typescript:typecheck": "npm run typecheck --workspace @molcrafts/molhub",
+		"cli:parity": "tsx scripts/check-cli-parity.ts",
+		"cache:parity": "tsx scripts/check-cross-sdk-cache.ts",
+		"api:test": "npm run test --workspace @molcrafts/molhub-api",
+		"web:test": "npm run test --workspace @molcrafts/molhub-web",
+		"docs:snippets": "tsx scripts/check-docs-typescript.ts",
+		"docs:typedoc": "typedoc",
+		"docs:build": "uv run --group docs zensical build --strict && npm run docs:typedoc",
+		"docs:architecture": "tsx scripts/check-docs-architecture.ts",
+		"docs:check": "uv run pytest -q tests/test_docs_examples.py && npm run docs:snippets && npm run docs:architecture && npm run docs:build",
+		"package:audit": "uv run python scripts/check_package_contents.py",
+		"security:audit": "npm audit --omit=dev --audit-level=high",
+		"check": "npm run contract:check && npm run build --workspace @molcrafts/molhub && npm run lint --workspaces --if-present && npm run typecheck --workspaces --if-present && npm run test --workspaces --if-present && npm run cli:parity && npm run cache:parity"
+	},
+	"devDependencies": {
+		"ajv": "^8.20.0",
+		"js-yaml": "^4.1.0",
+		"typedoc": "^0.28.0",
+		"tsx": "^4.23.11",
+		"typescript": "^5.7.0"
+	},
+	"packageManager": "npm@11.17.0",
+	"engines": {
+		"node": "^22.0.0 || >=24.0.0"
+	}
+}

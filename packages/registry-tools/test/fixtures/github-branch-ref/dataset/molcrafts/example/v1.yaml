@@ -1,0 +1,20 @@
+# Broken: the GitHub raw locator names the branch `main` instead of a commit.
+#
+# It serves whatever was pushed last. Compare with artifacts/dataset/molcrafts/
+# 3bpa/v1.yaml, which pins 29e6d467… and differs from this by one word.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — GitHub raw locator pinned to a branch
+license: MIT
+doi: 10.1021/acs.jctc.1c00647
+
+artifacts:
+  - role: train_300K
+    filename: train_300K.xyz
+    size: 1504880
+    locators:
+      - https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/main/dataset_3BPA/train_300K.xyz

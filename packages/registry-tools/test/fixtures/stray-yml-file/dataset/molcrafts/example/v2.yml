@@ -1,0 +1,19 @@
+# Broken by its extension: clients glob `*.yaml` and nothing else, so this file
+# is not a dataset that loads slowly — it is a dataset that does not exist.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v2
+
+title: Fixture — a manifest saved with the wrong extension
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: example.csv
+    digest: md5:ce2c7b2a879450cbbfff4d7ccea648f9
+    size: 6024335
+    locators:
+      - zenodo://14980914/example.csv
