@@ -22,6 +22,7 @@ from molhub.dataset.protocol import (
 from molhub.dataset.qm9 import QM9Dataset
 from molhub.dataset.revmd17 import RevMD17Dataset
 from molhub.dataset.threebpa import ThreeBPADataset
+from molhub.dataset.zinc_typing import ZincTypingDataset
 
 __all__ = [
     "ArtifactHub",
@@ -35,6 +36,7 @@ __all__ = [
     "QM9Dataset",
     "RevMD17Dataset",
     "ThreeBPADataset",
+    "ZincTypingDataset",
     "Targets",
     "MetaCodec",
     "MolecularUnits",

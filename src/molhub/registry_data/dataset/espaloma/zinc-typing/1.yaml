@@ -1,0 +1,37 @@
+# Espaloma ZINC GAFF 1.81 atom-typing recovery set (Validation A packaging).
+#
+# Upstream blob rights to rehost may be unclear. This manifest pins the
+# package definition + provenance + retrieval recipe. Locators and digests
+# below are placeholders until an immutable upstream locator is confirmed;
+# molhub does not rehost multi-MB bytes when rights are unclear.
+#
+# Adapter code never embeds these locators — only COORDINATE.
+schema_version: 1
+kind: dataset
+namespace: espaloma
+name: zinc-typing
+version: "1"
+
+title: ZINC GAFF 1.81 atom types for Espaloma typing recovery
+description: >-
+  Molecule graphs with legacy GAFF 1.81 atom-type labels for chemical-perception
+  recovery (Espaloma Chem. Sci. 2022 Validation A). Published corpus size is
+  about 7529 ZINC molecules with a molecule-level 80:10:10 train/val/test split
+  (Espaloma-original). ~99.1% typing accuracy is a literature reference, not a
+  packaging hard gate. Payload layout: splits.json + mols/<id>/{atoms,bonds}.npz.
+license: unknown
+doi: 10.1039/D2SC02739A
+
+artifacts:
+  - role: main
+    filename: zinc-typing-main.zip
+    digest: md5:171e3da60080d2d0135225dd4b2004a3
+    size: 50
+    locators:
+      # Placeholder pin — replace when immutable upstream is known.
+      - zenodo://0000000/zinc-typing-main.zip
+
+targets:
+  graph_level: []
+  atom_level:
+    - atom_type
