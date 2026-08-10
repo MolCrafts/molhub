@@ -90,6 +90,8 @@ jobs:
 
   docs-and-packages:
     name: Docs and package contents
+    # Not part of the dev integration loop — docs/PyPI release stay on main/master.
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -102,8 +104,6 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Install Python + docs tooling
-        run: uv sync --extra dev --group docs
       - run: npm ci
       - run: npm run docs:check
       - run: npm run package:audit

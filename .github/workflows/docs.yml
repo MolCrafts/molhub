@@ -16,7 +16,7 @@ on:
       - "packages/typescript/src/**"
       - ".github/workflows/docs.yml"
   push:
-    branches: [main, master, dev]
+    branches: [main, master]
     paths:
       - "docs/**"
       - "src/**"
@@ -50,8 +50,6 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: Install Python + docs tooling
-        run: uv sync --extra dev --group docs
       - run: npm ci
       - run: npm run docs:check
       - uses: actions/upload-artifact@v4
@@ -71,21 +69,15 @@ jobs:
         with:
           name: molhub-docs-${{ github.sha }}
           path: site
-      - name: Detect Docs Pages configuration
-        id: cloudflare
+      - name: Require the Docs Pages project
         env:
           PROJECT: ${{ vars.CLOUDFLARE_DOCS_PROJECT }}
-          API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -z "$PROJECT" ] || [ -z "$API_TOKEN" ] || [ -z "$ACCOUNT_ID" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Docs Pages publish skipped — set CLOUDFLARE_DOCS_PROJECT, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID when ready."
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$PROJECT" ]; then
+            echo "::error::CLOUDFLARE_DOCS_PROJECT is unset."
+            exit 1
           fi
       - name: Publish immutable docs build
-        if: steps.cloudflare.outputs.configured == 'true'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
