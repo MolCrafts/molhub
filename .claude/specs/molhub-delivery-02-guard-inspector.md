@@ -1,6 +1,6 @@
 ---
 title: Inspector 生命周期与自动化交互证据
-status: approved
+status: code-complete
 created: 2026-08-09
 ---
 
@@ -24,7 +24,7 @@ Playwright route 使用硬编码的小型 ExtXYZ fixture，并可延迟指定 ro
 
 instrumentation 包装原始 `customElements.define`。当 incoming name 为 `molvis-viewer` 时，在调用原始 `define` 之前原地 patch incoming constructor prototype 的 lifecycle methods；不得替换 constructor、不得调用第二次 `define`、不得复制 MolVis element。
 
-捕获 `molvis:ready` 时保存真实 `app`、`app.scene` 与 `scene.getEngine()` 引用。对应 element disconnect 后，测试直接断言 `app.isRunning === false`、`scene.isDisposed() === true` 和 `engine.isDisposed === true`。这些引用必须来自 ready event，不能在 dispose 后重新查询 DOM 或以 element 已移除来替代 runtime 断言。
+捕获 `molvis:ready` 时保存真实 `app`、`app.scene` 与 `scene.getEngine()` 引用。对应 element disconnect 后，测试直接断言 `app.isRunning === false`、Babylon Scene 的 boolean getter `scene.isDisposed === true` 和 `engine.isDisposed === true`。这些引用必须来自 ready event，不能在 dispose 后重新查询 DOM 或以 element 已移除来替代 runtime 断言。
 
 ### Worker and Blob ownership
 
@@ -42,7 +42,7 @@ instrumentation 包装原始 `customElements.define`。当 incoming name 为 `mo
 
 ### Keyboard and mobile evidence
 
-Keyboard-only 场景不得调用 locator `.focus()` 或鼠标 API。它使用真实 `Tab` / `Shift+Tab` 导航，以 arrows 操作 select 和 slider，以 `Enter` / `Space` 激活 button/link。每个目标控件必须匹配 `:focus-visible`，且 computed `outline` 或 `box-shadow` 至少一个为非空、非 `none` 的可见值。场景覆盖 artifact role、trajectory frame、Copy link 和 artifact-detail return。
+Keyboard-only 场景不得调用 locator `.focus()` 或鼠标 API。它使用真实 `Tab` / `Shift+Tab` 导航；select 用 typeahead（Chromium 关闭态下 ArrowDown 无效），slider 用 arrows；button/link 用 `Enter` / `Space` 激活。每个目标控件必须匹配 `:focus-visible`，且 computed `outline` 或 `box-shadow` 至少一个为非空、非 `none` 的可见值。场景覆盖 artifact role、trajectory frame、Copy link 和 artifact-detail return。
 
 Mobile-light 场景使用 `390 × 844` viewport 与明确 light color scheme，断言关键区域可见且无水平溢出，并附加 screenshot artifact。自动截图不代表 AC-012 的人工视觉审查通过。
 
@@ -71,13 +71,13 @@ npm run test:e2e --workspace @molcrafts/molhub-web -- --grep ^Inspector lifecycl
 
 ## Tasks
 
-- [ ] Add pre-document fetch-signal, incoming MolVis prototype, ready-reference, Worker, and trajectory-Blob instrumentation to `apps/web/e2e/inspector.spec.ts`
-- [ ] Add the named `Inspector lifecycle aborts stale work and disposes resources` Playwright test to `apps/web/e2e/inspector.spec.ts` with delayed fetch, rapid role switching, direct abort and runtime-disposal assertions
-- [ ] Add real-keyboard focus traversal and `390 × 844` mobile-light screenshot scenarios to `apps/web/e2e/inspector.spec.ts`, retaining manual AC-012 as pending
-- [ ] Add regression example `regressions/molhub-delivery-02-guard-inspector.mjs` as a thin deterministic runner for only the named Playwright lifecycle test
-- [ ] Execute `node regressions/molhub-delivery-02-guard-inspector.mjs`
-- [ ] Verify the complete Inspector browser suite with `npm run build --workspace @molcrafts/molhub-web` and `npm run test:e2e --workspace @molcrafts/molhub-web -- inspector.spec.ts`
-- [ ] Run full check + test suite
+- [x] Add pre-document fetch-signal, incoming MolVis prototype, ready-reference, Worker, and trajectory-Blob instrumentation to `apps/web/e2e/inspector.spec.ts`
+- [x] Add the named `Inspector lifecycle aborts stale work and disposes resources` Playwright test to `apps/web/e2e/inspector.spec.ts` with delayed fetch, rapid role switching, direct abort and runtime-disposal assertions
+- [x] Add real-keyboard focus traversal and `390 × 844` mobile-light screenshot scenarios to `apps/web/e2e/inspector.spec.ts`, retaining manual AC-012 as pending
+- [x] Add regression example `regressions/molhub-delivery-02-guard-inspector.mjs` as a thin deterministic runner for only the named Playwright lifecycle test
+- [x] Execute `node regressions/molhub-delivery-02-guard-inspector.mjs`
+- [x] Verify the complete Inspector browser suite with `npm run build --workspace @molcrafts/molhub-web` and `npm run test:e2e --workspace @molcrafts/molhub-web -- inspector.spec.ts`
+- [x] Run full check + test suite
 
 ## Testing strategy
 

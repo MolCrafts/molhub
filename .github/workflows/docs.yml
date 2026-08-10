@@ -16,7 +16,7 @@ on:
       - "packages/typescript/src/**"
       - ".github/workflows/docs.yml"
   push:
-    branches: [main, master]
+    branches: [main, master, dev]
     paths:
       - "docs/**"
       - "src/**"

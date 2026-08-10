@@ -2,7 +2,18 @@ name: Web
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main, master, dev]
+    paths:
+      - "apps/web/**"
+      - "packages/typescript/**"
+      - "packages/registry-tools/**"
+      - "spec/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/assets/moko.svg"
+      - ".github/workflows/web.yml"
+  push:
+    branches: [dev]
     paths:
       - "apps/web/**"
       - "packages/typescript/**"

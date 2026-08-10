@@ -23,7 +23,7 @@ criteria:
     type: runtime
     pass_when: |
       References captured from molvis:ready for every disconnected old viewer
-      satisfy app.isRunning === false, scene.isDisposed() === true, and
+      satisfy app.isRunning === false, scene.isDisposed === true, and
       scene.getEngine().isDisposed === true.
     status: pending
   - id: ac-004

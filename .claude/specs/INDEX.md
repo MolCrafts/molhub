@@ -37,7 +37,7 @@
 
 | Position | Spec | Status | Outcome |
 |---:|---|---|---|
-| 02 | [Inspector 生命周期证据](molhub-delivery-02-guard-inspector.md) | approved | 自动证明 role/route 取消与 dispose；扩充 keyboard/mobile-light 证据 |
+| 02 | [Inspector 生命周期证据](molhub-delivery-02-guard-inspector.md) | code-complete | 自动证明 role/route 取消与 dispose；扩充 keyboard/mobile-light 证据 |
 
 ## Feature coverage
 
