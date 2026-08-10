@@ -40,6 +40,12 @@ class TestTargetSchema:
         assert "energy" in ts.graph_level
         assert "forces" in ts.atom_level
 
+    def test_semantic_families_default_empty(self):
+        ts = TargetSchema()
+        assert ts.chemical_perception == frozenset()
+        assert ts.mm == frozenset()
+        assert ts.qm == frozenset()
+
     def test_custom(self):
         ts = TargetSchema(
             graph_level=frozenset({"energy", "homo"}),
@@ -48,10 +54,25 @@ class TestTargetSchema:
         assert ts.graph_level == frozenset({"energy", "homo"})
         assert ts.atom_level == frozenset({"forces", "charges"})
 
+    def test_named_semantic_families(self):
+        ts = TargetSchema(
+            chemical_perception=frozenset({"atom_type"}),
+            mm=frozenset({"energy", "forces"}),
+            qm=frozenset({"U0"}),
+        )
+        assert ts.chemical_perception == frozenset({"atom_type"})
+        assert ts.mm == frozenset({"energy", "forces"})
+        assert ts.qm == frozenset({"U0"})
+
     def test_frozen(self):
         ts = TargetSchema(graph_level=frozenset({"energy"}))
         with pytest.raises(Exception):
             ts.graph_level = frozenset({"other"})  # ty: ignore[invalid-assignment]
+
+    def test_semantic_families_frozen(self):
+        ts = TargetSchema(mm=frozenset({"energy"}))
+        with pytest.raises(Exception):
+            ts.mm = frozenset({"other"})  # ty: ignore[invalid-assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +119,16 @@ class TestSubsetDataset:
         base = InMemoryDataset([_make_frame([1])], name="base")
         sub = SubsetDataset(base, [0])
         assert ":subset=" in sub.source_id
+        # unnamed keeps the 12-hex digest form
+        digest = sub.source_id.rsplit("=", 1)[-1]
+        assert len(digest) == 12
+        assert all(c in "0123456789abcdef" for c in digest)
+
+    def test_named_source_id_uses_split_qualifier(self):
+        base = InMemoryDataset([_make_frame([1])], name="base")
+        sub = SubsetDataset(base, [0], name="molhub-random-molecule:train")
+        assert sub.source_id == f"{base.source_id}#split=molhub-random-molecule:train"
+        assert ":subset=" not in sub.source_id
 
     def test_is_map_dataset(self):
         base = InMemoryDataset([_make_frame([1])])

@@ -3,6 +3,14 @@
 from molhub.dataset.csv_dataset import CSVDataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.meta import MetaCodec, Targets
+from molhub.dataset.molecular import (
+    CONFORMER_ID,
+    KNOWN_SPLIT_SCHEMES,
+    MOLECULE_ID,
+    MolecularFrame,
+    MolecularUnits,
+    MoleculeSplit,
+)
 from molhub.dataset.protocol import (
     InMemoryDataset,
     IterableDataset,
@@ -29,4 +37,10 @@ __all__ = [
     "ThreeBPADataset",
     "Targets",
     "MetaCodec",
+    "MolecularUnits",
+    "MolecularFrame",
+    "MoleculeSplit",
+    "KNOWN_SPLIT_SCHEMES",
+    "MOLECULE_ID",
+    "CONFORMER_ID",
 ]
