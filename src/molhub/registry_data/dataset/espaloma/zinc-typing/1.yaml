@@ -1,35 +1,34 @@
-# Espaloma ZINC GAFF 1.81 atom-typing recovery set (Validation A packaging).
+# ZINC subset for GAFF atom-typing recovery (Validation A).
 #
-# Upstream blob rights to rehost may be unclear. This manifest pins the
-# package definition + provenance + retrieval recipe. Locators and digests
-# below are placeholders until an immutable upstream locator is confirmed;
-# molhub does not rehost multi-MB bytes when rights are unclear.
-#
-# Adapter code never embeds these locators — only COORDINATE.
+# Upstream: parm@Frosst ZINC distribution (ccl.net). Espaloma assigns GAFF 1.81
+# types at runtime via antechamber/OpenMM ForceFields; this package ships the
+# molecular structures (zinc.sdf) with stable molecule identity and covalent
+# graphs. GAFF string labels may be attached offline (see convert script) —
+# unit tests use synthetic fixtures with hard-coded labels.
 schema_version: 1
 kind: dataset
 namespace: espaloma
 name: zinc-typing
 version: "1"
 
-title: ZINC GAFF 1.81 atom types for Espaloma typing recovery
+title: ZINC (parm@Frosst) structures for GAFF typing recovery
 description: >-
-  Molecule graphs with legacy GAFF 1.81 atom-type labels for chemical-perception
-  recovery (Espaloma Chem. Sci. 2022 Validation A). Published corpus size is
-  about 7529 ZINC molecules with a molecule-level 80:10:10 train/val/test split
-  (Espaloma-original). ~99.1% typing accuracy is a literature reference, not a
-  packaging hard gate. Payload layout: splits.json + mols/<id>/{atoms,bonds}.npz.
+  ~7535 ZINC molecules from the parm@Frosst distribution used by Espaloma's
+  atom-typing recovery experiment (~7529 after cleaning in some reports).
+  Archive: parm_at_Frosst.tgz (zinc.sdf + type tables). Molecule-level 80:10:10
+  split seed 2666 for espaloma-original. GAFF 1.81 labels are not in the SDF;
+  assign offline with AmberTools/OpenBabel or consume pre-typed fixtures.
 license: unknown
 doi: 10.1039/D2SC02739A
 
 artifacts:
   - role: main
-    filename: zinc-typing-main.zip
-    digest: md5:171e3da60080d2d0135225dd4b2004a3
-    size: 50
+    filename: parm_at_Frosst.tgz
+    digest: sha256:e1c4a042c358dbe1f462139568c3c91b9d9dc471ca674fad06814ec322be4c9f
+    size: 4165650
     locators:
-      # Placeholder pin — replace when immutable upstream is known.
-      - zenodo://0000000/zinc-typing-main.zip
+      - https://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
+      - http://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
 
 targets:
   graph_level: []

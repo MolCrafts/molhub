@@ -1,30 +1,35 @@
-# Espaloma PhAlkEthOH MM-small toy set (MM parameter fitting / Validation B).
+# Espaloma PhAlkEthOH MM-small (Validation B / MM energy reproduction).
 #
-# Synthetic offline fixtures cover unit tests. Locators below are placeholders
-# until an immutable upstream archive is confirmed; molhub does not rehost
-# large bytes when rights are unclear. Adapter code holds only COORDINATE.
+# Upstream ships DGL heterographs (Espaloma GraphDataset layout). MolHub consumers
+# use the normalized Frame tree produced by
+# ``scripts/convert_espaloma_phalkethoh_mm.py`` (requires dgl once at convert time).
+# Adapter :class:`~molhub.dataset.PhalkethohMMDataset` reads the normalized tree
+# (splits.json + mols/<id>/{atoms,confs}.npz); unit tests use synthetic fixtures.
 schema_version: 1
 kind: dataset
 namespace: espaloma
 name: phalkethoh-mm-small
 version: "1"
 
-title: PhAlkEthOH MM-small multi-conformer energies (Espaloma toy)
+title: PhAlkEthOH MM-small multi-conformer MM energies (Espaloma toy)
 description: >-
-  C/H/O phenyl–alkane–ether–alcohol molecules with ~100 conformers each and
-  reference MM energies (kcal/mol) for Espaloma-style Class-I MM fitting.
-  Molecule-level 80:10:10 split. Coords in Å; forces optional in kcal/(mol·Å).
-  Payload: splits.json + mols/<id>/{atoms.npz,confs.npz,legacy_params.json?}.
-license: unknown
+  Espaloma subsampled PhAlkEthOH MM-fitting set: 173 C/H/O molecules with 100
+  conformers each (17 300 frames). Reference MM energies stored as graph-level
+  u_ref in Hartree in the native DGL payload; after conversion they are
+  mm_energy in kcal/mol (×627.5094740631). Coordinates in Å. Molecule-level
+  80:10:10 split with Espaloma notebook seed 2666 (espaloma-original).
+  Official bytes: choderalab/espaloma release 0.2.1 asset small_phalkethoh_mm.zip.
+  Convert once: python scripts/convert_espaloma_phalkethoh_mm.py --src <zip> --out <dir>.
+license: MIT
 doi: 10.1039/D2SC02739A
 
 artifacts:
   - role: main
-    filename: phalkethoh-mm-small.zip
-    digest: md5:5a77084dd75f9be781297f923e521ae0
-    size: 46
+    filename: small_phalkethoh_mm.zip
+    digest: sha256:61371668970c9f7a55911bb82f5b0f1a5fbecb4b64aa080b402733eee3429a9a
+    size: 280619984
     locators:
-      - zenodo://0000001/phalkethoh-mm-small.zip
+      - https://github.com/choderalab/espaloma/releases/download/0.2.1/small_phalkethoh_mm.zip
 
 targets:
   graph_level:
