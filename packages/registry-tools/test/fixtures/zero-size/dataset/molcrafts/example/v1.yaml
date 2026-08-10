@@ -1,0 +1,23 @@
+# Broken: `size: 0` passes the digest-or-size rule while checking nothing.
+#
+# Zero is not a smaller artifact, it is the shape of a failed transfer. molhub's
+# own history is a Figshare endpoint answering 202 with an empty body, cached as
+# a valid exclusion list. Since a size may be an artifact's only cross-check,
+# accepting `size: 0` would let that exact empty download verify as correct --
+# the wire failure reintroduced one level up, in the registry.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — artifact declaring a zero byte count
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: example.csv
+    size: 0
+    locators:
+      - zenodo://14980914/example.csv

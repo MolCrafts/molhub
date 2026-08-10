@@ -1,0 +1,41 @@
+description: Coordinate parsing and normalization
+cases:
+  - name: full coordinate remains canonical
+    input: dataset:molcrafts/qm9@v2
+    expect:
+      kind: dataset
+      namespace: molcrafts
+      name: qm9
+      version: v2
+      canonical: dataset:molcrafts/qm9@v2
+      manifest_path: dataset/molcrafts/qm9/v2.yaml
+      cache_path: dataset/molcrafts/qm9@v2
+  - name: shorthand expands both defaults
+    input: qm9@v2
+    expect:
+      kind: dataset
+      namespace: molcrafts
+      name: qm9
+      version: v2
+      canonical: dataset:molcrafts/qm9@v2
+      manifest_path: dataset/molcrafts/qm9/v2.yaml
+      cache_path: dataset/molcrafts/qm9@v2
+  - name: explicit namespace keeps the default kind
+    input: acme/qm9@2026.08
+    expect:
+      kind: dataset
+      namespace: acme
+      name: qm9
+      version: "2026.08"
+      canonical: dataset:acme/qm9@2026.08
+      manifest_path: dataset/acme/qm9/2026.08.yaml
+      cache_path: dataset/acme/qm9@2026.08
+  - name: missing version is rejected
+    input: dataset:molcrafts/qm9
+    expect: { error: invalid_coordinate }
+  - name: unknown kind is rejected
+    input: notebook:molcrafts/qm9@v2
+    expect: { error: invalid_coordinate }
+  - name: uppercase namespace is rejected
+    input: dataset:MolCrafts/qm9@v2
+    expect: { error: invalid_coordinate }

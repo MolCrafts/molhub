@@ -1,0 +1,20 @@
+# Broken: the hf:// locator pins `@main`, which is a branch, not a commit.
+#
+# Spelling the branch out is no better than omitting it; a branch moves.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — HuggingFace locator pinned to a branch name
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: data.parquet
+    digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    size: 1024
+    locators:
+      - hf://molcrafts/example-dataset@main/data.parquet

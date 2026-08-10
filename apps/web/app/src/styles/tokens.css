@@ -1,0 +1,145 @@
+/*
+ * MolCrafts Web tokens.
+ *
+ * Brand anchors and surface values intentionally match molcrafts-zensical-theme.
+ * MolHub adds only artifact-kind colours; it does not invent a second shell.
+ */
+
+:root {
+  /* Shared MolCrafts anchors */
+  --molcrafts-forest: #18432b;
+  --molcrafts-forest-light: #2a6744;
+  --molcrafts-forest-dark: #0e2b1b;
+  --molcrafts-cream: #fbf6e4;
+  --molcrafts-cream-soft: #fffaf0;
+  --molcrafts-sand: #f2da9d;
+  --molcrafts-sand-strong: #c8841d;
+  --molcrafts-ink: #14271d;
+  --molcrafts-muted: #657268;
+  --molcrafts-slate: #101811;
+  --molcrafts-forest-mid: #2f7d50;
+  --molcrafts-forest-bright: #55a572;
+  --molcrafts-forest-soft: #8ecfa0;
+  --molcrafts-cyan-spark: #1fc0f1;
+  --molcrafts-cyan-spark-soft: #8ce4ff;
+
+  /* Compatibility references used by component tokens */
+  --mc-forest-950: var(--molcrafts-forest-dark);
+  --mc-forest-900: var(--molcrafts-forest);
+  --mc-forest-800: var(--molcrafts-forest);
+  --mc-forest-700: var(--molcrafts-forest-light);
+  --mc-forest-600: var(--molcrafts-forest-mid);
+  --mc-forest-500: var(--molcrafts-forest-bright);
+  --mc-forest-300: var(--molcrafts-forest-soft);
+  --mc-forest-100: #e7f2e9;
+  --mc-lime-400: var(--molcrafts-sand);
+  --mc-lime-200: rgba(242, 218, 157, 0.5);
+  --mc-cyan-500: var(--molcrafts-cyan-spark);
+  --mc-cyan-100: #dcf6fb;
+  --mc-sand-500: var(--molcrafts-sand-strong);
+  --mc-sand-100: rgba(242, 218, 157, 0.42);
+  --mc-violet-500: #7c3aed;
+  --mc-violet-100: #eee8fb;
+  --mc-neutral-950: var(--molcrafts-ink);
+  --mc-neutral-800: #264136;
+  --mc-neutral-600: var(--molcrafts-muted);
+  --mc-neutral-500: #7b857c;
+  --mc-neutral-300: rgba(24, 67, 43, 0.22);
+  --mc-neutral-200: rgba(24, 67, 43, 0.14);
+  --mc-neutral-100: #f3e9cb;
+  --mc-neutral-50: var(--molcrafts-cream);
+  --mc-white: #fffdf6;
+
+  /* The docs theme uses Inter for both headings and body copy. */
+  --mc-font-display: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --mc-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --mc-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Shared compact geometry */
+  --mc-radius-sm: 0.28rem;
+  --mc-radius-md: 0.4rem;
+  --mc-radius-lg: 0.55rem;
+  --mc-radius-xl: 0.55rem;
+  --mc-shadow-sm: 0 0.08rem 0.28rem rgba(24, 67, 43, 0.05);
+  --mc-shadow-md: 0 0.35rem 0.95rem rgba(24, 67, 43, 0.08);
+  /* Alias product motion names onto constitution slots (used by shared UI). */
+  --mc-motion-fast: var(--motion-fast, 120ms);
+  --mc-motion-base: var(--motion-base, 150ms);
+  --mc-motion-slow: var(--motion-slow, 180ms);
+  --mc-ease: var(--motion-ease, cubic-bezier(0.2, 0, 0, 1));
+  --ease-standard: var(--mc-ease);
+
+  /* Light paper */
+  --mc-canvas: var(--molcrafts-cream);
+  --mc-canvas-tinted: #f7efd6;
+  --mc-surface: #fffdf6;
+  --mc-surface-muted: #f3e9cb;
+  --mc-surface-strong: var(--molcrafts-forest-dark);
+  --mc-text: var(--molcrafts-ink);
+  --mc-text-muted: var(--molcrafts-muted);
+  --mc-text-subtle: #7b857c;
+  --mc-text-inverse: var(--molcrafts-cream);
+  --mc-action-foreground: var(--molcrafts-cream);
+  --mc-border: rgba(24, 67, 43, 0.14);
+  --mc-border-strong: rgba(24, 67, 43, 0.22);
+  --mc-action: var(--molcrafts-forest);
+  --mc-action-hover: var(--molcrafts-forest-dark);
+  --mc-action-active: #091f13;
+  --mc-action-soft: rgba(24, 67, 43, 0.1);
+  --mc-action-line: rgba(24, 67, 43, 0.24);
+  --mc-focus: var(--molcrafts-sand-strong);
+  --mc-code-surface: #f3e9cb;
+  --mc-code-text: #264136;
+  --mc-warning: #a15c09;
+  --mc-warning-surface: rgba(242, 218, 157, 0.42);
+  --mc-danger: #a83c37;
+  --mc-danger-surface: #f7dfd9;
+
+  /* MolHub-only artifact vocabulary */
+  --molhub-signal: var(--molcrafts-sand);
+  --molhub-signal-soft: rgba(242, 218, 157, 0.5);
+  --molhub-dataset: var(--molcrafts-forest-mid);
+  --molhub-dataset-soft: #e7f2e9;
+  --molhub-model: #0b7285;
+  --molhub-model-soft: #dff2f5;
+  --molhub-plugin: #7c3aed;
+  --molhub-plugin-soft: #eee8fb;
+}
+
+.dark {
+  color-scheme: dark;
+  --mc-canvas: var(--molcrafts-slate);
+  --mc-canvas-tinted: #142117;
+  --mc-surface: #141c15;
+  --mc-surface-muted: #17271d;
+  --mc-surface-strong: #09170e;
+  --mc-text: #ecf2e8;
+  --mc-text-muted: rgba(236, 242, 232, 0.68);
+  --mc-text-subtle: rgba(236, 242, 232, 0.46);
+  --mc-text-inverse: var(--molcrafts-cream);
+  --mc-action-foreground: var(--molcrafts-forest-dark);
+  --mc-border: rgba(236, 242, 232, 0.14);
+  --mc-border-strong: rgba(236, 242, 232, 0.2);
+  --mc-action: var(--molcrafts-sand);
+  --mc-action-hover: #f6e4b7;
+  --mc-action-active: #fff0cb;
+  --mc-action-soft: rgba(242, 218, 157, 0.14);
+  --mc-action-line: rgba(242, 218, 157, 0.28);
+  --mc-focus: var(--molcrafts-sand);
+  --mc-code-surface: #14251a;
+  --mc-code-text: #d8e2d8;
+  --mc-warning: #f2c27c;
+  --mc-warning-surface: #3a2b18;
+  --mc-danger: #f08a84;
+  --mc-danger-surface: #402321;
+  --molhub-signal: var(--molcrafts-sand);
+  --molhub-signal-soft: rgba(242, 218, 157, 0.14);
+  --molhub-dataset: var(--molcrafts-forest-soft);
+  --molhub-dataset-soft: #203c29;
+  --molhub-model: #8bd0e8;
+  --molhub-model-soft: #173640;
+  --molhub-plugin: #c4b5fd;
+  --molhub-plugin-soft: #30294a;
+  --mc-shadow-sm: 0 0.08rem 0.28rem rgba(0, 0, 0, 0.22);
+  --mc-shadow-md: 0 0.4rem 1.05rem rgba(0, 0, 0, 0.28);
+}

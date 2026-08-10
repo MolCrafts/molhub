@@ -1,4 +1,4 @@
-"""revMD17 DataSource: revised MD17 molecular dynamics trajectories.
+"""revMD17 data source: MD17 trajectories recomputed at PBE/def2-SVP.
 
 Reference:
     Christensen & von Lilienfeld, "On the role of gradients for machine
@@ -7,25 +7,34 @@ Reference:
 
 Usage::
 
-    from molhub.dataset import RevMD17Source
+    from molhub.dataset import RevMD17Dataset
 
-    source = RevMD17Source(data_dir, molecule="aspirin")
-    frame = source[0]   # molpy Frame with atoms block + energy in metadata
+    source = RevMD17Dataset(data_dir, molecule="aspirin")
+    frame = source[0]   # molpy Frame with atoms block + energy in frame.meta
 """
 
 from __future__ import annotations
 
-import ssl
 from pathlib import Path
 
 import numpy as np
-from molpy.core.frame import Block, Frame
+from molpy import Block, Frame
 
+from molhub.dataset.hub import ArtifactHub
+from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
+from molhub.molhub import Molhub
 
-ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
+COORDINATE = "dataset:molcrafts/revmd17@v4"
+"""Where revMD17 lives in the registry. Its manifest carries the locators and the
+digests; this module holds no upstream URL of its own.
 
-# Canonical 10 molecules of revMD17 and their filenames on the mirror.
+Upstream publishes each molecule as its own downloadable file, so the manifest
+declares one role per molecule and a source fetches only the one it needs —
+about 150 MB rather than the 1 GB archive."""
+
+# Canonical 10 molecules of revMD17: the manifest role that serves each, and
+# the filename upstream gives it (also the name expected in *root* offline).
 _MOLECULES: dict[str, str] = {
     "aspirin": "rmd17_aspirin.npz",
     "azobenzene": "rmd17_azobenzene.npz",
@@ -47,22 +56,30 @@ _ELEMENT_SYMBOLS: dict[int, str] = {
 }
 
 
-class RevMD17Source:
+class RevMD17Dataset:
     """Map-style dataset for the revised MD17 trajectories.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.metadata``.
+    and ``energy`` in ``frame.meta`` (read it with
+    :class:`molhub.dataset.Targets`).
 
-    Energies are in kcal/mol and forces in kcal/(mol·Å) as distributed.
+    Coordinates are in ångström, energies in kcal/mol and forces in
+    kcal/(mol·Å), as distributed.
 
     Args:
-        root: Directory for the downloaded NPZ file.
+        root: Directory holding a pre-downloaded NPZ file. Used only when
+            *download* is ``False``; fetched files land in the shared cache.
         molecule: One of the 10 revMD17 molecule names (e.g. ``"aspirin"``).
-        download: Download the file if it does not exist.
-    """
+        download: Fetch this molecule's file through the registry. Set to
+            ``False`` in offline / test environments.
+        hub: Anything satisfying :class:`~molhub.dataset.hub.ArtifactHub`.
+            Defaults to a freshly constructed :class:`~molhub.molhub.Molhub`.
 
-    BASE_URL = "https://figshare.com/ndownloader/files/23950376"
+    Class attributes:
+        TARGET_SCHEMA: :class:`TargetSchema` naming ``energy`` as graph-level
+            and ``forces`` as atom-level.
+    """
 
     TARGET_SCHEMA: TargetSchema = TargetSchema(
         graph_level=frozenset({"energy"}),
@@ -74,6 +91,8 @@ class RevMD17Source:
         root: str | Path,
         molecule: str = "aspirin",
         download: bool = True,
+        *,
+        hub: ArtifactHub | None = None,
     ) -> None:
         if molecule not in _MOLECULES:
             raise ValueError(
@@ -82,17 +101,7 @@ class RevMD17Source:
         self.root = Path(root)
         self.molecule = molecule
         self.filename = _MOLECULES[molecule]
-        self.filepath = self.root / self.filename
-        self.root.mkdir(parents=True, exist_ok=True)
-
-        if download and not self.filepath.exists():
-            raise FileNotFoundError(
-                f"revMD17 file not found at {self.filepath}. "
-                f"Download the archive from {self.BASE_URL} and extract "
-                f"{self.filename} into {self.root}."
-            )
-        if not self.filepath.exists():
-            raise FileNotFoundError(f"revMD17 file missing: {self.filepath}")
+        self.filepath = self._locate(download, hub)
 
         data = np.load(self.filepath)
         for key in ("nuclear_charges", "coords", "energies", "forces"):
@@ -105,18 +114,46 @@ class RevMD17Source:
         self._energies = data["energies"].reshape(-1)  # (n_frames,)
         self._forces = data["forces"]  # (n_frames, n_atoms, 3)
 
-        symbols = np.array(
+        self._symbols = np.array(
             [_ELEMENT_SYMBOLS.get(int(z), "?") for z in self._charges],
             dtype="U3",
         )
 
-        self._symbols = symbols
-        self._z = self._charges
+    def _locate(self, download: bool, hub: ArtifactHub | None) -> Path:
+        """Return the local path holding this molecule's NPZ.
+
+        With *download*, the file comes from the registry: resolved by coordinate,
+        transferred, and checked against the md5 Figshare publishes before it
+        is usable. Without it, it must already sit in ``root`` under the name
+        upstream gives it.
+
+        Raises:
+            FileNotFoundError: In offline mode, if the file is missing or empty.
+        """
+        if download:
+            return (hub or Molhub()).fetch(COORDINATE, roles=[self.molecule])[self.molecule]
+
+        path = self.root / self.filename
+        # A zero-byte file counts as absent: that is what an interrupted
+        # transfer leaves behind, and treating it as present makes the failure
+        # permanent.
+        if not (path.exists() and path.stat().st_size > 0):
+            raise FileNotFoundError(
+                f"revMD17 file not found at {path}. Set download=True to fetch "
+                f"{COORDINATE} from the registry, or place the file there first."
+            )
+        return path
 
     @property
     def source_id(self) -> str:
-        size = self.filepath.stat().st_size
-        return f"revmd17:{self.molecule}:size={size}:n={len(self)}"
+        """A cache key for this exact view of the dataset.
+
+        The coordinate names the whole dataset; a source reads one molecule of
+        it, so the name is the coordinate plus a qualifier after a ``#``. That
+        separator is deliberately not coordinate syntax — the result names a
+        view, not an artifact, and should not pretend otherwise.
+        """
+        return f"{COORDINATE}#molecule={self.molecule}"
 
     def __len__(self) -> int:
         return int(self._coords.shape[0])
@@ -137,5 +174,5 @@ class RevMD17Source:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.metadata["energy"] = float(self._energies[idx])
+        Targets(frame).write({"energy": float(self._energies[idx])})
         return frame

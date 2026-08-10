@@ -1,0 +1,30 @@
+{
+  "name": "@molcrafts/molhub-registry-tools",
+  "version": "0.1.0",
+  "description": "Validation and deterministic snapshot tooling for MolHub registry databases",
+  "license": "BSD-3-Clause",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "validate": "tsx src/validate.ts",
+    "registry:build": "tsx src/build-registry.ts",
+    "test": "tsx src/check-fixtures.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src test"
+  },
+  "dependencies": {
+    "@molcrafts/molhub": "0.1.0",
+    "ajv": "^8.20.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.11",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,33 @@
+description: Ordered locator fallback and cache reuse
+cases:
+  - name: first successful locator wins
+    locators: [mock://a, mock://b]
+    responses:
+      mock://a: { status: 200, body_utf8: good }
+      mock://b: { status: 200, body_utf8: unused }
+    expect: { body_utf8: good, network_calls: 1, files_written: 1 }
+  - name: bad status falls through
+    locators: [mock://a, mock://b]
+    responses:
+      mock://a: { status: 202, body_utf8: "" }
+      mock://b: { status: 200, body_utf8: good }
+    expect: { body_utf8: good, network_calls: 2, files_written: 1 }
+  - name: digest mismatch falls through
+    locators: [mock://a, mock://b]
+    digest: sha256:770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c
+    responses:
+      mock://a: { status: 200, body_utf8: wrong }
+      mock://b: { status: 200, body_utf8: good }
+    expect: { body_utf8: good, network_calls: 2, files_written: 1 }
+  - name: every failure is reported without a final file
+    locators: [mock://a, mock://b]
+    responses:
+      mock://a: { status: 404, body_utf8: missing }
+      mock://b: { status: 503, body_utf8: unavailable }
+    expect: { error: all_locators_failed, network_calls: 2, files_written: 0 }
+  - name: cache hit performs no network call
+    locators: [mock://a]
+    cached_body_utf8: cached
+    responses:
+      mock://a: { status: 200, body_utf8: unused }
+    expect: { body_utf8: cached, network_calls: 0, files_written: 1 }

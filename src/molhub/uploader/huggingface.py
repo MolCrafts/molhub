@@ -1,23 +1,17 @@
-"""Upload files and datasets to HuggingFace Hub.
+"""Compatibility shim for the pre-source HuggingFace uploader.
 
-Uses the ``huggingface_hub`` library.  Install with
-``pip install molhub[huggingface]`` or ``pip install huggingface_hub``.
+The implementation now lives in
+:class:`molhub.sources.drivers.huggingface.HuggingFaceSource`, where
+uploading is the write half of the same driver that resolves and fetches. This
+class stays so existing callers keep working; prefer the driver directly::
 
-Usage::
+    from molhub.sources import Drivers, Publication
 
-    from molhub.uploader import HuggingFaceUploader
+    hub = Drivers.discover().for_scheme("hf")
+    locator = hub.publish([Path("data.csv")], "my-org/my-dataset",
+                          Publication(title="…"))
 
-    uploader = HuggingFaceUploader(token="hf_...")
-    uploader.upload_file(
-        local_path="data/qm9.tar.bz2",
-        repo_id="my-org/my-dataset",
-        path_in_repo="raw/qm9.tar.bz2",
-    )
-    uploader.upload_folder(
-        local_dir="data/processed/",
-        repo_id="my-org/my-dataset",
-        path_in_repo="processed/",
-    )
+Scheduled for removal two minor releases after 0.1.
 """
 
 from __future__ import annotations
@@ -25,24 +19,36 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from molhub.sources.drivers.huggingface import HuggingFaceSource
+
+__all__ = ["HuggingFaceUploader"]
+
+# The shim's public API is spelled in huggingface_hub's singular repo types;
+# the driver is constructed with molhub's plural form.
+_DRIVER_REPO_TYPE = {"dataset": "datasets", "model": "models", "space": "spaces"}
+
 
 class HuggingFaceUploader:
     """Upload files and folders to a HuggingFace Hub repository.
 
     Args:
-        token: HuggingFace API token (or set ``HF_TOKEN`` env var).
+        token: HuggingFace API token (or set ``HF_TOKEN``).
         endpoint: Optional custom endpoint URL.
     """
 
-    def __init__(
-        self,
-        token: str | None = None,
-        endpoint: str | None = None,
-    ) -> None:
+    def __init__(self, token: str | None = None, endpoint: str | None = None) -> None:
         self._token = token
         self._endpoint = endpoint
 
-    # -- public API ----------------------------------------------------------
+    def _source(self, repo_type: str) -> HuggingFaceSource:
+        """Build a driver for *repo_type* (``"dataset"``, ``"model"``, ``"space"``)."""
+        kwargs: dict[str, Any] = {
+            "repo_type": _DRIVER_REPO_TYPE[repo_type],
+            "token": self._token,
+        }
+        if self._endpoint:
+            kwargs["endpoint"] = self._endpoint
+        return HuggingFaceSource(**kwargs)
 
     def upload_file(
         self,
@@ -53,31 +59,22 @@ class HuggingFaceUploader:
         repo_type: str = "dataset",
         commit_message: str | None = None,
         **kwargs: Any,
-    ) -> str:
-        """Upload a single file to a HF Hub repository.
+    ) -> object:
+        """Upload a single file to a HuggingFace Hub repository.
 
         Args:
-            local_path: Path to the local file.
-            repo_id: HuggingFace repository id (e.g. ``"username/dataset-name"``).
+            local_path: Existing local file to upload.
+            repo_id: Destination repository id, ``"org/name"``.
             path_in_repo: Destination path inside the repository.
-            repo_type: One of ``"dataset"``, ``"model"``, ``"space"``.
+            repo_type: Hub repository type.
             commit_message: Optional commit message.
-            **kwargs: Forwarded to :func:`huggingface_hub.upload_file`.
+            **kwargs: Additional arguments forwarded to the Hub client.
 
         Returns:
-            The URL of the uploaded file.
+            The exact object returned by ``huggingface_hub.upload_file``.
         """
-        from huggingface_hub import upload_file as _hf_upload_file
-
-        msg = commit_message or f"Upload {Path(local_path).name}"
-        return _hf_upload_file(
-            path_or_fileobj=str(local_path),
-            path_in_repo=path_in_repo,
-            repo_id=repo_id,
-            repo_type=repo_type,
-            token=self._token,
-            commit_message=msg,
-            **kwargs,
+        return self._source(repo_type).upload_file(
+            local_path, repo_id, path_in_repo, commit_message=commit_message, **kwargs
         )
 
     def upload_folder(
@@ -89,31 +86,22 @@ class HuggingFaceUploader:
         repo_type: str = "dataset",
         commit_message: str | None = None,
         **kwargs: Any,
-    ) -> str:
-        """Upload an entire folder to a HF Hub repository.
+    ) -> object:
+        """Upload an entire folder to a HuggingFace Hub repository.
 
         Args:
-            local_dir: Path to the local folder.
-            repo_id: HuggingFace repository id.
-            path_in_repo: Destination path prefix inside the repository.
-            repo_type: One of ``"dataset"``, ``"model"``, ``"space"``.
+            local_dir: Existing local directory to upload.
+            repo_id: Destination repository id, ``"org/name"``.
+            path_in_repo: Destination path inside the repository.
+            repo_type: Hub repository type.
             commit_message: Optional commit message.
-            **kwargs: Forwarded to :func:`huggingface_hub.upload_folder`.
+            **kwargs: Additional arguments forwarded to the Hub client.
 
         Returns:
-            The URL of the uploaded folder.
+            The exact object returned by ``huggingface_hub.upload_folder``.
         """
-        from huggingface_hub import upload_folder as _hf_upload_folder
-
-        msg = commit_message or f"Upload folder {Path(local_dir).name}"
-        return _hf_upload_folder(
-            folder_path=str(local_dir),
-            path_in_repo=path_in_repo,
-            repo_id=repo_id,
-            repo_type=repo_type,
-            token=self._token,
-            commit_message=msg,
-            **kwargs,
+        return self._source(repo_type).upload_folder(
+            local_dir, repo_id, path_in_repo, commit_message=commit_message, **kwargs
         )
 
     def create_repo(
@@ -124,26 +112,8 @@ class HuggingFaceUploader:
         private: bool = False,
         exist_ok: bool = True,
     ) -> str:
-        """Create a new repository on HuggingFace Hub.
-
-        Args:
-            repo_id: Repository id (e.g. ``"username/dataset-name"``).
-            repo_type: One of ``"dataset"``, ``"model"``, ``"space"``.
-            private: Whether the repository should be private.
-            exist_ok: If True, do not raise when the repo already exists.
-
-        Returns:
-            The URL of the created repository.
-        """
-        from huggingface_hub import create_repo as _hf_create_repo
-
-        return _hf_create_repo(
-            repo_id=repo_id,
-            repo_type=repo_type,
-            private=private,
-            token=self._token,
-            exist_ok=exist_ok,
-        )
+        """Create a new repository on HuggingFace Hub."""
+        return self._source(repo_type).create_repo(repo_id, private=private, exist_ok=exist_ok)
 
     def upload_dataset(
         self,
@@ -153,38 +123,28 @@ class HuggingFaceUploader:
         path_in_repo: str = "",
         private: bool = False,
         commit_message: str | None = None,
-    ) -> str:
-        """Upload a dataset (file or folder) to HF Hub, creating the repo if needed.
-
-        This is a convenience combining :meth:`create_repo` and
-        :meth:`upload_file` / :meth:`upload_folder`.
+    ) -> object:
+        """Upload a dataset, creating its HuggingFace Hub repository if needed.
 
         Args:
-            local_path: Path to local file or folder.
-            repo_id: HuggingFace repository id.
-            path_in_repo: Destination path prefix inside the repository.
+            local_path: Existing local file or directory to upload.
+            repo_id: Destination repository id, ``"org/name"``.
+            path_in_repo: Destination path inside the repository.
             private: Whether to create a private repository.
             commit_message: Optional commit message.
 
         Returns:
-            The repository URL.
+            The exact Hub object returned by the selected file or folder
+            upload operation.
         """
         local = Path(local_path)
         self.create_repo(repo_id, private=private)
 
         if local.is_dir():
             return self.upload_folder(
-                local,
-                repo_id,
-                path_in_repo=path_in_repo,
-                commit_message=commit_message,
+                local, repo_id, path_in_repo=path_in_repo, commit_message=commit_message
             )
-        else:
-            dest = f"{path_in_repo}/{local.name}" if path_in_repo else local.name
-            dest = dest.lstrip("/")
-            return self.upload_file(
-                local,
-                repo_id,
-                path_in_repo=dest,
-                commit_message=commit_message,
-            )
+        destination = f"{path_in_repo}/{local.name}" if path_in_repo else local.name
+        return self.upload_file(
+            local, repo_id, path_in_repo=destination.lstrip("/"), commit_message=commit_message
+        )

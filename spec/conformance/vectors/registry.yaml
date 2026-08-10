@@ -1,0 +1,55 @@
+description: Registry resolution and deterministic search
+registry:
+  schema_version: 1
+  entries:
+    - coordinate: dataset:molcrafts/qm9@v2
+      kind: dataset
+      namespace: molcrafts
+      name: qm9
+      version: v2
+      title: QM9
+      description: Molecular properties
+      license: CC0-1.0
+      doi: 10.0000/qm9
+      targets: { graph_level: [energy], atom_level: [] }
+      artifacts:
+        - role: main
+          filename: qm9.xyz
+          format: extxyz
+          media_type: chemical/x-xyz
+          locators: [zenodo://2/qm9.xyz]
+          digest: null
+          size: 6
+    - coordinate: model:acme/mace@1
+      kind: model
+      namespace: acme
+      name: mace
+      version: "1"
+      title: MACE potential
+      description: Molecular potential
+      license: Apache-2.0
+      doi: 10.0000/mace
+      targets: { graph_level: [energy], atom_level: [forces] }
+      artifacts:
+        - role: weights
+          filename: mace.model
+          format: mace-model
+          media_type: application/octet-stream
+          locators: [zenodo://1/mace.model]
+          digest: null
+          size: 5
+cases:
+  - name: shorthand resolves
+    action: resolve
+    coordinate: qm9@v2
+    expect: { coordinate: dataset:molcrafts/qm9@v2 }
+  - name: text search returns a deterministic coordinate list
+    action: search
+    query: molecular
+    expect:
+      coordinates: [dataset:molcrafts/qm9@v2, model:acme/mace@1]
+  - name: kind search filters entries
+    action: search
+    kind: model
+    expect:
+      coordinates: [model:acme/mace@1]

@@ -1,0 +1,84 @@
+name: Deploy Submission API
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "apps/api/**"
+      - "packages/typescript/**"
+      - "spec/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/api-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      write_smoke:
+        description: "Create one persistent staging smoke submission"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: molhub-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Test and dry-run the Worker
+        run: |
+          npm run lint --workspace @molcrafts/molhub-api
+          npm run typecheck --workspace @molcrafts/molhub-api
+          npm run test --workspace @molcrafts/molhub-api
+          npm run deploy:dry --workspace @molcrafts/molhub-api
+      - name: Require a provisioned D1 database id
+        run: |
+          if grep -q '00000000-0000-0000-0000-000000000000' apps/api/wrangler.jsonc; then
+            echo "::error::Provision D1 and replace the placeholder database_id before deployment."
+            exit 1
+          fi
+      - name: Apply remote D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/api
+          command: d1 migrations apply molhub-submissions --remote
+      - name: Deploy the Worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          workingDirectory: apps/api
+          command: deploy
+      - name: Smoke health
+        env:
+          API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          test -n "$API_URL"
+          curl --fail-with-body --retry 4 --retry-all-errors "$API_URL/health" | grep '"status":"ok"'
+      - name: Smoke create and status in the configured staging API
+        if: inputs.write_smoke == true
+        env:
+          API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          NAME="deployment-smoke-${GITHUB_RUN_ID}"
+          RESPONSE=$(curl --fail-with-body --request POST "$API_URL/v1/submissions" \
+            --header 'content-type: application/json' \
+            --data "{\"manifest\":{\"schema_version\":1,\"kind\":\"dataset\",\"namespace\":\"smoke\",\"name\":\"$NAME\",\"version\":\"v1\",\"title\":\"Deployment smoke\",\"license\":\"CC0-1.0\",\"doi\":\"10.0000/smoke\",\"artifacts\":[{\"role\":\"main\",\"filename\":\"sample.xyz\",\"format\":\"extxyz\",\"media_type\":\"chemical/x-xyz\",\"size\":4,\"locators\":[\"https://example.test/sample.xyz\"]}]}}")
+          ID=$(printf '%s' "$RESPONSE" | jq -r .id)
+          test -n "$ID" && test "$ID" != null
+          curl --fail-with-body "$API_URL/v1/submissions/$ID" | grep '"status":"pending"'

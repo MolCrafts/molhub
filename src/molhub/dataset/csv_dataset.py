@@ -1,18 +1,24 @@
 """CSV dataset: download + parse CSV files into :class:`Frame` objects.
 
-Zero extra dependencies — uses stdlib ``csv`` and ``urllib``.
+Parsing is stdlib ``csv``; remote files go through
+:class:`~molhub.dataset.cache.DownloadCache`, which inherits the source's
+transfer contract. No third-party parser is involved.
+
+A URL passed here is not a molhub coordinate — there is no manifest behind it
+and therefore no published digest to check. It is cached by a name derived
+from the URL, under ``urls/`` in the shared cache root.
 
 Each row of the CSV becomes one :class:`Frame` with all column values
-stored in ``frame.metadata``.  Numeric columns are auto-detected.
+stored in ``frame.meta``.  Numeric columns are auto-detected.
 
 Usage::
 
-    from molhub.dataset import CSVDataset
+    from molhub.dataset import CSVDataset, Targets
 
     ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
     print(len(ds))       # number of rows
     frame = ds[0]        # first row as a Frame
-    print(frame.metadata["labels.Exp_Tg(K)"])   # access a column
+    print(Targets(frame)["labels.Exp_Tg(K)"])   # access a column
 
     # Also works with local files:
     ds = CSVDataset("/path/to/data.csv")
@@ -21,12 +27,13 @@ Usage::
 from __future__ import annotations
 
 import csv
-import os
-import urllib.request
 from pathlib import Path
 from typing import Any
 
-from molpy.core.frame import Frame
+from molpy import Frame
+
+from molhub.dataset.cache import DownloadCache
+from molhub.dataset.meta import Targets
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -75,25 +82,6 @@ def _parse_csv(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
 
 
 # ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
-
-
-def _filename_from_url(url: str) -> str:
-    """Extract a plausible filename from a URL."""
-    path = url.split("?")[0]
-    name = path.rstrip("/").rsplit("/", 1)[-1]
-    return name or "data.csv"
-
-
-def _download(url: str, dest: Path) -> None:
-    """Download *url* to *dest* with a User-Agent header."""
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as r:
-        dest.write_bytes(r.read())
-
-
-# ---------------------------------------------------------------------------
 # CSVDataset
 # ---------------------------------------------------------------------------
 
@@ -103,7 +91,8 @@ class CSVDataset:
 
     Args:
         path_or_url: Local file path or remote URL to a CSV file.
-        cache_dir: Directory for downloaded CSVs.  Defaults to
+        cache_dir: Cache root for downloaded CSVs, which land in its ``urls/``
+            subdirectory. Defaults to ``$MOLHUB_HOME``, then the deprecated
             ``$MOLHUB_CACHE_DIR``, then ``~/.cache/molhub``.
         download: If True (default), download the file when *path_or_url*
             is a remote URL and the file is not already cached.
@@ -121,9 +110,8 @@ class CSVDataset:
 
         if path_or_url.startswith(("http://", "https://")):
             self._url = path_or_url
-            self._path = self._resolve_cache_path(cache_dir)
-            if download and not self._path.exists():
-                self._ensure_downloaded()
+            cache = DownloadCache(cache_dir)
+            self._path = cache.fetch(self._url) if download else cache.path_for(self._url)
             if not self._path.exists():
                 raise FileNotFoundError(
                     f"CSV not found at {self._path}. Set download=True or pre-download the file."
@@ -135,47 +123,25 @@ class CSVDataset:
 
         self._headers, self._rows = _parse_csv(self._path)
 
-    # -- cache path ----------------------------------------------------------
-
-    def _resolve_cache_path(self, cache_dir: str | Path | None) -> Path:
-        if cache_dir is not None:
-            root = Path(cache_dir)
-        elif "MOLHUB_CACHE_DIR" in os.environ:
-            root = Path(os.environ["MOLHUB_CACHE_DIR"])
-        else:
-            root = Path.home() / ".cache" / "molhub"
-        root.mkdir(parents=True, exist_ok=True)
-        return root / _filename_from_url(self._url)  # type: ignore[arg-type]
-
-    # -- download ------------------------------------------------------------
-
-    def _ensure_downloaded(self) -> None:
-        assert self._url is not None
-        _download(self._url, self._path)
-
     @classmethod
     def download(cls, url: str, cache_dir: str | Path | None = None) -> Path:
-        """Download a CSV from *url* without parsing it."""
-        dest = cls._resolve_cache_path_static(url, cache_dir)
-        if not dest.exists():
-            _download(url, dest)
-        return dest
+        """Download a CSV from *url* without parsing it.
 
-    @staticmethod
-    def _resolve_cache_path_static(url: str, cache_dir: str | Path | None = None) -> Path:
-        if cache_dir is not None:
-            root = Path(cache_dir)
-        elif "MOLHUB_CACHE_DIR" in os.environ:
-            root = Path(os.environ["MOLHUB_CACHE_DIR"])
-        else:
-            root = Path.home() / ".cache" / "molhub"
-        root.mkdir(parents=True, exist_ok=True)
-        return root / _filename_from_url(url)
+        Args:
+            url: Remote CSV to fetch.
+            cache_dir: Cache root; see the constructor.
+        """
+        return DownloadCache(cache_dir).fetch(url)
 
     # -- MapDataset protocol -------------------------------------------------
 
     @property
     def source_id(self) -> str:
+        """Identifies this view of the data — a filename and a row count.
+
+        Not a molhub coordinate: a raw path or URL has no namespace, name or
+        version to report. Do not parse it as one.
+        """
         return f"csv:{self._path.name}:n={len(self._rows)}"
 
     def __len__(self) -> int:
@@ -184,7 +150,7 @@ class CSVDataset:
     def __getitem__(self, idx: int) -> Frame:
         row = self._rows[idx]
         frame = Frame()
-        frame.metadata.update(row)
+        Targets(frame).write(row)
         return frame
 
     # -- introspection -------------------------------------------------------

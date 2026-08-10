@@ -1,0 +1,32 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "molhub-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "ratelimits": [
+    {
+      "name": "SUBMISSION_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "molhub-submissions",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "WEB_ORIGIN": "https://app.molcrafts.org",
+    "GITHUB_REPOSITORY": "MolCrafts/molhub-registry",
+    "GITHUB_BASE_BRANCH": "main"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}

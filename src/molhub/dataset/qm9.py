@@ -6,11 +6,11 @@ Reference:
 
 Usage::
 
-    from molhub.dataset import QM9Source
+    from molhub.dataset import QM9Dataset
 
-    source = QM9Source(data_dir)
+    source = QM9Dataset(data_dir)
     print(len(source))        # 130831
-    frame = source[0]         # molpy Frame with atoms block + metadata targets
+    frame = source[0]         # molpy Frame with atoms block + targets in frame.meta
 """
 
 from __future__ import annotations
@@ -18,15 +18,24 @@ from __future__ import annotations
 import random
 import sys
 import tarfile
-import urllib.request
 from pathlib import Path
 
 import numpy as np
-from molpy.core.element import Element
-from molpy.core.frame import Block, Frame
+from molpy import Block, Element, Frame
 from tqdm import tqdm
 
+from molhub.dataset.hub import ArtifactHub
+from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
+from molhub.molhub import Molhub
+
+COORDINATE = "dataset:molcrafts/qm9@v2"
+"""Where QM9 lives in the registry. Its manifest carries the locators and the
+digests; this module holds no upstream URL of its own."""
+
+# Names the source has always used on disk in offline mode.
+_TARBALL_NAME = "qm9.tar.bz2"
+_EXCLUDE_NAME = "qm9_exclude.txt"
 
 # All scalar properties exposed by raw QM9 records (excluding "tag" and "index").
 _QM9_GRAPH_TARGETS: frozenset[str] = frozenset(
@@ -57,14 +66,14 @@ _PROPERTY_NAMES = [
     "Cv",
 ]
 
-_DEFAULT_URL = "https://ndownloader.figshare.com/files/3195389"
-_EXCLUDE_URL = "https://figshare.com/ndownloader/files/3195404"
 
+def _is_cached(path: Path) -> bool:
+    """True when *path* holds a non-empty file.
 
-def _download(url: str, dest: Path) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as r:
-        dest.write_bytes(r.read())
+    A zero-byte file counts as absent. Treating it as present is what let an
+    empty exclusion list silently pass through and inflate the dataset.
+    """
+    return path.exists() and path.stat().st_size > 0
 
 
 def _load_exclusion_list(path: Path) -> set[int]:
@@ -103,46 +112,68 @@ def _parse_xyz(content: str) -> Frame:
     atoms_blk["z"] = np.array(zs, dtype=np.float64)
     atoms_blk["number"] = np.array(numbers, dtype=np.int64)
 
-    targets: dict[str, float] = {}
+    values: dict[str, float] = {}
     for key in _PROPERTY_NAMES:
         if key in ("tag", "index"):
             continue
-        targets[key] = float(metadata[key])
+        values[key] = float(metadata[key])
 
     frame = Frame()
     frame["atoms"] = atoms_blk
-    frame.metadata.update(targets)
+    Targets(frame).write(values)
     return frame
 
 
 def _filter_targets(frame: Frame, kept: frozenset[str]) -> Frame:
     """Drop targets not in *kept* to shrink metadata when user wants a subset."""
-    filtered = {k: v for k, v in frame.metadata.items() if k in kept}
-    frame.metadata.clear()
-    frame.metadata.update(filtered)
+    filtered = {k: v for k, v in Targets(frame).read().items() if k in kept}
+    Targets(frame).write(filtered)
     return frame
 
 
-def _ensure_downloaded(root: Path) -> None:
-    """Download the QM9 tarball and exclusion list if not already present.
+def _locate_files(root: Path, download: bool, hub: ArtifactHub | None = None) -> tuple[Path, Path]:
+    """Return paths to the QM9 tarball and exclusion list.
 
-    Idempotent — safe to call unconditionally.
+    With *download*, the files come from the registry: resolved by coordinate,
+    transferred under the source's transport contract, and checked against
+    the md5 Figshare publishes for the pinned article version. Without it, they
+    must already sit in *root* under the names this source has always used.
+
+    Args:
+        root: Directory holding pre-downloaded files in offline mode.
+        download: Whether to fetch through the hub.
+        hub: Any :class:`~molhub.dataset.hub.ArtifactHub`; defaults to a
+            freshly constructed :class:`Molhub`.
+
+    Returns:
+        ``(tarball, exclusion_list)``.
+
+    Raises:
+        FileNotFoundError: In offline mode, if either file is missing or empty.
     """
-    root.mkdir(parents=True, exist_ok=True)
-    tarball = root / "qm9.tar.bz2"
-    exclude_file = root / "qm9_exclude.txt"
-    if not tarball.exists():
-        print("Downloading QM9 tarball...", flush=True)
-        _download(_DEFAULT_URL, tarball)
-    if not exclude_file.exists():
-        _download(_EXCLUDE_URL, exclude_file)
+    if download:
+        paths = (hub or Molhub()).fetch(COORDINATE)
+        return paths["main"], paths["exclude"]
+
+    tarball = root / _TARBALL_NAME
+    exclude_file = root / _EXCLUDE_NAME
+    if not _is_cached(tarball):
+        raise FileNotFoundError(
+            f"QM9 tarball not found at {tarball}. Set download=True or place the file there first."
+        )
+    if not _is_cached(exclude_file):
+        raise FileNotFoundError(
+            f"QM9 exclusion list not found at {exclude_file}. "
+            "Set download=True or place the file there first."
+        )
+    return tarball, exclude_file
 
 
-def _load_raw(root: Path, total: int | None) -> list[Frame]:
-    """Return all raw QM9 samples as ``list[Frame]`` (auto-downloads if needed)."""
-    _ensure_downloaded(root)
-    tarball = root / "qm9.tar.bz2"
-    exclude_file = root / "qm9_exclude.txt"
+def _load_raw(
+    root: Path, total: int | None, *, download: bool = False, hub: ArtifactHub | None = None
+) -> list[Frame]:
+    """Return all raw QM9 samples as ``list[Frame]``."""
+    tarball, exclude_file = _locate_files(root, download, hub)
 
     excluded = _load_exclusion_list(exclude_file)
 
@@ -177,32 +208,33 @@ def _load_raw(root: Path, total: int | None) -> list[Frame]:
 
 
 # ---------------------------------------------------------------------------
-# QM9Source
+# QM9Dataset
 # ---------------------------------------------------------------------------
 
 
-class QM9Source:
+class QM9Dataset:
     """Map-style dataset for QM9.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``) and scalar quantum
-    properties stored in ``frame.metadata``.
+    properties stored in ``frame.meta`` (read them with
+    :class:`molhub.dataset.Targets`).
 
     Args:
         root: Directory for the raw QM9 tarball (downloaded on first use).
         total: Subsample to at most this many molecules (reproducible seed).
         targets: If given, keep only these scalar properties in each sample.
-            ``None`` keeps all of :attr:`QM9Source.ALL_TARGETS`.
+            ``None`` keeps all of :attr:`QM9Dataset.ALL_TARGETS`.
         download: Download raw files if missing. Set to ``False`` in
             offline / test environments.
+        hub: Anything satisfying :class:`~molhub.dataset.hub.ArtifactHub`.
+            Defaults to a freshly constructed :class:`~molhub.molhub.Molhub`.
 
     Class attributes:
         TARGET_SCHEMA: :class:`TargetSchema` covering every scalar target
             that appears in the raw QM9 records (graph-level only).
         ALL_TARGETS: Frozen set of scalar property names.
     """
-
-    SOURCE_VERSION: str = "v2"
 
     ALL_TARGETS: frozenset[str] = _QM9_GRAPH_TARGETS
     TARGET_SCHEMA: TargetSchema = TargetSchema(
@@ -217,8 +249,11 @@ class QM9Source:
         total: int | None = None,
         targets: list[str] | tuple[str, ...] | None = None,
         download: bool = True,
+        hub: ArtifactHub | None = None,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
+        self._download = download
+        self._hub = hub
 
         if targets is not None:
             kept = frozenset(targets)
@@ -234,46 +269,51 @@ class QM9Source:
         self._frames: list[Frame] | None = None
         self._total = total
 
-        if download:
-            _ensure_downloaded(self.root)
-        else:
-            tarball = self.root / "qm9.tar.bz2"
-            exclude_file = self.root / "qm9_exclude.txt"
-            if not tarball.exists():
-                raise FileNotFoundError(
-                    f"QM9 tarball not found at {tarball}. "
-                    "Set download=True or call QM9Source.download() first."
-                )
-            if not exclude_file.exists():
-                raise FileNotFoundError(
-                    f"QM9 exclusion list not found at {exclude_file}. "
-                    "Set download=True or call QM9Source.download() first."
-                )
+        if not download:
+            # Fail now rather than at first access, as this source always has.
+            _locate_files(self.root, download=False)
 
     def _ensure_frames_loaded(self) -> None:
         if self._frames is not None:
             return
-        frames = _load_raw(self.root, self._total)
+        frames = _load_raw(self.root, self._total, download=self._download, hub=self._hub)
         if self._targets is not None:
             kept = frozenset(self._targets)
             frames = [_filter_targets(f.copy(), kept) for f in frames]
         self._frames = frames
 
     @classmethod
-    def download(cls, root: str | Path) -> Path:
-        """Ensure raw QM9 files are present in *root*."""
-        root = Path(root)
-        _ensure_downloaded(root)
-        return root
+    def download(cls, root: str | Path | None = None, *, hub: ArtifactHub | None = None) -> Path:
+        """Fetch the QM9 files and return the directory holding them.
+
+        Args:
+            root: Ignored; retained so existing calls keep working. Files land
+                in the shared cache under ``$MOLHUB_HOME``, filed by coordinate
+                and role, not here.
+            hub: Anything satisfying :class:`~molhub.dataset.hub.ArtifactHub`.
+                Defaults to a freshly constructed :class:`Molhub`.
+
+        Returns:
+            The cache directory the fetched files now live in.
+        """
+        paths = (hub or Molhub()).fetch(COORDINATE)
+        return paths["main"].parent
 
     @property
     def source_id(self) -> str:
-        parts = [f"qm9:{self.SOURCE_VERSION}"]
+        """A cache key for this exact view of the dataset.
+
+        An unmodified source is named by its coordinate and nothing else, so
+        the id round-trips through :meth:`Coordinate.parse`. Subsetting appends
+        qualifiers after a ``#``, which is not part of coordinate syntax — the
+        result names a view, not an artifact, and should not pretend otherwise.
+        """
+        qualifiers = []
         if self._total is not None:
-            parts.append(f"total={self._total}")
+            qualifiers.append(f"total={self._total}")
         if self._targets is not None:
-            parts.append(f"targets={'+'.join(self._targets)}")
-        return ":".join(parts)
+            qualifiers.append(f"targets={'+'.join(self._targets)}")
+        return f"{COORDINATE}#{','.join(qualifiers)}" if qualifiers else COORDINATE
 
     def __len__(self) -> int:
         self._ensure_frames_loaded()

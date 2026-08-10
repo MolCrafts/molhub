@@ -1,0 +1,232 @@
+/* MolHub product stylesheet.
+ *
+ * Constitution (motion, status roles, shared geometry names):
+ *   ./constitution-theme.css + ./constitution-base.css
+ *   source: molcrafts-ui (`npm run sync:products`)
+ * Brand paper/forest palette stays in ./tokens.css.
+ */
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./constitution-theme.css";
+@import "./constitution-base.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--mc-font-ui);
+  --font-display: var(--mc-font-display);
+  --font-mono: var(--mc-font-mono);
+
+  --color-background: var(--mc-canvas);
+  --color-paper: var(--mc-canvas);
+  --color-canvas-tinted: var(--mc-canvas-tinted);
+  --color-surface: var(--mc-surface);
+  --color-surface-strong: var(--mc-surface-strong);
+  --color-sunken: var(--mc-surface-muted);
+  --color-interactive: var(--mc-action-soft);
+  --color-interactive-active: var(--mc-action-line);
+  --color-foreground: var(--mc-text);
+  --color-muted-foreground: var(--mc-text-muted);
+  --color-subtle-foreground: var(--mc-text-subtle);
+  --color-border: var(--mc-border);
+  --color-border-strong: var(--mc-border-strong);
+  --color-input: var(--mc-border-strong);
+  --color-ring: var(--mc-focus);
+  --color-accent: var(--mc-action);
+  --color-accent-hover: var(--mc-action-hover);
+  --color-accent-active: var(--mc-action-active);
+  --color-accent-foreground: var(--mc-action-foreground);
+  --color-accent-ink: var(--mc-action);
+  --color-accent-soft: var(--mc-action-soft);
+  --color-accent-line: var(--mc-action-line);
+  --color-primary: var(--mc-action);
+  --color-primary-foreground: var(--mc-action-foreground);
+  --color-card: var(--mc-surface);
+  --color-card-foreground: var(--mc-text);
+  --color-popover: var(--mc-surface);
+  --color-popover-foreground: var(--mc-text);
+  --color-muted: var(--mc-surface-muted);
+  --color-secondary: var(--mc-surface-muted);
+  --color-secondary-foreground: var(--mc-text);
+  --color-code: var(--mc-code-surface);
+  --color-code-foreground: var(--mc-code-text);
+  --color-signal: var(--molhub-signal);
+  --color-signal-soft: var(--molhub-signal-soft);
+  --color-forest-950: var(--molcrafts-forest-dark);
+  --color-kind-dataset: var(--molhub-dataset);
+  --color-kind-dataset-soft: var(--molhub-dataset-soft);
+  --color-kind-model: var(--molhub-model);
+  --color-kind-model-soft: var(--molhub-model-soft);
+  --color-kind-plugin: var(--molhub-plugin);
+  --color-kind-plugin-soft: var(--molhub-plugin-soft);
+  --color-state-attested: var(--mc-action);
+  --color-state-attested-soft: var(--mc-action-soft);
+  --color-state-attested-line: var(--mc-action-line);
+  --color-state-caution: var(--mc-warning);
+  --color-state-caution-surface: var(--mc-warning);
+  --color-state-caution-soft: var(--mc-warning-surface);
+  --color-state-caution-line: color-mix(in srgb, var(--mc-warning) 32%, transparent);
+  --color-state-archival: var(--mc-text-muted);
+  --color-state-archival-soft: var(--mc-surface-muted);
+  --color-state-archival-line: var(--mc-border-strong);
+  --color-state-critical: var(--mc-danger);
+  --color-state-critical-surface: var(--mc-danger);
+  --color-state-critical-soft: var(--mc-danger-surface);
+  --color-state-critical-line: color-mix(in srgb, var(--mc-danger) 34%, transparent);
+  --color-scrim: rgb(8 18 11 / 58%);
+
+  --radius-control: var(--mc-radius-sm);
+  --radius-panel: var(--mc-radius-md);
+  --radius-overlay: var(--mc-radius-lg);
+  --radius-sm: var(--mc-radius-sm);
+  --radius-md: var(--mc-radius-md);
+  --radius-lg: var(--mc-radius-lg);
+  --radius-xl: var(--mc-radius-xl);
+  --shadow-raised: var(--mc-shadow-sm);
+  --shadow-overlay: var(--mc-shadow-md);
+
+  --text-micro: 0.6875rem;
+  --text-label: 0.75rem;
+  --text-meta: 0.8125rem;
+  --text-body: 0.9375rem;
+  --text-title: 1.0625rem;
+  --text-heading: 1.375rem;
+  --text-display: clamp(2.45rem, 5vw, 3.45rem);
+
+  --spacing-control-compact: 2rem;
+  --spacing-control: 2.5rem;
+  --spacing-control-comfortable: 3rem;
+  --spacing-touch-target: 2.75rem;
+  --spacing-header: 3.5rem;
+  --container-content: 82rem;
+  --container-prose-measure: 46rem;
+  --container-rail: 18rem;
+
+  --ease-standard: var(--mc-ease);
+}
+
+@layer base {
+  * {
+    border-color: var(--mc-border);
+  }
+
+  html {
+    min-width: 20rem;
+    scroll-behavior: smooth;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--mc-canvas);
+    color: var(--mc-text);
+    font-family: var(--mc-font-ui);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: var(--molhub-signal-soft);
+    color: var(--mc-text);
+  }
+}
+
+@layer utilities {
+  .page-shell {
+    width: min(100% - 2rem, 82rem);
+    margin-inline: auto;
+  }
+
+  .brand-header {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 55%),
+      linear-gradient(
+        90deg,
+        var(--molcrafts-forest-dark),
+        var(--molcrafts-forest) 62%,
+        var(--molcrafts-forest-light)
+      );
+    color: var(--molcrafts-cream);
+    border-color: rgba(14, 43, 27, 0.5);
+    box-shadow: 0 0.12rem 0.45rem rgba(14, 43, 27, 0.16);
+  }
+
+  .brand-footer {
+    background: var(--molcrafts-forest-dark);
+    color: var(--molcrafts-cream);
+    border-color: rgba(242, 218, 157, 0.16);
+  }
+
+  .display-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .mesh-background {
+    background: linear-gradient(
+        115deg,
+        color-mix(in srgb, var(--mc-canvas) 98%, transparent) 0%,
+        color-mix(in srgb, var(--mc-canvas) 94%, transparent) 58%,
+        color-mix(in srgb, var(--molcrafts-sand) 18%, var(--mc-canvas)) 100%
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--mc-action) 6.5%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--mc-action) 5%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: auto, 5rem 5rem, 5rem 5rem;
+  }
+
+  .hairline-grid {
+    background-image: linear-gradient(
+        to right,
+        color-mix(in srgb, var(--mc-border) 56%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--mc-border) 56%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 5rem 5rem;
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 45%), transparent 82%);
+  }
+}
+
+@media (min-width: 640px) {
+  .page-shell {
+    width: min(100% - 3rem, 82rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

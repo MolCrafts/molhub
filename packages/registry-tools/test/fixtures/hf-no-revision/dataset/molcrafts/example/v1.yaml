@@ -1,0 +1,21 @@
+# Broken: the hf:// locator carries no `@<revision>`.
+#
+# An absent revision is not "unspecified" — the client substitutes `main`, so
+# this manifest quietly tracks a branch.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — HuggingFace locator with no revision
+license: CC0-1.0
+doi: 10.5281/zenodo.14980914
+
+artifacts:
+  - role: main
+    filename: data.parquet
+    digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    size: 1024
+    locators:
+      - hf://molcrafts/example-dataset/data.parquet

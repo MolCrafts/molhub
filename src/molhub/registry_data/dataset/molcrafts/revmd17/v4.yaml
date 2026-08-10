@@ -1,0 +1,117 @@
+# revMD17 (rMD17), Figshare article 12672038, version 4.
+#
+# Upstream shape, read off the API rather than guessed: v1 and v2 published only
+# the 1 GB `rmd17.tar.bz2`; v3 added a readme; v4 additionally publishes each
+# molecule's `.npz` as its own downloadable file. So one manifest with one role
+# per molecule is the honest shape -- ten manifests would invent ten dataset
+# names for what upstream calls one dataset with one DOI, and a single `main`
+# archive role would make reading aspirin cost a gigabyte.
+#
+# The locators pin `/v4/`. A bare `figshare://12672038` resolves to whatever is
+# current, and this article has already moved four times.
+#
+# The archive `rmd17.tar.bz2` and the train/test split files (`splits.zip`,
+# `index_{train,test}_0N.csv`) are also in v4 and are deliberately not
+# catalogued here: the archive duplicates the ten roles below, and nothing in
+# molhub consumes the splits yet. Add roles when something does.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: revmd17
+version: v4
+
+title: revMD17 — MD17 trajectories recomputed at PBE/def2-SVP
+description: >-
+  100,000 configurations for each of ten small organic molecules, taken from
+  the original MD17 trajectories and recomputed at the PBE/def2-SVP level with
+  tight SCF convergence and a dense integration grid, so the labels are
+  practically free of numerical noise. Energies are in kcal/mol and forces in
+  kcal/mol/angstrom. Azobenzene carries 99,988 configurations -- 11 DFT
+  calculations failed on van der Waals clashes and the original trajectory held
+  99,999. The structures are consecutive MD samples and are not independent;
+  upstream warns against training on more than 1,000 of them.
+license: CC0-1.0
+doi: 10.6084/m9.figshare.12672038.v4
+
+artifacts:
+  - role: aspirin
+    filename: rmd17_aspirin.npz
+    digest: md5:17fd6fb69066888613f7e16b358a7553
+    size: 153601803
+    locators:
+      - figshare://12672038/v4/rmd17_aspirin.npz
+
+  - role: azobenzene
+    filename: rmd17_azobenzene.npz
+    digest: md5:be79df918468eb3579aa73a0becf7390
+    size: 175180782
+    locators:
+      - figshare://12672038/v4/rmd17_azobenzene.npz
+
+  - role: benzene
+    filename: rmd17_benzene.npz
+    digest: md5:18c9242bc90fbf28215f6dd81e650f16
+    size: 88801794
+    locators:
+      - figshare://12672038/v4/rmd17_benzene.npz
+
+  - role: ethanol
+    filename: rmd17_ethanol.npz
+    digest: md5:eb837fb8deb27d4e0d52f71a03aff776
+    size: 67201791
+    locators:
+      - figshare://12672038/v4/rmd17_ethanol.npz
+
+  - role: malonaldehyde
+    filename: rmd17_malonaldehyde.npz
+    digest: md5:cdc1d70c0c34062ddde6e5071eb6fe21
+    size: 67201791
+    locators:
+      - figshare://12672038/v4/rmd17_malonaldehyde.npz
+
+  - role: naphthalene
+    filename: rmd17_naphthalene.npz
+    digest: md5:0efba19c9907e3852318b1e6008b3b9e
+    size: 132001800
+    locators:
+      - figshare://12672038/v4/rmd17_naphthalene.npz
+
+  - role: paracetamol
+    filename: rmd17_paracetamol.npz
+    digest: md5:ba10784f7b67635427085f6d7ec2dd97
+    size: 146401802
+    locators:
+      - figshare://12672038/v4/rmd17_paracetamol.npz
+
+  - role: salicylic
+    filename: rmd17_salicylic.npz
+    digest: md5:900fedf242da438400fa4293348d7dd1
+    size: 117601798
+    locators:
+      - figshare://12672038/v4/rmd17_salicylic.npz
+
+  - role: toluene
+    filename: rmd17_toluene.npz
+    digest: md5:0f2913d51f8149c90ab28d697a076f64
+    size: 110401797
+    locators:
+      - figshare://12672038/v4/rmd17_toluene.npz
+
+  - role: uracil
+    filename: rmd17_uracil.npz
+    digest: md5:992a4479c28a07e0cce6da964805be31
+    size: 88801794
+    locators:
+      - figshare://12672038/v4/rmd17_uracil.npz
+
+  # Documents the array keys and the units the roles above are stored in.
+  - role: readme
+    filename: readme.txt
+    digest: md5:29e6f250bb2d1c461363e24955b5be1e
+    size: 2082
+    locators:
+      - figshare://12672038/v4/readme.txt
+
+targets:
+  graph_level: [energy]
+  atom_level: [forces]

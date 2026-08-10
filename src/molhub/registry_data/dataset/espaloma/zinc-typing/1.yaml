@@ -1,0 +1,36 @@
+# ZINC subset for GAFF atom-typing recovery (Validation A).
+#
+# Upstream: parm@Frosst ZINC distribution (ccl.net). Espaloma assigns GAFF 1.81
+# types at runtime via antechamber/OpenMM ForceFields; this package ships the
+# molecular structures (zinc.sdf) with stable molecule identity and covalent
+# graphs. GAFF string labels may be attached offline (see convert script) —
+# unit tests use synthetic fixtures with hard-coded labels.
+schema_version: 1
+kind: dataset
+namespace: espaloma
+name: zinc-typing
+version: "1"
+
+title: ZINC (parm@Frosst) structures for GAFF typing recovery
+description: >-
+  ~7535 ZINC molecules from the parm@Frosst distribution used by Espaloma's
+  atom-typing recovery experiment (~7529 after cleaning in some reports).
+  Archive: parm_at_Frosst.tgz (zinc.sdf + type tables). Molecule-level 80:10:10
+  split seed 2666 for espaloma-original. GAFF 1.81 labels are not in the SDF;
+  assign offline with AmberTools/OpenBabel or consume pre-typed fixtures.
+license: unknown
+doi: 10.1039/D2SC02739A
+
+artifacts:
+  - role: main
+    filename: parm_at_Frosst.tgz
+    digest: sha256:e1c4a042c358dbe1f462139568c3c91b9d9dc471ca674fad06814ec322be4c9f
+    size: 4165650
+    locators:
+      - https://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
+      - http://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
+
+targets:
+  graph_level: []
+  atom_level:
+    - atom_type

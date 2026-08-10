@@ -1,0 +1,60 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://molhub.dev/spec/derived-inspection.schema.yaml
+title: MolHub derived inspection descriptor
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - source
+  - converter
+  - molrec_schema_version
+  - generated_at
+  - record
+  - properties
+properties:
+  schema_version:
+    const: 1
+  source:
+    type: object
+    additionalProperties: false
+    required: [coordinate, role, digest, size]
+    properties:
+      coordinate:
+        type: string
+        pattern: '^(dataset|model|plugin):[^/]+/[^@]+@[^@]+$'
+      role: { type: string, minLength: 1 }
+      digest:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9._+-]*:[A-Fa-f0-9]+$'
+      size: { type: integer, minimum: 0 }
+  converter:
+    type: object
+    additionalProperties: false
+    required: [name, version, commit]
+    properties:
+      name: { type: string, minLength: 1 }
+      version: { type: string, minLength: 1, not: { const: latest } }
+      commit: { type: string, pattern: '^[A-Fa-f0-9]{7,64}$' }
+  molrec_schema_version:
+    type: string
+    minLength: 1
+    not: { const: latest }
+  generated_at: { type: string, format: date-time }
+  record:
+    type: object
+    additionalProperties: false
+    required: [format, url, frames]
+    properties:
+      format: { const: molrec-zarr-v3 }
+      url: { type: string, format: uri, pattern: '^https://' }
+      frames: { type: integer, minimum: 1 }
+  properties:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, target]
+      properties:
+        name: { type: string, minLength: 1 }
+        target: { enum: [structure, atom, environment] }
+        unit: { type: string, minLength: 1 }

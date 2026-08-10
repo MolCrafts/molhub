@@ -1,0 +1,11 @@
+description: Cache paths shared by Python and Node
+cases:
+  - name: dataset main role
+    key: dataset/molcrafts/qm9@v2/main
+    expect_path: files/dataset/molcrafts/qm9@v2/main
+  - name: model weights role
+    key: model/molcrafts/mace-mp-0@1.0/weights
+    expect_path: files/model/molcrafts/mace-mp-0@1.0/weights
+  - name: unsafe characters are normalized within a segment
+    key: dataset/acme/example@v1/role with spaces
+    expect_path: files/dataset/acme/example@v1/role_with_spaces

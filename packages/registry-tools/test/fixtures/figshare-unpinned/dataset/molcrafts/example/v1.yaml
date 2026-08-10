@@ -1,0 +1,21 @@
+# Broken: the Figshare locator carries no `/v<n>`.
+#
+# Article 1057646 already has a v1 and a v2, so this resolves to whichever is
+# current and starts serving different data the day upstream publishes a v3.
+schema_version: 1
+kind: dataset
+namespace: molcrafts
+name: example
+version: v1
+
+title: Fixture — unpinned Figshare article id
+license: CC0-1.0
+doi: 10.1038/sdata.2014.22
+
+artifacts:
+  - role: main
+    filename: dsgdb9nsd.xyz.tar.bz2
+    digest: md5:ad1ebd51ee7f5b3a6e32e974e5d54012
+    size: 86144227
+    locators:
+      - figshare://1057646/dsgdb9nsd.xyz.tar.bz2
