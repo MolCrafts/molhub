@@ -11,6 +11,7 @@ from molhub.dataset.molecular import (
     MolecularUnits,
     MoleculeSplit,
 )
+from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import (
     InMemoryDataset,
     IterableDataset,
@@ -37,6 +38,7 @@ __all__ = [
     "RevMD17Dataset",
     "ThreeBPADataset",
     "ZincTypingDataset",
+    "PhalkethohMMDataset",
     "Targets",
     "MetaCodec",
     "MolecularUnits",

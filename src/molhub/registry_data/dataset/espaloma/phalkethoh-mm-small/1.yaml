@@ -1,0 +1,33 @@
+# Espaloma PhAlkEthOH MM-small toy set (MM parameter fitting / Validation B).
+#
+# Synthetic offline fixtures cover unit tests. Locators below are placeholders
+# until an immutable upstream archive is confirmed; molhub does not rehost
+# large bytes when rights are unclear. Adapter code holds only COORDINATE.
+schema_version: 1
+kind: dataset
+namespace: espaloma
+name: phalkethoh-mm-small
+version: "1"
+
+title: PhAlkEthOH MM-small multi-conformer energies (Espaloma toy)
+description: >-
+  C/H/O phenyl–alkane–ether–alcohol molecules with ~100 conformers each and
+  reference MM energies (kcal/mol) for Espaloma-style Class-I MM fitting.
+  Molecule-level 80:10:10 split. Coords in Å; forces optional in kcal/(mol·Å).
+  Payload: splits.json + mols/<id>/{atoms.npz,confs.npz,legacy_params.json?}.
+license: unknown
+doi: 10.1039/D2SC02739A
+
+artifacts:
+  - role: main
+    filename: phalkethoh-mm-small.zip
+    digest: md5:5a77084dd75f9be781297f923e521ae0
+    size: 46
+    locators:
+      - zenodo://0000001/phalkethoh-mm-small.zip
+
+targets:
+  graph_level:
+    - mm_energy
+  atom_level:
+    - forces
