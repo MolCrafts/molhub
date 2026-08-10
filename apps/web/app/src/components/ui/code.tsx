@@ -3,21 +3,16 @@ import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-/*
- * Nearly every load-bearing string in this registry is machine syntax —
- * coordinates (`dataset:molcrafts/qm9@v2`), locators, SPDX ids, DOIs, and
- * digests — so `Code` is a primary text style here rather than documentation
- * decoration. The mono face and its optical size correction come from base CSS.
+/**
+ * Mono text for machine syntax (coordinates, digests, paths).
+ * `inline` for prose/table cells; `block` for copyable multi-line blobs.
  */
-const codeVariants = cva("rounded-control bg-sunken font-mono text-foreground", {
+const codeVariants = cva("rounded-control bg-muted font-mono text-foreground", {
   variants: {
     variant: {
-      /** Sits inside a sentence or a table cell. */
-      inline: "px-1 py-px",
-      /** Own line: locator lists, digests, copy-me coordinates. */
+      inline: "px-1 py-px font-medium",
       block: "block w-full overflow-x-auto px-2 py-1.5",
     },
-    /** Long digests and locators would otherwise widen their column. */
     wrap: {
       none: "whitespace-nowrap",
       anywhere: "[overflow-wrap:anywhere]",

@@ -4,34 +4,29 @@ import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-/* No destructive variant: submission creates review records but the public UI
- * has no delete or irreversible action. */
 const buttonVariants = cva(
-  cn(
-    "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap",
-    "rounded-control font-medium",
-    "transition-colors duration-(--motion-fast) ease-standard",
-    "outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-    "disabled:pointer-events-none disabled:opacity-50",
-    "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-  ),
+  "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control text-body font-medium outline-none transition-colors duration-(--motion-fast) ease-standard disabled:pointer-events-none disabled:opacity-50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-accent text-accent-foreground hover:bg-accent-hover active:bg-accent-active",
+        default: "bg-accent text-accent-foreground hover:bg-accent-hover",
+        destructive:
+          "bg-destructive text-destructive-foreground hover:bg-status-failed-hover focus-visible:ring-destructive/30",
         outline:
-          "border border-border-strong bg-transparent text-foreground hover:bg-interactive active:bg-interactive-active",
-        subtle: "bg-sunken text-foreground hover:bg-interactive active:bg-interactive-active",
-        ghost:
-          "bg-transparent text-muted-foreground hover:bg-interactive hover:text-foreground active:bg-interactive-active",
-        link: "bg-transparent text-accent-ink underline-offset-4 hover:underline",
+          "border border-input bg-transparent hover:bg-interactive hover:text-interactive-foreground",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost: "hover:bg-interactive hover:text-interactive-foreground",
+        link: "text-accent underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-control-compact px-2.5 text-label",
-        default: "h-control px-3 text-meta",
-        lg: "h-control-comfortable px-4 text-body",
+        /* 32px default · 28px compact · 36px comfortable (constitution §2) */
+        default: "h-control px-4 has-[>svg]:px-3",
+        sm: "h-control-compact gap-1 px-3 has-[>svg]:px-2",
+        lg: "h-control-comfortable px-6 has-[>svg]:px-4",
+        content: "h-auto min-w-0 shrink whitespace-normal",
         icon: "size-control",
         "icon-sm": "size-control-compact",
+        "icon-lg": "size-control-comfortable",
       },
     },
     defaultVariants: {
@@ -56,17 +51,8 @@ function Button({
   return (
     <Comp
       data-slot="button"
-      // A bare <button> defaults to type="submit", so the first one placed
-      // inside a form would reload the page instead of doing its job — a bug
-      // that only appears once someone adds a form and is baffling when it
-      // does. Only for a real button: with `asChild` the child may be an
-      // anchor, where the attribute is meaningless. An explicit `type` in
-      // props still wins, because it is spread after this.
+      // Bare <button> defaults to type="submit"; only set type for real buttons.
       {...(asChild ? {} : { type: "button" as const })}
-      data-variant={variant ?? "default"}
-      // Link-styled buttons sit inside prose, so they opt out of the
-      // coarse-pointer 44px expansion applied in base CSS.
-      {...(variant === "link" ? { "data-inline": "" } : {})}
       className={cn(buttonVariants({ variant, size }), className)}
       {...props}
     />

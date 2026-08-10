@@ -2,62 +2,115 @@ import { type ClassValue, clsx } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
 /*
- * tailwind-merge only knows Tailwind's stock scales. Our theme adds named
- * values (`text-body`, `h-control`, `rounded-panel`, `max-w-content`), and
- * without registering them the merge is actively wrong in two ways:
+ * tailwind-merge only knows Tailwind's stock scales. Our constitution theme
+ * adds named values (`text-micro`, `h-control-compact`, `rounded-control`,
+ * `max-w-dialog-sm`). Leaving them unregistered makes the merge wrong:
  *
- *   text-body + text-muted-foreground  ->  text-body is DROPPED
- *       (`text-*` falls through to the colour group, whose validator matches
- *        anything, so the size looks like a competing colour)
- *   h-control + h-control-comfortable  ->  BOTH kept
- *       (unrecognised values are never treated as conflicting, so a caller's
- *        override loses or wins by CSS source order rather than by intent)
+ *   twMerge("text-body", "text-muted-foreground")  ->  "text-muted-foreground"
+ *       Font size DROPPED — `body` looks like a competing colour token.
  *
- * Registering the scales below is what makes `className` overrides behave.
- * Keep these lists in sync with the matching blocks in ../styles/tailwind.css.
+ *   twMerge("rounded-control", "rounded-lg")       ->  both kept
+ *       Unrecognised values never conflict; order decides visually.
+ *
+ * Keep FONT_SIZES / RADII in sync with src/styles/tokens.css.
+ * SPACING is a **union** of product geometry names so a shared `cn` still
+ * merges correctly after products add their own --spacing-* extras.
  */
 
-/** `--text-*` in the theme block. */
-const FONT_SIZES = ["micro", "label", "meta", "body", "title", "heading", "display"] as const;
+/** `--text-*` constitution type scale (+ product extras like molhub `meta`). */
+const FONT_SIZES = [
+  "micro",
+  "label",
+  "meta",
+  "body",
+  "body-lg",
+  "title",
+  "heading",
+  "display",
+] as const;
 
-/** `--spacing-*` named control geometry. */
-const CONTROL_SIZES = [
+/** `--radius-*` roles (sm/md/lg/xl aliases are stock). */
+const RADII = ["control", "panel", "overlay", "checkbox"] as const;
+
+/**
+ * Every product `--spacing-*` name we know of, registered for all geometry
+ * groups. Registering a name for a group it is never used with is free;
+ * missing a real name is the silent bug class above.
+ */
+const SPACING = [
+  // constitution / shared control chrome
   "control",
-  "control-compact",
   "control-comfortable",
+  "control-compact",
+  "toolbar",
+  "toolbar-compact",
+  "statusbar",
   "touch-target",
+  "menu",
+  "menu-compact",
+  "dialog-sm",
+  "dialog-md",
+  "dialog-lg",
+  "dialog-wide",
+  "dialog-tall",
+  "dialog-scroll",
+  "dialog-scroll-compact",
+  "dialog-viewport",
+  "dialog-viewport-tall",
+  "dialog-sidebar",
+  "overlay-viewport",
+  "panel-sm",
+  "panel-md",
+  "panel-lg",
+  "field-label",
+  "inspector",
+  // molvis extras
+  "tool-rail",
+  "inspector-overlay",
+  "data-count",
+  "data-table",
+  "chart",
+  "analysis-picker",
+  "analysis-list",
+  "pipeline-menu-min",
+  "pipeline-menu-max",
+  // molexp extras
+  "command-offset",
+  "canvas-min",
+  "chart-xs",
+  "chart-sm",
+  "chart-md",
+  "chart-lg",
+  "chart-xl",
+  "structure-preview",
+  "compute-list",
+  "compute-picker",
+  // molhub extras
   "header",
   "row",
   "row-compact",
 ] as const;
 
-/** `--radius-*` roles, backed by the three brand radii. */
-const RADII = ["control", "panel", "overlay"] as const;
-
-/** `--container-*` width caps. */
+/** molhub `--container-*` width caps (and similar max-w names). */
 const CONTAINERS = ["content", "prose-measure", "rail"] as const;
 
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
       "font-size": [{ text: [...FONT_SIZES] }],
-      h: [{ h: [...CONTROL_SIZES] }],
-      "min-h": [{ "min-h": [...CONTROL_SIZES] }],
-      w: [{ w: [...CONTROL_SIZES, ...CONTAINERS] }],
-      size: [{ size: [...CONTROL_SIZES] }],
-      "max-w": [{ "max-w": [...CONTAINERS] }],
       rounded: [{ rounded: [...RADII] }],
+      h: [{ h: [...SPACING] }],
+      "min-h": [{ "min-h": [...SPACING] }],
+      "max-h": [{ "max-h": [...SPACING] }],
+      w: [{ w: [...SPACING, ...CONTAINERS] }],
+      "min-w": [{ "min-w": [...SPACING, ...CONTAINERS] }],
+      "max-w": [{ "max-w": [...SPACING, ...CONTAINERS] }],
+      size: [{ size: [...SPACING] }],
     },
   },
 });
 
-/**
- * Merge class names, letting later Tailwind utilities win over earlier ones.
- *
- * Every primitive under `components/ui/` composes its classes through this, so
- * a caller's `className` can always override a default without `!important`
- * or ordering luck.
- */
+/** Merge class names; later Tailwind utilities win over earlier ones. */
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }

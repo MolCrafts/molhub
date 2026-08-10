@@ -62,10 +62,12 @@
   --mc-radius-xl: 0.55rem;
   --mc-shadow-sm: 0 0.08rem 0.28rem rgba(24, 67, 43, 0.05);
   --mc-shadow-md: 0 0.35rem 0.95rem rgba(24, 67, 43, 0.08);
-  --mc-motion-fast: 120ms;
-  --mc-motion-base: 180ms;
-  --mc-motion-slow: 260ms;
-  --mc-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Alias product motion names onto constitution slots (used by shared UI). */
+  --mc-motion-fast: var(--motion-fast, 120ms);
+  --mc-motion-base: var(--motion-base, 150ms);
+  --mc-motion-slow: var(--motion-slow, 180ms);
+  --mc-ease: var(--motion-ease, cubic-bezier(0.2, 0, 0, 1));
+  --ease-standard: var(--mc-ease);
 
   /* Light paper */
   --mc-canvas: var(--molcrafts-cream);

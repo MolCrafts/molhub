@@ -1,5 +1,14 @@
+/* MolHub product stylesheet.
+ *
+ * Constitution (motion, status roles, shared geometry names):
+ *   ./constitution-theme.css + ./constitution-base.css
+ *   source: molcrafts-ui (`npm run sync:products`)
+ * Brand paper/forest palette stays in ./tokens.css.
+ */
 @import "tailwindcss";
 @import "./tokens.css";
+@import "./constitution-theme.css";
+@import "./constitution-base.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
