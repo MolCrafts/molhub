@@ -1,4 +1,5 @@
 - [streaming-data-tiers-01-strategy](streaming-data-tiers-01-strategy.md) — remote/rolling/ready 三层分级 + 传送带流水线策略之锚；后继 -02 块格式[molnex]、-03 传送带[molhub]、-04 调度集成[molnex]。 [approved]
+- [molix-data-dissolution-05-molhub-reception](molix-data-dissolution-05-molhub-reception.md) — MolNex ETL 层的 molhub 侧接收：tombstone + WaterLES/MolRec/transforms/neighbor-delegate 在 @dataset 协议上重表达。 [approved]
 # MolHub product specifications
 
 这里保存 MolHub 的长期产品合同。与一次性 implementation spec 不同，

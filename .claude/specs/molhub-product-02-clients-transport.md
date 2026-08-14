@@ -108,7 +108,7 @@ digest 的条目报告 skipped 而不是伪造成功。
 
 `molhub.dataset` 在 transport 上提供科学数据便利层：
 
-- runtime-checkable `MapDataset` / `IterableDataset`；
+- runtime-checkable `Dataset` / `IterableDataset`（与 `torch.utils.data` 所需面相同，可超集）；
 - `TargetSchema` 区分 graph-level 与 atom-level；
 - `Targets(frame)` 是读取/写入 `Frame.meta` 的唯一公共适配；
 - `InMemoryDataset` / `SubsetDataset`；
