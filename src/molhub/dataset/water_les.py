@@ -46,7 +46,6 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Box, Element, Frame
 
-from molhub.dataset._meta import write_meta
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import InMemoryDataset, TargetSchema
@@ -170,7 +169,7 @@ def _parse_water_extxyz(path: Path) -> list[Frame]:
         box = _lattice(fields)
         if box is not None:
             frame.box = box
-        write_meta(frame, {"energy": float(fields["energy"])})
+        frame.meta.update({"energy": float(fields["energy"])})
         frames.append(frame)
 
         cursor += 2 + n_atoms

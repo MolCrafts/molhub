@@ -1,15 +1,12 @@
-"""Dataset protocols — map-style and iterable-style interfaces for molecular data.
+"""Dataset protocols (map-style and iterable-style).
 
-Provides two core protocols:
+Copied surface, no third-party dataset framework:
 
-* :class:`MapDataset` — indexable dataset with ``__len__`` and ``__getitem__``.
-  Suitable for datasets whose samples can be randomly accessed by integer index.
+* :class:`Dataset` — ``__len__`` and ``__getitem__``.
+* :class:`IterableDataset` — ``__iter__``.
 
-* :class:`IterableDataset` — streaming dataset with ``__iter__``.
-  Suitable for datasets whose samples are generated or streamed on-the-fly.
-
-Also provides :class:`TargetSchema` to declare target layout, plus
-:class:`InMemoryDataset` and :class:`SubsetDataset` concrete helpers.
+A sample is a :class:`molpy.Frame` (one molecule). Graph-level fields live
+in ``frame.meta``. Concrete helpers may also expose ``source_id``.
 """
 
 from __future__ import annotations
@@ -25,13 +22,10 @@ from molpy import Frame
 # ---------------------------------------------------------------------------
 
 Sample = Frame
-"""A single dataset sample is a :class:`molpy.Frame`.
+"""A sample is a :class:`molpy.Frame` — one molecule.
 
-The ``atoms`` block carries per-atom data (``element``, ``x``, ``y``, ``z``,
-``number``, and optionally ``fx``, ``fy``, ``fz`` for forces).
-Graph-level targets (e.g. energy) live in ``frame.meta`` as typed
-``MetaValue`` entries; read them as plain Python values with
-:class:`molhub.dataset.Targets`.
+Per-atom data lives in the ``atoms`` block. Graph-level fields (energy,
+molecule id, units, …) live in ``frame.meta``.
 """
 
 
@@ -76,32 +70,25 @@ class TargetSchema:
 
 
 @runtime_checkable
-class MapDataset(Protocol):
-    """Protocol for index-addressable (map-style) datasets.
+class Dataset(Protocol):
+    """Map-style dataset: ``__len__`` and ``__getitem__``.
 
-    A map-style dataset supports random access by integer index and reports
-    its total length.
-
-    Implementors must provide ``__len__`` and ``__getitem__``.
+    Extra attributes such as ``source_id`` are optional and are *not* part of
+    this protocol.
     """
-
-    @property
-    def source_id(self) -> str:
-        """Unique, deterministic identifier for cache-key computation."""
-        ...
 
     def __len__(self) -> int:
         """Total number of samples available."""
         ...
 
-    def __getitem__(self, idx: int) -> Sample:
-        """Return the sample at integer *idx*.
+    def __getitem__(self, index: int) -> Sample:
+        """Return the sample at integer *index*.
 
         Returns:
-            A :class:`molpy.core.frame.Frame`.
+            A :class:`molpy.Frame`.
 
         Raises:
-            IndexError: If *idx* is out of range.
+            IndexError: If *index* is out of range.
         """
         ...
 
@@ -113,24 +100,16 @@ class MapDataset(Protocol):
 
 @runtime_checkable
 class IterableDataset(Protocol):
-    """Protocol for streaming (iterable-style) datasets.
+    """Streaming dataset: ``__iter__``.
 
-    An iterable-style dataset yields samples via ``__iter__``.
-
-    Use this for lazy file readers, on-the-fly generation, or datasets
-    too large to index in memory.
+    ``source_id`` is optional and is not required for ``isinstance``.
     """
-
-    @property
-    def source_id(self) -> str:
-        """Unique, deterministic identifier for cache-key computation."""
-        ...
 
     def __iter__(self) -> Iterator[Sample]:
         """Yield samples in streaming order.
 
         Returns:
-            An iterator over :class:`molpy.core.frame.Frame` objects.
+            An iterator over :class:`molpy.Frame` objects.
         """
         ...
 
@@ -141,7 +120,7 @@ class IterableDataset(Protocol):
 
 
 class InMemoryDataset:
-    """A :class:`MapDataset` wrapping an in-memory list of :class:`Frame` objects.
+    """A :class:`Dataset` wrapping an in-memory list of :class:`Frame` objects.
 
     Args:
         frames: List of :class:`Frame` objects.
@@ -164,10 +143,10 @@ class InMemoryDataset:
 
 
 class SubsetDataset:
-    """A :class:`MapDataset` exposing a subset of another by index list.
+    """A :class:`Dataset` exposing a subset of another by index list.
 
     Args:
-        source: Parent :class:`MapDataset`.
+        source: Parent :class:`Dataset`.
         indices: List of 0-based indices into *source*.
         name: Optional named view. When set, :attr:`source_id` uses the
             ``#split={name}`` qualifier (ThreeBPA/QM9 view convention).
@@ -177,7 +156,7 @@ class SubsetDataset:
 
     def __init__(
         self,
-        source: MapDataset,
+        source: Dataset,
         indices: list[int],
         *,
         name: str | None = None,
@@ -213,7 +192,7 @@ class SubsetDataset:
 
 
 __all__ = [
-    "MapDataset",
+    "Dataset",
     "IterableDataset",
     "Sample",
     "TargetSchema",

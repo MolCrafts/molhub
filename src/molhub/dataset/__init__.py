@@ -8,7 +8,6 @@ from molhub.dataset.definition import (
     dataset,
 )
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import MetaCodec, Targets
 from molhub.dataset.molrec import MolRecDataset
 from molhub.dataset.neighbor import NeighborDelegate
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
@@ -68,8 +67,6 @@ __all__ = [
     "UnitConvert",
     "ConstantLabel",
     "NeighborDelegate",
-    "Targets",
-    "MetaCodec",
     "HessianRecord",
     "EnergyForceTrajectory",
     "TorsionProfile",

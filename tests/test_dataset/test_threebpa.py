@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from molhub.coordinate import Coordinate
-from molhub.dataset import ArtifactHub, MapDataset, Targets, ThreeBPADataset
+from molhub.dataset import ArtifactHub, Dataset, ThreeBPADataset
 from molhub.dataset.threebpa import COORDINATE
 
 # Two structures in the shape the real files use: seven columns per atom
@@ -70,7 +70,7 @@ class TestThreeBPADataset:
         assert len(ThreeBPADataset(sample_xyz_path, tag="train_300K")) == 2
 
     def test_is_map_dataset(self, sample_xyz_path):
-        assert isinstance(ThreeBPADataset(sample_xyz_path, tag="train_300K"), MapDataset)
+        assert isinstance(ThreeBPADataset(sample_xyz_path, tag="train_300K"), Dataset)
 
     def test_atoms_block(self, sample_xyz_path):
         atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]
@@ -102,14 +102,14 @@ class TestThreeBPADataset:
 
     def test_energy_in_metadata(self, sample_xyz_path):
         src = ThreeBPADataset(sample_xyz_path, tag="train_300K")
-        assert Targets(src[0]).read()["energy"] == pytest.approx(-40.50)
-        assert Targets(src[1]).read()["energy"] == pytest.approx(-40.45)
+        assert src[0].meta["energy"] == pytest.approx(-40.50)
+        assert src[1].meta["energy"] == pytest.approx(-40.45)
 
     def test_lattice_token_is_not_mistaken_for_the_energy(self, sample_xyz_path):
         """``Lattice="…"`` splits into bare numeric tokens; only ``energy=`` counts."""
-        assert Targets(ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]).read() == {
-            "energy": pytest.approx(-40.50)
-        }
+        frame = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]
+        assert set(frame.meta) == {"energy"}
+        assert frame.meta["energy"] == pytest.approx(-40.50)
 
     def test_forces_shape(self, sample_xyz_path):
         atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]

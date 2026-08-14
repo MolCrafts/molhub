@@ -82,7 +82,7 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Transport | `BlobStore` | On-disk cache keyed by coordinate and role under `$MOLHUB_HOME`, reserved as a cross-SDK contract so one machine downloads once |
 | Transport | `Source` drivers | `https`, `zenodo`, `figshare`, `hf`, `molhub` out of the box. A third party adds a scheme by publishing a driver to the `molhub.sources` entry point — no molhub source change. `PublishingSource` adds upload to the same driver |
 | CLI | `molhub` | `search`, `info`, `fetch --into`, `cache verify` — the same verbs as the Python API |
-| Datasets | `molhub.dataset` (protocols) | `MapDataset` and `IterableDataset` runtime-checkable protocols, plus `TargetSchema` declaring graph-level vs atom-level targets |
+| Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one molecule); graph fields live in `frame.meta` |
 | Datasets | `molhub.dataset` (helpers) | `InMemoryDataset` wraps a list of frames; `SubsetDataset` slices any map-style dataset by index |
 | Datasets | `QM9Dataset` | 130,831 small organic molecules with quantum-chemical properties — auto-downloads & caches `dataset:molcrafts/qm9@v2` |
 | Datasets | `RevMD17Dataset` | Revised MD17 trajectories for 10 molecules, with energies and forces — auto-downloads & caches one molecule of `dataset:molcrafts/revmd17@v4` |
@@ -92,7 +92,7 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Publishing | `molhub.uploader` | Deprecated shims (`HuggingFaceUploader`, `FigshareUploader`) forwarding to those drivers, kept for existing callers |
 | Inspector | `apps/web/` | Shareable structure/trajectory and property-map exploration, with original-source provenance |
 
-Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame`: the `atoms` block holds per-atom data (`element`, `x`, `y`, `z`, `number`, and optionally `fx`, `fy`, `fz`), while graph-level targets such as energy live in `frame.meta`. molpy stores those as dtype-tagged `MetaValue` entries — use `molhub.dataset.Targets(frame)` to read them back as plain Python values.
+Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame` — one molecule. The `atoms` block holds per-atom data; graph-level fields (energy, ids, units, …) live in `frame.meta`.
 
 ## Install
 
@@ -187,13 +187,13 @@ Two rules bite when you write a manifest by hand:
 Every built-in source resolves its own coordinate and fetches through `Molhub`, so there is nothing to download by hand. The blocks below reach upstream on a cold cache.
 
 ```python
-from molhub.dataset import QM9Dataset, CSVDataset, Targets
+from molhub.dataset import QM9Dataset, CSVDataset
 
 # Load QM9 — auto-downloads & caches dataset:molcrafts/qm9@v2
 qm9 = QM9Dataset("./data/qm9")
 print(len(qm9))          # 130831
 frame = qm9[42]          # one sample carries atoms + computed properties
-print(Targets(frame).read())   # {'A': ..., 'B': ..., 'U0': ..., ...}
+print(frame.meta["U0"])
 
 # Load any CSV from a URL or local file. A bare URL is not a coordinate: there is
 # no manifest and no published digest behind it, so it is cached by name under
@@ -201,27 +201,23 @@ print(Targets(frame).read())   # {'A': ..., 'B': ..., 'U0': ..., ...}
 ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
 print(ds.headers)        # ['labels.SMILES', 'labels.Exp_Tg(K)', ...] (column names as published)
 frame = ds[0]
-print(Targets(frame)["labels.Exp_Tg(K)"])
+print(frame.meta["labels.Exp_Tg(K)"])
 ```
 
 ### Dataset protocols
 
-Every dataset conforms to one of two runtime-checkable protocols, so downstream code can consume them generically.
-
-`MapDataset` — index-addressable; supports `len()` and random access by integer position. Use when samples fit in memory or are backed by a random-access store.
+`Dataset` — map-style: `len()` and `__getitem__(int)` → `Frame`.
 
 ```python
 from molpy import Frame
 
-from molhub.dataset import MapDataset
+from molhub.dataset import Dataset
 
 class MyDataset:
     def __len__(self) -> int: ...
-    def __getitem__(self, idx: int) -> Frame: ...
-    @property
-    def source_id(self) -> str: ...
+    def __getitem__(self, index: int) -> Frame: ...
 
-assert isinstance(MyDataset(), MapDataset)  # runtime-checkable protocol
+assert isinstance(MyDataset(), Dataset)
 ```
 
 `IterableDataset` — streaming; samples are yielded one at a time. Use for lazy file readers, on-the-fly generation, or datasets too large to hold in memory.
@@ -235,8 +231,6 @@ from molhub.dataset import IterableDataset
 
 class MyStream:
     def __iter__(self) -> Iterator[Frame]: ...
-    @property
-    def source_id(self) -> str: ...
 
 assert isinstance(MyStream(), IterableDataset)
 ```
@@ -245,7 +239,7 @@ assert isinstance(MyStream(), IterableDataset)
 
 | Target level | Location | Example |
 |---|---|---|
-| `graph_level` | `frame.meta` (read via `Targets(frame)`) | `energy`, `homo`, `lumo` |
+| `graph_level` | `frame.meta` | `energy`, `homo`, `lumo` |
 | `atom_level` | `atoms` block columns | `fx`, `fy`, `fz` |
 
 `InMemoryDataset` / `SubsetDataset` — convenience helpers for wrapping and slicing:
@@ -281,7 +275,7 @@ Graph-level targets: `A`, `B`, `C`, `mu`, `alpha`, `homo`, `lumo`, `gap`, `r2`, 
 **revMD17** (`RevMD17Dataset`) — `dataset:molcrafts/revmd17@v4`, MD17 trajectories recomputed at PBE/def2-SVP for 10 molecules. Upstream publishes each molecule as its own file, so the manifest declares **one role per molecule** (plus a `readme`) and a source fetches only the one it needs — about 150 MB rather than the 1 GB archive. Reference: Christensen & von Lilienfeld, *MLST* (2020).
 
 ```python
-from molhub.dataset import RevMD17Dataset, Targets
+from molhub.dataset import RevMD17Dataset
 
 source = RevMD17Dataset("./data/revmd17", molecule="aspirin")
 # Auto-downloads & caches role "aspirin" of dataset:molcrafts/revmd17@v4.
@@ -289,7 +283,7 @@ print(source.source_id)   # dataset:molcrafts/revmd17@v4#molecule=aspirin
 
 frame = source[100]
 # atoms block: element, x, y, z, number, fx, fy, fz
-print(Targets(frame).read())   # {'energy': ...}
+print(frame.meta["energy"])
 
 # Offline: pass download=False and put rmd17_aspirin.npz in root.
 ```

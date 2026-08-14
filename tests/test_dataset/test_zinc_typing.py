@@ -12,8 +12,7 @@ import pytest
 
 import molhub
 from molhub.coordinate import Coordinate
-from molhub.dataset import ArtifactHub, MapDataset, Targets, ZincTypingDataset
-from molhub.dataset.molecular import MOLECULE_ID
+from molhub.dataset import ArtifactHub, Dataset, ZincTypingDataset
 from molhub.dataset.zinc_typing import COORDINATE
 from molhub.manifest import Manifest
 
@@ -129,7 +128,7 @@ class TestZincTypingDataset:
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
         assert len(ds) == 3
         assert ds.source_id == f"{COORDINATE}#split=train"
-        assert isinstance(ds, MapDataset)
+        assert isinstance(ds, Dataset)
 
     def test_target_schema(self):
         assert ZincTypingDataset.TARGET_SCHEMA.atom_level == frozenset({"atom_type"})
@@ -139,7 +138,7 @@ class TestZincTypingDataset:
     def test_frame_contract(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
         frame = ds[0]
-        assert Targets(frame)[MOLECULE_ID] == "m00"
+        assert frame.meta["molecule_id"] == "m00"
         atoms = frame["atoms"]
         n = len(atoms["number"])
         assert len(atoms["element"]) == n
@@ -153,7 +152,7 @@ class TestZincTypingDataset:
     def test_source_order_preserved(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
         assert ds.molecule_ids == ["m00", "m01", "m02"]
-        assert [Targets(ds[i])[MOLECULE_ID] for i in range(len(ds))] == [
+        assert [ds[i].meta["molecule_id"] for i in range(len(ds))] == [
             "m00",
             "m01",
             "m02",
@@ -182,7 +181,7 @@ class TestZincTypingDataset:
         ds = ZincTypingDataset(tmp_path / "empty", split="val", download=True, hub=hub)
         assert hub.calls == [(COORDINATE, ["main"])]
         assert len(ds) == 1
-        assert Targets(ds[0])[MOLECULE_ID] == "m03"
+        assert ds[0].meta["molecule_id"] == "m03"
 
     def test_unknown_split_raises(self, fixture_root: Path):
         with pytest.raises(ValueError, match="split"):

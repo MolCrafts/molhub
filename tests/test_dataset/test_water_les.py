@@ -20,15 +20,17 @@ Reference:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 import pytest
-from molhub.dataset.water_les import COORDINATE, WaterLESDataset
 from molpy import Frame
 
 from molhub.coordinate import Coordinate
-from molhub.dataset import ArtifactHub, Dataset, Targets
+from molhub.dataset import ArtifactHub, Dataset, water_les
+from molhub.dataset.water_les import COORDINATE, WaterLESDataset
 
 # ---------------------------------------------------------------------------
 # Fixture writer — the molnex conftest, made RNG-free
@@ -128,7 +130,7 @@ class FakeHub:
 
 
 def _energies(frames: Dataset) -> list[float]:
-    return [float(Targets(frames[i])["energy"]) for i in range(len(frames))]
+    return [float(frames[i].meta["energy"]) for i in range(len(frames))]
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +187,7 @@ class TestWaterLESParse:
     def test_energy_is_a_plain_float_target(self, water_les_root):
         """Graph-level energy lives in ``frame.meta`` as a Python float."""
         frame = WaterLESDataset(water_les_root, split="test").load()[0]
-        assert isinstance(Targets(frame)["energy"], float)
+        assert isinstance(frame.meta["energy"], float)
 
     def test_energy_is_the_only_graph_level_target(self, water_les_root):
         """``Lattice="…"`` splits into bare numeric tokens; only ``energy=`` counts."""
@@ -289,7 +291,7 @@ class TestWaterLESUnits:
         frames = WaterLESDataset(water_les_root, split="test").load()
         for i in range(len(frames)):
             frame = frames[i]
-            per_atom = float(Targets(frame)["energy"]) / frame["atoms"].nrows
+            per_atom = float(frame.meta["energy"]) / frame["atoms"].nrows
             assert -20.0 < per_atom < -5.0
 
     def test_energy_passes_through_unscaled(self, water_les_root):
@@ -444,3 +446,43 @@ class TestWaterLESRetrieval:
         (stub_root / WaterLESDataset.TEST_FILE).write_bytes(b"")
         hub = FakeHub({"test": water_les_root / WaterLESDataset.TEST_FILE})
         assert len(WaterLESDataset(stub_root, split="test", hub=hub).load()) == 2
+
+
+# ---------------------------------------------------------------------------
+# Graph-level meta lives on the frame, not behind a molhub wrapper
+# ---------------------------------------------------------------------------
+
+#: The wrapper identifiers ``hf-facade-01-meta-dissolution`` deletes. Boundary
+#: aware on purpose: ``write_metadata`` (DerivedLayout's unrelated conveyor API)
+#: and ``TargetSchema`` / ``TargetDeclaration`` must never match.
+_DISSOLVED_WRAPPERS = re.compile(r"\bTargets\b|\bMetaCodec\b|\bwrite_meta\b(?!data)")
+
+
+def _dissolved_wrapper_names(module: ModuleType) -> list[str]:
+    """Deleted meta-wrapper identifiers still named in *module*'s source."""
+    path = module.__file__
+    assert path is not None
+    source = Path(path).read_text(encoding="utf-8")
+    return sorted({match.group() for match in _DISSOLVED_WRAPPERS.finditer(source)})
+
+
+class TestWaterLESMeta:
+    """The loader's graph-level surface is ``frame.meta`` and nothing else."""
+
+    def test_energy_is_read_straight_off_frame_meta(self, water_les_root):
+        """First test frame carries ``E = -60.0`` eV, with no accessor between."""
+        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        assert float(frame.meta["energy"]) == pytest.approx(-60.0, abs=1e-6)
+
+    def test_frame_meta_hands_back_a_plain_python_float(self, water_les_root):
+        """molpy 0.13 unwraps on read, so nothing in molhub has to decode."""
+        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        assert isinstance(frame.meta["energy"], float)
+
+    def test_module_namespace_holds_no_deleted_meta_wrapper(self):
+        assert [
+            name for name in ("Targets", "MetaCodec", "write_meta") if hasattr(water_les, name)
+        ] == []
+
+    def test_module_source_names_no_deleted_meta_wrapper(self):
+        assert _dissolved_wrapper_names(water_les) == []

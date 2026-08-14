@@ -28,7 +28,6 @@ artifacts:
     size: 4165650
     locators:
       - https://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
-      - http://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz
 
 targets:
   graph_level: []

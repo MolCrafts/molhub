@@ -109,7 +109,6 @@ import numpy as np  # noqa: E402
 from molpy import Block, Frame  # noqa: E402
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder  # noqa: E402
-from molhub.dataset import Targets  # noqa: E402
 from molhub.dataset.themol import THEMOL_UNITS, EnergyForceTrajectory  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -292,7 +291,7 @@ def _frame(
             "bond_number": np.asarray(order, dtype=np.int64),
         }
     )
-    Targets(frame).write(
+    frame.meta.update(
         {
             "molecule_id": molecule_id,
             "source_record_id": molecule_id,

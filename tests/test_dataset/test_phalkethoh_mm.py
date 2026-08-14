@@ -13,8 +13,7 @@ import pytest
 
 import molhub
 from molhub.coordinate import Coordinate
-from molhub.dataset import ArtifactHub, MapDataset, PhalkethohMMDataset, Targets
-from molhub.dataset.molecular import CONFORMER_ID, MOLECULE_ID
+from molhub.dataset import ArtifactHub, Dataset, PhalkethohMMDataset
 from molhub.dataset.phalkethoh_mm import COORDINATE
 from molhub.manifest import Manifest
 
@@ -143,19 +142,19 @@ class TestPhalkethohMMDataset:
         ds = PhalkethohMMDataset(fixture_root, download=False, split=None)
         assert len(ds) == 4  # 2 mol × 2 conf
         assert ds.source_id == COORDINATE
-        assert isinstance(ds, MapDataset)
+        assert isinstance(ds, Dataset)
 
     def test_frame_contract(self, fixture_root: Path):
         ds = PhalkethohMMDataset(fixture_root, download=False, split="train")
         assert len(ds) == 2
         assert ds.source_id == f"{COORDINATE}#split=train"
         f0, f1 = ds[0], ds[1]
-        assert Targets(f0)[MOLECULE_ID] == "molA"
-        assert Targets(f1)[MOLECULE_ID] == "molA"
-        assert Targets(f0)["mm_energy"] == pytest.approx(-1.0)
-        assert Targets(f1)["mm_energy"] == pytest.approx(-1.5)
-        assert Targets(f0)["conf_index"] == 0
-        assert Targets(f1)[CONFORMER_ID] == "1"
+        assert f0.meta["molecule_id"] == "molA"
+        assert f1.meta["molecule_id"] == "molA"
+        assert f0.meta["mm_energy"] == pytest.approx(-1.0)
+        assert f1.meta["mm_energy"] == pytest.approx(-1.5)
+        assert f0.meta["conf_index"] == 0
+        assert f1.meta["conformer_id"] == "1"
         # Å coords hard-coded
         assert float(f0["atoms"]["x"][1]) == pytest.approx(1.0)
         assert float(f1["atoms"]["x"][1]) == pytest.approx(1.1)
@@ -164,14 +163,14 @@ class TestPhalkethohMMDataset:
         # bonds
         assert list(f0["bonds"]["atomi"]) == [0]
         assert list(f0["bonds"]["atomj"]) == [1]
-        assert "legacy_params_json" in Targets(f0)
+        assert "legacy_params_json" in f0.meta
 
     def test_split_keeps_all_confs(self, fixture_root: Path):
         val = PhalkethohMMDataset(fixture_root, download=False, split="val")
         assert len(val) == 2
-        ids = {Targets(val[i])[MOLECULE_ID] for i in range(len(val))}
+        ids = {val[i].meta["molecule_id"] for i in range(len(val))}
         assert ids == {"molB"}
-        energies = [Targets(val[i])["mm_energy"] for i in range(len(val))]
+        energies = [val[i].meta["mm_energy"] for i in range(len(val))]
         assert energies == pytest.approx([-2.0, -2.5])
 
     def test_download_zip_via_hub(self, tmp_path: Path):

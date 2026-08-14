@@ -36,33 +36,55 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 from molpy import Frame, UnitSystem
 
-from molhub.dataset._meta import Targets
-
 __all__ = ["AtomicDress", "UnitConvert", "ConstantLabel"]
 
 MetaScalar = bool | int | float | str
-"""What ``Frame.meta`` stores — the scalar types :class:`MetaCodec` encodes."""
+"""What a graph-level target may be — the scalar types a transform produces.
+
+molpy's own metadata is wider: it also admits fixed-length sequences. No
+dataset target is one, so this union stays the documented contract for the
+values these transforms compute and write.
+"""
+
+_MetaValue = MetaScalar | list[bool | int | float]
+"""Anything ``Frame.meta`` can hand back, including molpy's fixed-length
+sequences. Read paths carry values through untouched, so they must admit a
+value these transforms would never compute themselves."""
 
 
-def _read_targets(sample: Frame) -> dict[str, MetaScalar]:
-    """Graph-level targets of *sample* as plain Python scalars."""
-    return dict(Targets(sample).read())
+def _read_targets(sample: Frame) -> dict[str, _MetaValue]:
+    """Graph-level targets of *sample*, as the plain values molpy hands back.
+
+    The result is detached from the frame: ``Frame.meta`` is a write-through
+    view, and a transform must not write back through the sample it reads.
+    """
+    return dict(sample.meta)
 
 
-def _require_target(targets: Mapping[str, MetaScalar], key: str, owner: str) -> None:
-    """Raise :class:`KeyError` naming *key* when *targets* does not carry it."""
+def _require_number(targets: Mapping[str, _MetaValue], key: str, owner: str) -> float:
+    """Return *key*'s value as a float, refusing a target these cannot rescale.
+
+    Raises:
+        KeyError: *targets* does not carry *key*.
+        TypeError: *key* holds one of molpy's fixed-length sequences, which is
+            metadata but not a scalar target.
+    """
     if key not in targets:
         raise KeyError(f"{owner}: sample carries no target {key!r}; present: {sorted(targets)}")
+    value = targets[key]
+    if isinstance(value, list):
+        raise TypeError(f"{owner}: target {key!r} is a sequence, not a scalar: {value!r}")
+    return float(value)
 
 
-def _with_targets(sample: Frame, targets: Mapping[str, MetaScalar]) -> Frame:
+def _with_targets(sample: Frame, targets: Mapping[str, _MetaValue]) -> Frame:
     """Return a copy of *sample* whose graph-level targets are *targets*.
 
     The copy is what keeps :meth:`execute` pure; ``Frame.meta`` is replaced
     wholesale on the copy, so the caller's frame is untouched.
     """
     updated = sample.copy()
-    Targets(updated).write(dict(targets))
+    updated.meta = dict(targets)
     return updated
 
 
@@ -115,8 +137,7 @@ class AtomicDress:
             numbers = np.asarray(sample["atoms"]["number"])
             rows.append([float((numbers == element).sum()) for element in self.elements])
             targets = _read_targets(sample)
-            _require_target(targets, self.target_key, "AtomicDress.fit")
-            values.append(float(targets[self.target_key]))
+            values.append(_require_number(targets, self.target_key, "AtomicDress.fit"))
 
         counts = np.asarray(rows, dtype=np.float64)
         target = np.asarray(values, dtype=np.float64)
@@ -146,10 +167,10 @@ class AtomicDress:
                 "would silently subtract a zero baseline."
             )
         targets = _read_targets(sample)
-        _require_target(targets, self.target_key, "AtomicDress.execute")
+        value = _require_number(targets, self.target_key, "AtomicDress.execute")
         numbers = np.asarray(sample["atoms"]["number"])
         baseline = sum(self.atomic_energies.get(int(number), 0.0) for number in numbers)
-        targets[self.output_key] = float(targets[self.target_key]) - baseline
+        targets[self.output_key] = value - baseline
         return _with_targets(sample, targets)
 
     def state_dict(self) -> dict[str, np.ndarray]:
@@ -235,8 +256,7 @@ class UnitConvert:
         """
         targets = _read_targets(sample)
         for key, factor in self.factors.items():
-            _require_target(targets, key, "UnitConvert.execute")
-            targets[key] = float(targets[key]) * factor
+            targets[key] = _require_number(targets, key, "UnitConvert.execute") * factor
         return _with_targets(sample, targets)
 
 

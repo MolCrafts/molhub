@@ -13,8 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from molhub.dataset import PhalkethohMMDataset, Targets  # noqa: E402
-from molhub.dataset.molecular import MOLECULE_ID  # noqa: E402
+from molhub.dataset import PhalkethohMMDataset  # noqa: E402
 from molhub.dataset.phalkethoh_mm import COORDINATE  # noqa: E402
 
 
@@ -57,9 +56,9 @@ def main() -> None:
         train = PhalkethohMMDataset(root, download=False, split="train")
         assert len(train) == 2
         assert train.source_id == f"{COORDINATE}#split=train"
-        assert Targets(train[0])[MOLECULE_ID] == "molA"
-        assert Targets(train[0])["mm_energy"] == -1.0
-        assert Targets(train[1])["mm_energy"] == -1.5
+        assert train[0].meta["molecule_id"] == "molA"
+        assert train[0].meta["mm_energy"] == -1.0
+        assert train[1].meta["mm_energy"] == -1.5
     print("mm-param-val-03-phalkethoh-mm: OK")
 
 

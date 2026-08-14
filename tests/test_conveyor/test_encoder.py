@@ -48,7 +48,6 @@ from molpy import Block, Frame
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder
 from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
-from molhub.dataset import Targets
 from molhub.dataset.themol import (
     EnergyForceTrajectory,
     HessianRecord,
@@ -149,7 +148,7 @@ def _frame(
     if bonds is not None:
         frame["bonds"] = Block({name: np.asarray(value) for name, value in bonds.items()})
 
-    Targets(frame).write(
+    frame.meta.update(
         {
             "molecule_id": molecule_id,
             "source_record_id": molecule_id,

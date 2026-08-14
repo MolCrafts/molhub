@@ -35,7 +35,6 @@ from molhub.conveyor.errors import (
     UnroutableUnitError,
 )
 from molhub.conveyor.prepare import PreparedBlock, PreparedBlocks, PrepareJob
-from molhub.dataset import Targets
 from molhub.dataset.themol import THEMOL_UNITS, EnergyForceTrajectory
 
 _PREPARE_SOURCE = Path(molhub.__file__).parent / "conveyor" / "prepare.py"
@@ -142,7 +141,7 @@ def _frame(
             "bond_number": np.asarray(order, dtype=np.int64),
         }
     )
-    Targets(frame).write(
+    frame.meta.update(
         {
             "molecule_id": molecule_id,
             "source_record_id": molecule_id,

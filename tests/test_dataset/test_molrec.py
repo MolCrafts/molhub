@@ -25,10 +25,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from molhub.dataset.molrec import MolRecDataset
 from molpy import Block, Box, Frame, MolRec, Trajectory
 
-from molhub.dataset import Dataset, Targets
+from molhub.dataset import Dataset
+from molhub.dataset.molrec import MolRecDataset
 from molhub.dataset.protocol import TargetSchema
 
 # ---------------------------------------------------------------------------
@@ -229,19 +229,19 @@ class TestMolRecRecordToSample:
     def test_scalar_target_values_are_per_frame(self, conformer_record):
         """Energy tolerance 1e-10 — the write→read path is expected to be exact."""
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(Targets(frames[i])["U0"]) for i in range(len(frames))]
+        got = [float(frames[i].meta["U0"]) for i in range(len(frames))]
         for value, want in zip(got, _U0):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_second_scalar_target_is_not_mixed_with_the_first(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(Targets(frames[i])["gap"]) for i in range(len(frames))]
+        got = [float(frames[i].meta["gap"]) for i in range(len(frames))]
         for value, want in zip(got, _GAP):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_scalar_target_is_a_plain_float(self, conformer_record):
         frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]
-        assert isinstance(Targets(frame)["U0"], float)
+        assert isinstance(frame.meta["U0"], float)
 
     def test_repeated_topology_atomic_numbers(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
@@ -314,13 +314,13 @@ class TestMolRecTeacherIsolation:
 
     def test_teacher_a_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
-        got = [float(Targets(frames[i])["energy"]) for i in range(len(frames))]
+        got = [float(frames[i].meta["energy"]) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_A):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_teacher_b_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherB").load()
-        got = [float(Targets(frames[i])["energy"]) for i in range(len(frames))]
+        got = [float(frames[i].meta["energy"]) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_B):
             assert value == pytest.approx(want, abs=1e-10)
 

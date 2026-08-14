@@ -7,12 +7,14 @@ suite never touches Figshare.
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from molpy import Frame
 
-from molhub.dataset import ArtifactHub, Targets
+from molhub.dataset import ArtifactHub, qm9
 from molhub.dataset.qm9 import (
     COORDINATE,
     QM9Dataset,
@@ -78,44 +80,67 @@ class TestParseXyz:
 
     def test_all_fifteen_targets_present(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert set(Targets(frame).read()) == set(QM9Dataset.ALL_TARGETS)
+        assert set(frame.meta) == set(QM9Dataset.ALL_TARGETS)
 
     def test_tag_and_index_are_not_targets(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert "tag" not in Targets(frame).read()
-        assert "index" not in Targets(frame).read()
+        assert "tag" not in frame.meta
+        assert "index" not in frame.meta
 
     def test_target_values(self):
-        meta = Targets(_parse_xyz(_SAMPLE_XYZ)).read()
-        assert meta["A"] == pytest.approx(157.7118)
-        assert meta["U0"] == pytest.approx(-40.47893)
-        assert meta["Cv"] == pytest.approx(6.469)
+        frame = _parse_xyz(_SAMPLE_XYZ)
+        targets = frame.meta
+        assert targets["A"] == pytest.approx(157.7118)
+        assert targets["U0"] == pytest.approx(-40.47893)
+        assert targets["Cv"] == pytest.approx(6.469)
 
     def test_star_caret_exponent_is_rewritten(self):
-        meta = Targets(_parse_xyz(_STARCARET_XYZ)).read()
-        assert meta["A"] == pytest.approx(1e-3)
+        assert _parse_xyz(_STARCARET_XYZ).meta["A"] == pytest.approx(1e-3)
 
 
 class TestFilterTargets:
     def test_keeps_only_requested(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset({"U0", "gap"}))
-        assert set(Targets(frame).read()) == {"U0", "gap"}
+        assert set(frame.meta) == {"U0", "gap"}
 
     def test_kept_values_survive(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset({"U0"}))
-        assert Targets(frame).read()["U0"] == pytest.approx(-40.47893)
+        assert frame.meta["U0"] == pytest.approx(-40.47893)
 
     def test_empty_keep_set_drops_everything(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset())
-        assert Targets(frame).read() == {}
+        assert frame.meta == {}
 
     def test_atoms_block_untouched(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset({"U0"}))
         assert list(frame["atoms"]["number"]) == [6, 1, 1, 1, 1]
+
+    def test_a_meta_key_the_parser_never_wrote_is_dropped_too(self):
+        """The filter *replaces* the frame's meta; it does not merge into it.
+
+        A merge (``frame.meta.update(kept)``) would leave every unfiltered key
+        standing, which is the whole failure this filter exists to prevent.
+        """
+        frame = _parse_xyz(_SAMPLE_XYZ)
+        frame.meta["custom_scalar"] = 1.5
+        _filter_targets(frame, frozenset({"U0"}))
+        assert "custom_scalar" not in frame.meta
+
+    def test_surviving_key_set_is_exactly_the_kept_set(self):
+        frame = _parse_xyz(_SAMPLE_XYZ)
+        frame.meta["custom_scalar"] = 1.5
+        _filter_targets(frame, frozenset({"U0"}))
+        assert set(frame.meta) == {"U0"}
+
+    def test_the_kept_value_is_read_straight_off_frame_meta(self):
+        frame = _parse_xyz(_SAMPLE_XYZ)
+        frame.meta["custom_scalar"] = 1.5
+        _filter_targets(frame, frozenset({"U0"}))
+        assert float(frame.meta["U0"]) == pytest.approx(-40.47893, abs=1e-10)
 
 
 class TestLoadExclusionList:
@@ -244,7 +269,7 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4], excluded=[2, 4])
         src = QM9Dataset(tmp_path, download=False)
         assert len(src) == 2
-        assert sorted(Targets(src[i]).read()["U0"] for i in range(len(src))) == [-3.0, -1.0]
+        assert sorted(src[i].meta["U0"] for i in range(len(src))) == [-3.0, -1.0]
 
     def test_empty_exclusion_list_keeps_everything(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3], excluded=[])
@@ -265,7 +290,7 @@ class TestQM9EndToEnd:
 
         def _sample() -> list[float]:
             src = QM9Dataset(tmp_path, total=5, download=False)
-            return [Targets(src[i]).read()["U0"] for i in range(len(src))]
+            return [src[i].meta["U0"] for i in range(len(src))]
 
         first, second = _sample(), _sample()
         assert len(first) == 5
@@ -279,13 +304,13 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=[1, 2])
         src = QM9Dataset(tmp_path, targets=["U0"], download=False)
         for i in range(len(src)):
-            assert set(Targets(src[i]).read()) == {"U0"}
+            assert set(src[i].meta) == {"U0"}
 
     def test_is_map_dataset(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
-        from molhub.dataset import MapDataset
+        from molhub.dataset import Dataset
 
-        assert isinstance(QM9Dataset(tmp_path, download=False), MapDataset)
+        assert isinstance(QM9Dataset(tmp_path, download=False), Dataset)
 
     def test_index_out_of_range(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
@@ -340,3 +365,34 @@ class TestQM9TargetSchema:
 
     def test_no_atom_level_targets(self):
         assert QM9Dataset.TARGET_SCHEMA.atom_level == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# Graph-level meta lives on the frame, not behind a molhub wrapper
+# ---------------------------------------------------------------------------
+
+#: The wrapper identifiers ``hf-facade-01-meta-dissolution`` deletes. Boundary
+#: aware on purpose: ``write_metadata`` (DerivedLayout's unrelated conveyor API)
+#: and ``TargetSchema`` / ``TargetDeclaration`` must never match.
+_DISSOLVED_WRAPPERS = re.compile(r"\bTargets\b|\bMetaCodec\b|\bwrite_meta\b(?!data)")
+
+
+def _dissolved_wrapper_names(module: ModuleType) -> list[str]:
+    """Deleted meta-wrapper identifiers still named in *module*'s source."""
+    path = module.__file__
+    assert path is not None
+    source = Path(path).read_text(encoding="utf-8")
+    return sorted({match.group() for match in _DISSOLVED_WRAPPERS.finditer(source)})
+
+
+class TestQM9MetaSurface:
+    """QM9 writes and filters targets through ``frame.meta`` directly."""
+
+    def test_parsed_target_is_read_straight_off_frame_meta(self):
+        assert float(_parse_xyz(_SAMPLE_XYZ).meta["U0"]) == pytest.approx(-40.47893, abs=1e-10)
+
+    def test_module_namespace_holds_no_deleted_meta_wrapper(self):
+        assert [name for name in ("Targets", "MetaCodec", "write_meta") if hasattr(qm9, name)] == []
+
+    def test_module_source_names_no_deleted_meta_wrapper(self):
+        assert _dissolved_wrapper_names(qm9) == []

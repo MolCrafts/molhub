@@ -36,8 +36,6 @@ import numpy as np
 from molpy import Block, Element, Frame
 
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import Targets
-from molhub.dataset.molecular import CONFORMER_ID, MOLECULE_ID
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
@@ -155,7 +153,7 @@ def _load_molecule_confs(mol_dir: Path, molecule_id: str) -> list[Frame]:
     legacy_path = mol_dir / "legacy_params.json"
     legacy: str | None = None
     if legacy_path.is_file():
-        # Store as JSON string meta so MetaCodec (str only) can hold it.
+        # Store as a JSON string so frame.meta (scalars only) can hold it.
         legacy = legacy_path.read_text()
 
     frames: list[Frame] = []
@@ -177,14 +175,14 @@ def _load_molecule_confs(mol_dir: Path, molecule_id: str) -> list[Frame]:
             frame["bonds"] = bonds_blk
 
         meta: dict[str, object] = {
-            MOLECULE_ID: str(molecule_id),
-            CONFORMER_ID: str(conf_i),
+            "molecule_id": str(molecule_id),
+            "conformer_id": str(conf_i),
             "conf_index": int(conf_i),
             "mm_energy": float(energies[conf_i]),
         }
         if legacy is not None:
             meta["legacy_params_json"] = legacy
-        Targets(frame).write(meta)
+        frame.meta.update(meta)
         frames.append(frame)
     return frames
 

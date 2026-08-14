@@ -34,8 +34,6 @@ import numpy as np
 from molpy import Block, Element, Frame
 
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import Targets
-from molhub.dataset.molecular import MOLECULE_ID
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
@@ -128,7 +126,7 @@ def _load_molecule(mol_dir: Path, molecule_id: str) -> Frame:
     frame = Frame()
     frame["atoms"] = atoms_blk
     frame["bonds"] = bonds_blk
-    Targets(frame).write({MOLECULE_ID: str(molecule_id)})
+    frame.meta.update({"molecule_id": str(molecule_id)})
     return frame
 
 

@@ -11,7 +11,7 @@ namespace: espaloma
 name: phalkethoh-mm-small
 version: "1"
 
-title: PhAlkEthOH MM-small multi-conformer MM energies (Espaloma toy)
+title: PhAlkEthOH MM-small multi-conformer MM energies
 description: >-
   Espaloma subsampled PhAlkEthOH MM-fitting set: 173 C/H/O molecules with 100
   conformers each (17 300 frames). Reference MM energies stored as graph-level

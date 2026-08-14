@@ -39,7 +39,6 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame, MolRec
 
-from molhub.dataset._meta import write_meta
 from molhub.dataset.protocol import InMemoryDataset, TargetSchema
 
 __all__ = ["MolRecDataset"]
@@ -129,7 +128,7 @@ class MolRecDataset:
 
     @property
     def target_schema(self) -> TargetSchema:
-        """Targets this teacher exposes: scalars graph-level, vectors atom-level."""
+        """Target names this teacher exposes: scalars graph-level, vectors atom-level."""
         return TargetSchema(
             graph_level=frozenset(self._scalars),
             atom_level=frozenset(self._vectors),
@@ -191,5 +190,5 @@ class MolRecDataset:
         frame["atoms"] = atoms
         if source.box is not None:
             frame.box = source.box
-        write_meta(frame, {name: float(data[index]) for name, data in self._scalars.items()})
+        frame.meta.update({name: float(data[index]) for name, data in self._scalars.items()})
         return frame

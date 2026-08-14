@@ -62,7 +62,6 @@ from typing import Any
 import numpy as np
 
 from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
-from molhub.dataset import Targets
 from molhub.dataset.themol import (
     EnergyForceTrajectory,
     HessianRecord,
@@ -268,7 +267,7 @@ class THEMolUnitEncoder:
 
         for index, frame in enumerate(frames):
             atoms = frame["atoms"]
-            targets = Targets(frame).read()
+            targets = frame.meta
             if index == 0:
                 topology = self._topology(key, frame)
                 identity = self.identity(self._smiles(key, targets))

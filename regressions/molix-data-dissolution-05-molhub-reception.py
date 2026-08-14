@@ -61,7 +61,6 @@ from molhub.dataset import (  # noqa: E402
     Dataset,
     MolRecDataset,
     NeighborDelegate,
-    Targets,
     UnitConvert,
     WaterLESDataset,
 )
@@ -287,7 +286,7 @@ def _dress_sample(numbers: list[int], targets: dict[str, float]) -> Frame:
     block = Block()
     block["number"] = np.array(numbers, dtype=np.int64)
     frame["atoms"] = block
-    Targets(frame).write(targets)
+    frame.meta.update(targets)
     return frame
 
 
@@ -361,16 +360,16 @@ def check_water_les(root: Path, empty_root: Path) -> None:
     # eV pass through unscaled, and the split is the upstream tail slice.
     assert set(first.meta) == {"energy"}
     for index, want in enumerate(_TEST_ENERGIES):
-        assert abs(float(Targets(test_split[index])["energy"]) - want) <= _ENERGY_TEXT_ATOL
+        assert abs(float(test_split[index].meta["energy"]) - want) <= _ENERGY_TEXT_ATOL
 
     train = WaterLESDataset(root, split="train").load()
     val = WaterLESDataset(root, split="val").load()
     assert len(train) == _TRAIN_LEN
     assert len(val) == _VAL_LEN
     for index, want in enumerate(_VAL_ENERGIES):
-        assert abs(float(Targets(val[index])["energy"]) - want) <= _ENERGY_TEXT_ATOL
-    train_energies = {float(Targets(train[i])["energy"]) for i in range(len(train))}
-    assert all(float(Targets(val[i])["energy"]) not in train_energies for i in range(len(val)))
+        assert abs(float(val[index].meta["energy"]) - want) <= _ENERGY_TEXT_ATOL
+    train_energies = {float(train[i].meta["energy"]) for i in range(len(train))}
+    assert all(float(val[i].meta["energy"]) not in train_energies for i in range(len(val)))
 
     assert WaterLESDataset.TRAIN_VAL_RATIO == (0.95, 0.05)
     assert WaterLESDataset.TARGET_SCHEMA.graph_level == frozenset({"energy"})
@@ -434,7 +433,7 @@ def check_molrec(record_path: Path) -> None:
 
     assert set(frames[0].meta) == {"energy"}, "the teacher prefix must be stripped"
     for index, want in enumerate(_EXPECTED_ENERGY_A):
-        assert abs(float(Targets(frames[index])["energy"]) - want) <= _ENERGY_EXACT_ATOL
+        assert abs(float(frames[index].meta["energy"]) - want) <= _ENERGY_EXACT_ATOL
         block = frames[index]["atoms"]
         for component, column in enumerate(("fx", "fy", "fz")):
             assert np.allclose(
@@ -452,7 +451,7 @@ def check_molrec(record_path: Path) -> None:
     assert set(b_frames[0].meta) == {"energy"}
     assert "fx" not in b_frames[0]["atoms"]
     for index, want in enumerate(_EXPECTED_ENERGY_B):
-        assert abs(float(Targets(b_frames[index])["energy"]) - want) <= _ENERGY_EXACT_ATOL
+        assert abs(float(b_frames[index].meta["energy"]) - want) <= _ENERGY_EXACT_ATOL
 
     assert teacher_a.source_id == _MOLREC_SOURCE_ID
     assert teacher_a.source_id != teacher_b.source_id
@@ -489,11 +488,11 @@ def check_transforms() -> None:
     for element, want in _BASELINES.items():
         assert abs(dress.atomic_energies[element] - want) <= _ENERGY_EXACT_ATOL
 
-    residuals = [float(Targets(dress.execute(sample))["U0_dressed"]) for sample in samples]
+    residuals = [float(dress.execute(sample).meta["U0_dressed"]) for sample in samples]
     for got, want in zip(residuals, _RESIDUALS):
         assert abs(got - want) <= _ENERGY_EXACT_ATOL
     assert abs(sum(r * r for r in residuals) - _RESIDUAL_SS) <= _ENERGY_EXACT_ATOL
-    untouched = float(Targets(samples[0])["U0"])
+    untouched = float(samples[0].meta["U0"])
     assert abs(untouched + 9.0) <= _ENERGY_EXACT_ATOL, "execute mutated its input sample"
 
     state = dress.state_dict()
@@ -503,7 +502,7 @@ def check_transforms() -> None:
     for element, want in _BASELINES.items():
         assert abs(restored.atomic_energies[element] - want) <= _ENERGY_EXACT_ATOL
     for sample, want in zip(samples, _RESIDUALS):
-        got = float(Targets(restored.execute(sample))["U0_dressed"])
+        got = float(restored.execute(sample).meta["U0_dressed"])
         assert abs(got - want) <= _ENERGY_EXACT_ATOL
 
     convert = UnitConvert(
@@ -520,14 +519,14 @@ def check_transforms() -> None:
     energy_only = UnitConvert({"U0": ("hartree", "eV")})
     sample = _dress_sample([1, 1, 8], {"U0": 2.0, "gap": 0.25})
     converted = energy_only.execute(sample)
-    assert abs(float(Targets(converted)["U0"]) / (2 * _HARTREE_TO_EV) - 1.0) <= 1e-6
-    assert abs(float(Targets(converted)["gap"]) - 0.25) <= _ENERGY_EXACT_ATOL
-    assert abs(float(Targets(sample)["U0"]) - 2.0) <= _ENERGY_EXACT_ATOL, "execute mutated input"
+    assert abs(float(converted.meta["U0"]) / (2 * _HARTREE_TO_EV) - 1.0) <= 1e-6
+    assert abs(float(converted.meta["gap"]) - 0.25) <= _ENERGY_EXACT_ATOL
+    assert abs(float(sample.meta["U0"]) - 2.0) <= _ENERGY_EXACT_ATOL, "execute mutated input"
 
     labelled = ConstantLabel(key="total_charge", value=0.0).execute(converted)
-    assert isinstance(Targets(labelled)["total_charge"], float)
-    assert abs(float(Targets(labelled)["total_charge"])) <= _ENERGY_EXACT_ATOL
-    assert abs(float(Targets(labelled)["gap"]) - 0.25) <= _ENERGY_EXACT_ATOL
+    assert isinstance(labelled.meta["total_charge"], float)
+    assert abs(float(labelled.meta["total_charge"])) <= _ENERGY_EXACT_ATOL
+    assert abs(float(labelled.meta["gap"]) - 0.25) <= _ENERGY_EXACT_ATOL
     assert "total_charge" not in converted.meta, "execute mutated input"
 
     print(

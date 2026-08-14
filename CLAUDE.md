@@ -183,8 +183,9 @@ For non-trivial work, prefer:
   **molhub 绝不自行计算 digest** —— 自算的值只能证明「我那次下载到了什么」，且会让
   编目必须先下载整个制品。
 - **`Source` 驱动接口** — 第三方据此扩展；MolCrafts 自建 source 亦不得特例化。
-- **`molhub.dataset` 的公开协议** — `MapDataset` / `IterableDataset` /
-  `TargetSchema` 已被下游消费，变更需走 stage 策略。
+- **`molhub.dataset` 的公开协议** — `Dataset`（`__len__` / `__getitem__`）与
+  `IterableDataset`（`__iter__`）。样本就是 `molpy.Frame`；图级字段读
+  `frame.meta[key]`。不另造 Targets / MolecularFrame / MoleculeSplit。
 
 <!-- mol:bootstrap:managed end -->
 

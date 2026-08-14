@@ -7,9 +7,9 @@ import pytest
 from molpy import Block, Frame
 
 from molhub.dataset.protocol import (
+    Dataset,
     InMemoryDataset,
     IterableDataset,
-    MapDataset,
     SubsetDataset,
     TargetSchema,
 )
@@ -94,9 +94,9 @@ class TestInMemoryDataset:
         ds = InMemoryDataset([], name="test")
         assert ds.source_id.startswith("memory:test")
 
-    def test_is_map_dataset(self):
+    def test_is_dataset(self):
         ds = InMemoryDataset([])
-        assert isinstance(ds, MapDataset)
+        assert isinstance(ds, Dataset)
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +130,10 @@ class TestSubsetDataset:
         assert sub.source_id == f"{base.source_id}#split=molhub-random-molecule:train"
         assert ":subset=" not in sub.source_id
 
-    def test_is_map_dataset(self):
+    def test_is_dataset(self):
         base = InMemoryDataset([_make_frame([1])])
         sub = SubsetDataset(base, [0])
-        assert isinstance(sub, MapDataset)
+        assert isinstance(sub, Dataset)
 
     def test_out_of_range(self):
         base = InMemoryDataset([_make_frame([1])], name="base")
@@ -147,31 +147,42 @@ class TestSubsetDataset:
 # ---------------------------------------------------------------------------
 
 
-class TestMapDatasetProtocol:
+class TestDatasetProtocol:
     def test_runtime_checkable(self):
-        assert isinstance(InMemoryDataset([]), MapDataset)
+        assert isinstance(InMemoryDataset([]), Dataset)
+
+    def test_len_and_getitem_suffice(self):
+        class MapShaped:
+            def __len__(self) -> int:
+                return 0
+
+            def __getitem__(self, index: int) -> Frame:
+                raise IndexError(index)
+
+        assert isinstance(MapShaped(), Dataset)
 
     def test_fails_on_iterable_only(self):
         class Streaming:
-            @property
-            def source_id(self):
-                return "stream:1"
-
             def __iter__(self):
                 yield from []
 
-        assert not isinstance(Streaming(), MapDataset)
+        assert not isinstance(Streaming(), Dataset)
 
 
 class TestIterableDatasetProtocol:
     def test_runtime_checkable(self):
         class Stream:
-            source_id = "s:1"
-
             def __iter__(self):
                 yield from []
 
         assert isinstance(Stream(), IterableDataset)
 
     def test_fails_on_map_only(self):
-        assert not isinstance(InMemoryDataset([]), IterableDataset)
+        class MapOnly:
+            def __len__(self) -> int:
+                return 0
+
+            def __getitem__(self, index: int) -> Frame:
+                raise IndexError(index)
+
+        assert not isinstance(MapOnly(), IterableDataset)

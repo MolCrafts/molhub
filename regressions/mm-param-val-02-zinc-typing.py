@@ -13,8 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from molhub.dataset import Targets, ZincTypingDataset  # noqa: E402
-from molhub.dataset.molecular import MOLECULE_ID  # noqa: E402
+from molhub.dataset import ZincTypingDataset  # noqa: E402
 from molhub.dataset.zinc_typing import COORDINATE  # noqa: E402
 
 
@@ -59,7 +58,7 @@ def main() -> None:
         assert len(test) == 1
         assert train.source_id == f"{COORDINATE}#split=train"
         frame = train[0]
-        assert Targets(frame)[MOLECULE_ID] == "m00"
+        assert frame.meta["molecule_id"] == "m00"
         assert list(frame["atoms"]["atom_type"]) == ["c3", "hc"]
         assert list(frame["bonds"]["atomi"]) == [0]
         assert list(frame["bonds"]["atomj"]) == [1]
