@@ -1,3 +1,4 @@
+- [streaming-data-tiers-01-strategy](streaming-data-tiers-01-strategy.md) — remote/rolling/ready 三层分级 + 传送带流水线策略之锚；后继 -02 块格式[molnex]、-03 传送带[molhub]、-04 调度集成[molnex]。 [approved]
 # MolHub product specifications
 
 这里保存 MolHub 的长期产品合同。与一次性 implementation spec 不同，
@@ -30,6 +31,19 @@
 每份 spec 都有同名 `.acceptance.md`。Acceptance status 比 spec 顶层状态更细；不得为了
 让整份 spec 看起来完成而把 production、visual 或 cross-repo criteria 提前标绿。
 
+## Implementation chain: python-native-dataset-protocol
+
+Python-native dataset 定义协议（`@dataset` + `load()` → 集合）。一次性实施链；完成后由 `mol:close` 删除。不替代 product-01 YAML registry，只修订 product-02 的 Python dataset 段。
+
+| Position | Spec | Status | Outcome |
+|---:|---|---|---|
+| 01 | [声明面：装饰器、清单、编目](python-native-dataset-protocol-01-types.md) | approved | `@dataset` + `DatasetManifest` + `Datasets`；FrameCollection 评估：不引入 molpy 类层次 |
+| 02 | [资源助手 fetch/open/cache_dir](python-native-dataset-protocol-02-helpers.md) | approved | 实例 `.fetch` / `.open` / `.cache_dir`；构造不取字节 |
+| 03 | [load() 与 QM9 参考实现](python-native-dataset-protocol-03-load.md) | approved | 定义类不再是 Dataset；`load()` 返回 PyTorch 对齐的 InMemoryDataset |
+| 04 | [迁移 RevMD17 / ThreeBPA / CSV](python-native-dataset-protocol-04-migrate.md) | approved | 与 QM9 同一交互；CSV 无假坐标 |
+| 05 | [迁移 Zinc / Phalkethoh](python-native-dataset-protocol-05-mm.md) | approved | load() → Frame 集合；删除 MolecularFrame / MoleculeSplit |
+| 06 | [公开面 resolve 与文档](python-native-dataset-protocol-06-surface.md) | approved | `from molhub.dataset import QM9`；包级 `resolve` |
+
 ## Implementation chain: molhub-delivery
 
 这是 2026-08-09 对 product 01–06 审计后产生的一次性实施链；完成后由 `mol:close`
@@ -38,6 +52,18 @@
 | Position | Spec | Status | Outcome |
 |---:|---|---|---|
 | 02 | [Inspector 生命周期证据](molhub-delivery-02-guard-inspector.md) | code-complete | 自动证明 role/route 取消与 dispose；扩充 keyboard/mobile-light 证据 |
+
+## Scientific collection chain: universal-class-i-dataset
+
+This chain owns source registration, physical-role composition, provenance,
+group identity, derived subsets, global molecular identity, split policy, and
+frozen evaluation collections. MolNex remains dataset-agnostic; a Molexp
+experiment consumes the pinned MolHub collection and owns task scheduling and
+run-specific configuration.
+
+| Position | Spec | Status | Outcome |
+|---:|---|---|---|
+| 01 | [Universal Class-I dataset composition](universal-class-i-01-dataset-composition.md) | approved | THEMol-first task collection, derived relaxation subset, hierarchical identity/splits, OMol25/OPoly26 evolution |
 
 ## Feature coverage
 
@@ -49,7 +75,7 @@
 | coordinate、manifest、locator、digest、cache | 01、02 |
 | 单一契约，消灭重复校验 | 01、02 |
 | Python SDK、TypeScript SDK、CLI、未来其他语言 | 02 |
-| dataset adapters 与统一 Frame/Target interface | 02 |
+| dataset adapters 与统一 Frame/Target interface | 02、python-native-dataset-protocol-01..06 |
 | 上传到 Figshare/Hugging Face | 03 |
 | 网站提交 manifest，不强迫 GitHub | 03 |
 | GitHub 直接 YAML 贡献 | 03 |
@@ -90,3 +116,8 @@
 旧 `registry-core-02`–`06` 是迁移期 implementation specs，包含已经推翻的假设：独立
 `molhub-js/molhub-app` 仓、`molhub-index` 名称、content-addressed cache、强制 MolHub
 自行计算 SHA-256，以及网站不能提交 manifest。它们由本产品链取代，不应恢复为真相源。
+
+## Closed external programs
+
+The former MM parameter-validation baseline chain in MolNex is closed and is
+not an authority for current dataset selection or production submission.
