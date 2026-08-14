@@ -172,8 +172,8 @@ correctness property of block *k* depends on block *j* being present.
 molecule's conformer bundle, or a *complete* torsion scan — must never straddle
 two blocks. This is the streaming-tier mirror of the unit-integrity property that
 `TokenBudgetPacker` already provides inside a batch
-(`molnex:src/molix/data/sampler.py:47`, and its aggregate-cost use at
-`molnex:src/molix/data/sampler.py:571-620`): a scan only carries its torsion profile
+(`molnex:src/molix/batch/sampler.py:47`, and its aggregate-cost use at
+`molnex:src/molix/batch/sampler.py:571-620`): a scan only carries its torsion profile
 when its frames are comparable within one batch, so a scan split across two
 blocks would either break the profile or force both blocks resident, defeating
 delete-after-consume. Blocks are additionally **split-pure**: one block belongs
@@ -205,8 +205,10 @@ state is simply re-run. Digest verification happens at the remote→local bounda
 with bounded retry: transient corruption of a downloaded shard has been observed
 in practice, so a mismatch must trigger re-fetch, and a mismatching block must
 never reach READY. The in-repo precedent for digest-pinned fetching is
-`WaterLESSource` (`molnex:src/molix/datasets/_data_acquisition.md`,
-`molnex:src/molix/datasets/water_les.py`); which layer implements the fetcher is a
+molhub's own `Molhub.fetch` + `sources/digest.py`, consumed by the reception
+adapters (`src/molhub/dataset/water_les.py`; the former molnex `WaterLESSource`
+was deleted at molnex `6d425f7` — see `molnex-etl-tombstone.md`); which layer
+implements the fetcher is a
 successor decision, but the invariant is fixed here.
 
 ### 4. Three-stage conveyor
@@ -243,7 +245,7 @@ train → **delete unpacked**.
 
 ### 5. Plan globally, consume rolling — the resolution
 
-`TaskMixtureBatchSampler` (`molnex:src/molix/data/sampler.py:267`) builds an **eager,
+`TaskMixtureBatchSampler` (`molnex:src/molix/batch/sampler.py:267`) builds an **eager,
 fully deterministic** plan in `__init__` from **metadata only**: per-sample
 atom/edge counts via packed-cache pointer arithmetic
 (`sampler.py:532-547`), caller-supplied `task_labels` / `group_ids`, a mixture,
@@ -265,9 +267,9 @@ they are resident for the whole run. Therefore:
 **The sampler needs no redesign.** What is missing is a *block-aware iterator /
 scheduler layer* that maps plan slices to READY blocks and applies backpressure
 when a needed block is not yet READY. `DataModule` already has the seam for it:
-`batch_sampler_source` (`molnex:src/molix/data/datamodule.py:148`, called once per epoch
-with `seed + epoch` at `molnex:src/molix/data/datamodule.py:264-266`, protocol at
-`molnex:src/molix/data/sampler.py:811`). That layer is owned by
+`batch_sampler_source` (`molnex:src/molix/batch/datamodule.py:148`, called once per epoch
+with `seed + epoch` at `molnex:src/molix/batch/datamodule.py:264-266`, protocol at
+`molnex:src/molix/batch/sampler.py:811`). That layer is owned by
 `-04-scheduler-integration`, not by this spec.
 
 Named scaling risk (recorded, not waived — Iron law):
@@ -275,7 +277,7 @@ Named scaling risk (recorded, not waived — Iron law):
 > **R1 — per-frame Python tables are the plan's memory wall, not the policy.**
 > `TaskMixtureBatchSampler` consumes `task_labels` / `group_ids` as parent-space
 > Python sequences of length `len(dataset)`, and `TokenBudgetPacker.__init__`
-> materializes counts as Python int lists (`molnex:src/molix/data/sampler.py:89`). At
+> materializes counts as Python int lists (`molnex:src/molix/batch/sampler.py:89`). At
 > 10^6–10^7 frames this is irrelevant. At 10^8 frames it is ≈ 0.8–3.6 GB per
 > count vector plus ≈ 6–8 GB for distinct `"<mol>:<dihedral>"` group strings.
 > The sampling *policy* is sound at any scale; the *representation* is not.
@@ -391,11 +393,11 @@ expiry, multi-node visibility) is owned by `-03-conveyor`.
 
 | Spec | Owned surface | Must satisfy | Exit criterion |
 |---|---|---|---|
-| **-02-block-format** (repo: **molnex**) | the READY-tier block store format (`PackedCache` v2 / `PackedStore`) as a *streaming-appendable column store* | I1, I2, I5, I7 | format is: **appendable** (a block can be written incrementally without rewriting predecessors), **unit-aligned** (I2 structural, not checked), **mmap zero-copy** on read, **few files per block** (HPC inode discipline, per `molnex:src/molix/data/cache.py:1-49`), **per-block provenance + sha256** embedded. Requirements only — the class design is out of scope here. |
+| **-02-block-format** (repo: **molnex**) | the READY-tier block store format (`PackedCache` v2 / `PackedStore`) as a *streaming-appendable column store* | I1, I2, I5, I7 | format is: **appendable** (a block can be written incrementally without rewriting predecessors), **unit-aligned** (I2 structural, not checked), **mmap zero-copy** on read, **few files per block** (HPC inode discipline, per `molnex:src/molix/store/cache.py:1-49`), **per-block provenance + sha256** embedded. Requirements only — the class design is out of scope here. |
 | **-03-conveyor** (repo: **molhub**) | prefetch / prepare stages, the block ledger, queue backpressure, leases | I3, I4, I5, I6, I9, I10 | a bounded-residency conveyor that keeps a ready queue non-empty under measured `B_net`, recovers from a mid-block crash, and provably never exceeds the byte budget. |
-| **-04-scheduler-integration** (repo: **molnex**) | block-aware batch iterator behind `batch_sampler_source`, plan↔block mapping, R1 resolution | I7, I8, I10 | the eager plan of `molnex:src/molix/data/sampler.py:267` drives consumption unchanged at small scale, with the per-frame-table crossover measured and the chosen representation landed. |
+| **-04-scheduler-integration** (repo: **molnex**) | block-aware batch iterator behind `batch_sampler_source`, plan↔block mapping, R1 resolution | I7, I8, I10 | the eager plan of `molnex:src/molix/batch/sampler.py:267` drives consumption unchanged at small scale, with the per-frame-table crossover measured and the chosen representation landed. |
 
-`PackedCache` v1 (`molnex:src/molix/data/cache.py:91`) keeps its documented **run-scoped,
+`PackedCache` v1 (`molnex:src/molix/store/cache.py:91`) keeps its documented **run-scoped,
 non-persistence** charter (`cache.py:1-49`) and is **not** retrofitted into the
 block store; the READY-tier format is a new artifact owned by `-02`.
 
@@ -415,31 +417,31 @@ No `librarian_report` was supplied with this task, so the following verdicts com
 from direct inspection of the surfaces named above; a blueprint refresh before
 `-02` starts is advisable.
 
-- `TaskMixtureBatchSampler` (`molnex:src/molix/data/sampler.py:267`) — **reuse**. The
+- `TaskMixtureBatchSampler` (`molnex:src/molix/batch/sampler.py:267`) — **reuse**. The
   eager metadata-only plan *is* the streaming plan authority (§ 5). No parallel
   sampler.
-- `TokenBudgetPacker` (`molnex:src/molix/data/sampler.py:47`) — **reuse** as the
+- `TokenBudgetPacker` (`molnex:src/molix/batch/sampler.py:47`) — **reuse** as the
   precedent and vocabulary for unit integrity (I2). No block-side packer is
   designed here.
-- `BatchSamplerSource` (`molnex:src/molix/data/sampler.py:811`) + `DataModule
-  batch_sampler_source` (`molnex:src/molix/data/datamodule.py:148`) — **reuse**. The
+- `BatchSamplerSource` (`molnex:src/molix/batch/sampler.py:811`) + `DataModule
+  batch_sampler_source` (`molnex:src/molix/batch/datamodule.py:148`) — **reuse**. The
   block-aware iterator enters through this existing seam; `DataModule` needs no
   new entry point.
-- `group_split_indices` (`molnex:src/molix/data/group_split.py:11`) and the upstream
+- `group_split_indices` (`molnex:src/molix/batch/group_split.py:11`) and the upstream
   `class1-universal-splits@1` manifests — **reuse** as hot-tier inputs. Streaming
   never re-splits.
-- `PackedCache` (`molnex:src/molix/data/cache.py:91`) — **new** (in `-02`). Its
+- `PackedCache` (`molnex:src/molix/store/cache.py:91`) — **new** (in `-02`). Its
   docstring binds it to run-scoped, unversioned, unvalidated caching; the READY
   tier needs versioning, appendability, and per-block provenance, so widening
   v1 would violate its own stated charter.
 - `MmapDataset` / `PackedView` / `SubsetDataset`
-  (`molnex:src/molix/data/dataset.py:358`, `:48`, `:396`) — **generalize** in `-02`/`-04`
+  (`molnex:src/molix/store/dataset.py:358`, `:48`, `:396`) — **generalize** in `-02`/`-04`
   (not here): the zero-copy read path and pointer-derived `atom_counts` /
   `edge_counts` accessors are exactly what a block-backed dataset must also
   expose, so the block store should serve the same accessors rather than
   spawning a parallel dataset hierarchy.
 - `WaterLESSource` digest-pinned fetch precedent
-  (`molnex:src/molix/datasets/_data_acquisition.md`) — **pattern**. I6 follows its
+  (the former molnex `_data_acquisition.md`, deleted at `6d425f7`; the surviving digest-pinned-fetch precedent is molhub `sources/fetcher.py`) — **pattern**. I6 follows its
   expected/actual sha256 discipline; no code is reused across the layer boundary.
 - molhub / molexp responsibilities — **reuse** the boundary in
   `molnex:.claude/notes/learnable-classical-ff.md`; no MolHub coordinate or adapter is
@@ -458,7 +460,7 @@ from direct inspection of the surfaces named above; a blueprint refresh before
 - [ ] Write the block-decomposition and four-state-lifecycle sections (1–5 GB independent blocks, unit-integrity and split-purity cut rule, `REMOTE → DOWNLOADING → READY → CONSUMED`, ledger, idempotency, digest-with-retry) into `.claude/specs/streaming-data-tiers-01-strategy.md`
 - [ ] Record the measured anchors and derive the byte-rate throughput condition in Domain basis of `.claude/specs/streaming-data-tiers-01-strategy.md` (20 MB/s, 6.5 TB, 4–20 GB shards, 300 GB budget, 2000/3700 conf/s marked indicative, 500 B and 1 kB per-frame accounting, the six-row margin table, the prepare-core arithmetic, and the explicit statement that prepare binds before download)
 - [ ] Write the invariant register I1–I10 with rationale and enforcing successor into `.claude/specs/streaming-data-tiers-01-strategy.md`
-- [ ] Write the plan-globally-consume-rolling resolution into `.claude/specs/streaming-data-tiers-01-strategy.md`, citing `molnex:src/molix/data/sampler.py:267`, `molnex:src/molix/data/sampler.py:811`, `molnex:src/molix/data/datamodule.py:148` and `:264-266`, asserting no sampling-policy redesign, and recording risk R1 with its `molnex:src/molix/data/sampler.py:89` evidence
+- [ ] Write the plan-globally-consume-rolling resolution into `.claude/specs/streaming-data-tiers-01-strategy.md`, citing `molnex:src/molix/batch/sampler.py:267`, `molnex:src/molix/batch/sampler.py:811`, `molnex:src/molix/batch/datamodule.py:148` and `:264-266`, asserting no sampling-policy redesign, and recording risk R1 with its `molnex:src/molix/batch/sampler.py:89` evidence
 - [ ] Write the coverage-over-time semantics, streaming levels L1–L3 with the L3 publishing recommendation, and the derivation-conveyor dual use plus molhub/molnex/molexp layer boundary into `.claude/specs/streaming-data-tiers-01-strategy.md`
 - [ ] Define the successor handoff contracts for `-02-block-format`, `-03-conveyor`, `-04-scheduler-integration` in `.claude/specs/streaming-data-tiers-01-strategy.md`, each with owned surface, inherited invariants, exit criterion, plus the API shape constraints and the `PackedCache` v1 charter carve-out
 - [ ] Write the acceptance contract `.claude/specs/streaming-data-tiers-01-strategy.acceptance.md` with every criterion typed `docs` and `status: pending`
@@ -475,11 +477,11 @@ testing prose. Verification is documentary and structural:
   and the specific content that must be present; a missing table, number, or
   invariant fails that criterion.
 - **Anchor validity** — every repo path and line reference in the document
-  (`molnex:src/molix/data/sampler.py:47`, `:89`, `:267`, `:532-547`, `:571-620`,
-  `:811`; `molnex:src/molix/data/datamodule.py:148`, `:264-266`;
-  `molnex:src/molix/data/cache.py:1-49`, `:91`; `molnex:src/molix/data/dataset.py:48`, `:358`,
-  `:396`; `molnex:src/molix/data/group_split.py:11`;
-  `molnex:src/molix/datasets/_data_acquisition.md`;
+  (`molnex:src/molix/batch/sampler.py:47`, `:89`, `:267`, `:532-547`, `:571-620`,
+  `:811`; `molnex:src/molix/batch/datamodule.py:148`, `:264-266`;
+  `molnex:src/molix/store/cache.py:1-49`, `:91`; `molnex:src/molix/store/dataset.py:48`, `:358`,
+  `:396`; `molnex:src/molix/batch/group_split.py:11`;
+  the former molnex `_data_acquisition.md` (deleted at `6d425f7`, superseded by molhub `sources/`);
   `molnex:.claude/notes/production-training-checklist.md`;
   `molnex:.claude/notes/learnable-classical-ff.md`) must resolve to the cited symbol or
   statement in the current tree.
