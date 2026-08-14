@@ -2,11 +2,12 @@
 
 Follows ``tests/test_sources/test_layering.py``: deliberately crude source-text
 checks whose value is that they are hard to satisfy accidentally and hard to work
-around quietly. Two properties are guarded: the conveyor is stdlib plus
+around quietly. Three properties are guarded: the conveyor is stdlib plus
 ``molhub`` — it must stay runnable (and unit-testable) with no torch, no molpy,
-and no network stack installed — and the block lifecycle has exactly four
-states, with no fifth one smuggled in as an enum member or a state-valued
-string.
+and no network stack installed — the block lifecycle has exactly four states,
+with no fifth one smuggled in as an enum member or a state-valued string, and
+the layering edge runs one way, so nothing under ``molhub.sources`` or
+``molhub.dataset`` may import the conveyor back.
 
 The package is located by path rather than imported, so a missing module shows up
 as a named failure here instead of a collection error.
@@ -17,14 +18,27 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 import molhub
+from molhub.conveyor.ledger import Ledger
+
+if TYPE_CHECKING:  # pragma: no cover - a static proof, never executed
+    from molhub.conveyor.transfer import TransferLedger
 
 _PACKAGE_ROOT = Path(molhub.__file__).parent / "conveyor"
 # Files of Python source, at any depth under the package.
 _MODULE_FILES = sorted(_PACKAGE_ROOT.rglob("*.py")) if _PACKAGE_ROOT.is_dir() else []
+
+# The two layers the conveyor is allowed to depend on, and which may never
+# depend on it: bytes (`sources`) and semantics (`dataset`).
+_BELOW_ROOTS = [
+    Path(molhub.__file__).parent / "sources",
+    Path(molhub.__file__).parent / "dataset",
+]
+_BELOW_FILES = sorted(path for root in _BELOW_ROOTS for path in root.rglob("*.py"))
 
 # Roots the conveyor is allowed to reach for. `molhub` earns its place because
 # `BlockId` validates through `Coordinate` and records digest through
@@ -126,6 +140,33 @@ def _imported_roots(path: Path) -> set[str]:
     return roots
 
 
+def _imported_modules(path: Path) -> set[str]:
+    """Every dotted module name imported by *path*, at any nesting depth.
+
+    Unlike :func:`_imported_roots` this keeps the whole path, which is what a
+    one-way edge inside ``molhub`` has to be judged on.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module)
+    return names
+
+
+def _the_ledger_fits_the_transfer_seam(ledger: Ledger) -> TransferLedger:
+    """Static proof, checked by ``ty``, that ``-01``'s ledger fits the seam.
+
+    Never called. ``TransferLedger`` is a narrow required-side view of the three
+    verbs a transfer needs; if it ever grows a fourth, or ``Ledger`` narrows one
+    of the three, this line stops type-checking — which is the whole point of
+    writing it down. Mirrors ``tests/test_dataset/test_hub.py``.
+    """
+    return ledger
+
+
 class TestConveyorPackageIsPresent:
     """Without these, the scans below would pass over an empty file list."""
 
@@ -140,6 +181,51 @@ class TestConveyorPackageIsPresent:
 
     def test_the_ledger_module_exists(self):
         assert (_PACKAGE_ROOT / "ledger.py").is_file()
+
+    def test_the_roster_module_exists(self):
+        assert (_PACKAGE_ROOT / "roster.py").is_file()
+
+    def test_the_splits_module_exists(self):
+        assert (_PACKAGE_ROOT / "splits.py").is_file()
+
+    def test_the_transfer_module_exists(self):
+        assert (_PACKAGE_ROOT / "transfer.py").is_file()
+
+
+class TestTheLayeringEdgeIsOneWay:
+    """The conveyor reads bytes and semantics; neither of them may read it back."""
+
+    def test_the_layers_below_are_present(self):
+        assert _BELOW_FILES, "molhub.sources / molhub.dataset were not found"
+
+    @pytest.mark.parametrize("module_file", _BELOW_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
+    def test_no_module_below_imports_the_conveyor(self, module_file):
+        offenders = {
+            name
+            for name in _imported_modules(module_file)
+            if name == "molhub.conveyor" or name.startswith("molhub.conveyor.")
+        }
+        assert offenders == set(), f"{module_file.name} imports {sorted(offenders)}"
+
+
+class TestTheConveyorSeamsAcceptTheLandedTypes:
+    """A transfer's collaborators are protocols; the real types must still fit."""
+
+    def test_the_ledger_satisfies_the_transfer_seam(self):
+        """``-01``'s ``Ledger`` declares nothing and fits by shape, as ``Molhub`` does."""
+        from molhub.conveyor.transfer import TransferLedger
+
+        assert issubclass(Ledger, TransferLedger)
+
+    def test_the_transfer_seam_is_exactly_the_three_verbs_it_needs(self):
+        """A wider view would rebuild ``-01``'s ledger instead of depending on it."""
+        from molhub.conveyor.transfer import TransferLedger
+
+        assert sorted(name for name in vars(TransferLedger) if not name.startswith("_")) == [
+            "append",
+            "lease",
+            "release",
+        ]
 
 
 class TestConveyorDependsOnStdlibAndMolhubOnly:

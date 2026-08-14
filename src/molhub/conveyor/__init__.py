@@ -24,10 +24,27 @@ ordinary records rather than filesystem locks::
     ledger.replay()[block]          # BlockState.READY
     ledger.active_leases()[block]   # ("plan:train-epoch-3",)
 
+On top of that memory sit the REMOTE tier's two questions — *what blocks exist,
+how big are they, and what must their bytes hash to*, and *how do those bytes
+get here without a corrupt shard being mistaken for a good one*.
+:class:`~molhub.conveyor.roster.BlockRoster` answers the first by **projecting**
+the registry manifest molhub already ships, so there is no second index to
+drift; :class:`~molhub.conveyor.transfer.ShardTransfer` answers the second by
+leasing the block, re-verifying every delivered file against the manifest
+digest, deleting bytes that disagree, and failing with a typed aggregate error
+rather than letting an unverified block advance::
+
+    roster = BlockRoster(Manifest.from_path(path), collection.role("electrostatic"))
+    roster.total_bytes()                    # what this role's REMOTE tier costs
+    ShardTransfer(hub, ledger).transfer(roster.blocks()[0])   # verified local path
+
+:class:`~molhub.conveyor.splits.SplitTable` is the split assignment of record,
+loaded only once the derivation's own ``metadata.json`` sha256 agrees.
+
 No network, no environment variable, no disk-layout decision, and stdlib plus
-``molhub`` only: the caller supplies the ledger's path, and the enumeration,
-transfer and residency stages build on top of this memory rather than each
-inventing their own.
+``molhub`` only: the caller supplies the ledger's path, unpack / prepare /
+``READY`` and the byte-bounded queue belong to the stages after this one, and
+none of them invents its own memory.
 """
 
 from molhub.conveyor.block import (
@@ -47,6 +64,29 @@ from molhub.conveyor.ledger import (
     LedgerRecord,
     SystemClock,
 )
+from molhub.conveyor.roster import (
+    BlockRoster,
+    NoShardArtifacts,
+    RemoteBlock,
+    RoleSourceMismatch,
+    RosterError,
+    UnsizedBlock,
+    UnverifiableBlock,
+)
+from molhub.conveyor.splits import (
+    SplitProvenance,
+    SplitProvenanceMismatch,
+    SplitTable,
+)
+from molhub.conveyor.transfer import (
+    Backoff,
+    ExponentialBackoff,
+    PersistentDigestMismatch,
+    ShardTransfer,
+    TransferAttempt,
+    TransferError,
+    TransferLedger,
+)
 
 __all__ = [
     "BlockId",
@@ -62,4 +102,21 @@ __all__ = [
     "Ledger",
     "InvalidRecord",
     "LedgerCorruption",
+    "RemoteBlock",
+    "BlockRoster",
+    "RosterError",
+    "NoShardArtifacts",
+    "UnsizedBlock",
+    "UnverifiableBlock",
+    "RoleSourceMismatch",
+    "SplitTable",
+    "SplitProvenance",
+    "SplitProvenanceMismatch",
+    "TransferLedger",
+    "Backoff",
+    "ExponentialBackoff",
+    "TransferAttempt",
+    "ShardTransfer",
+    "TransferError",
+    "PersistentDigestMismatch",
 ]
