@@ -20,10 +20,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
 ]
 dependencies = [
-  # Pinned to a minor range: molpy is pre-1.0 and moves public API between
-  # minors (0.3 -> 0.9 relocated Frame/Block/Element and renamed
-  # Frame.metadata -> Frame.meta). An open lower bound let that land silently.
-  "molcrafts-molpy>=0.12,<0.13",
+  # molpy is pre-1.0 and moves public API between minors (0.3 -> 0.9 relocated
+  # Frame/Block/Element and renamed Frame.metadata -> Frame.meta; 0.12 -> 0.13
+  # turned `Frame.meta` into a write-through view that unwraps `MetaValue` on
+  # read). molhub tracks the 0.13 line: the floor is what the dataset layer is
+  # written against, and the upper bound is deliberately open so the next minor
+  # surfaces here rather than being resolved away.
+  "molcrafts-molpy>=0.13",
   # Imported at module scope by every dataset adapter and by the conveyor's
   # encoder; it used to resolve only through h5py's transitive pull, which is a
   # dependency defect rather than a declaration.
