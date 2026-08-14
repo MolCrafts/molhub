@@ -105,16 +105,10 @@ molpy 是 pre-1.0，且在小版本间移动公开 API。0.3 → 0.9 把 `Frame`
 原先 `molcrafts-molpy>=0.3.0` 的开放下界让这次破坏性升级悄悄进了 lock，
 origin/master 一度不可导入且 CI 未覆盖。依赖已收紧为 `>=0.12,<0.13`。
 
-**0.12 的 metadata 契约有两个静默陷阱**，全部封装在 `molhub.dataset.meta`：
-
-1. `Frame.meta` 每次读取返回**新 dict**，原地 `update`/`clear` 写进临时对象后被
-   丢弃，**不报错**。必须整体赋值 `frame.meta = {...}`。
-2. 值必须是 `MetaValue(dtype, value)`，裸 Python 值被拒；dtype 字符串是
-   `f64/f32/i64/i32/u64/bool/string`——字符串标签是 `string` 而非 `str`。
-
-调用方一律走 `Targets(frame).write({...})` / `.read()`，不直接碰 `MetaValue`。
-`MetaCodec` 单独承担值↔`MetaValue` 的编解码，可注入替换。`test_meta.py` 里有一条回归测试专门锁定陷阱 1：若 molpy 哪天改成
-可原地修改，那条测试会失败，届时可重新评估这层封装。
+**Frame.meta 契约：** `frame.meta` 是写穿 mapping。读 `frame.meta[key]` 得到
+Python 标量；写 `frame.meta[key] = v` 或 `frame.meta.update(...)` 会落盘。
+Rust 侧仍是闭集 `MetaValue`；精确 dtype 才显式构造 `MetaValue`。没有
+`Targets` / `read_meta` 包装层。loader 仍可用内部 `write_meta` 整表替换。
 
 另注：`len(Block)` 是**列数**，行数是 `Block.nrows`；`len(Frame)` 是 block 个数。
 
@@ -225,3 +219,35 @@ schema 用 `anyOf: [{required: [digest]}, {required: [size]}]` 表达，Python �
 
 缓存因此也不需要内容寻址：按 manifest 已给出的坐标 + role 存放
 （`$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>`）。
+
+
+## [2026-08-15] User-facing API = HuggingFace datasets, records = Frame/Trajectory (operator override)
+
+<!-- mol:note:topic:hf-style-api -->
+
+**Rule (binding, operator-directed).** molhub's user surface copies HF
+`datasets` spelling: `molhub.load_dataset(name, split=..., streaming=...,
+revision=...)` / `load_dataset_builder(...).info` / `prepare(...)` (the
+save_to_disk-shaped materialization) / molnex `BlockDataset.load_from_disk`.
+`split` is an argument (PyTorch/HF idiom) — split tables are internal. Shard
+roles never appear on the user path; `info` describes content (features,
+splits, counts), not roles. The conveyor is invisible plumbing behind
+`streaming=True` and `prepare(...)`; the cross-repo seam is a block directory
+on disk.
+
+**Records ARE molpy objects.** One geometry = `Frame` (per-atom supervision as
+`atoms` columns, e.g. `atomic_charge`; matrices as named COO blocks, e.g.
+`hessian{row,col,value}`; index tuples as valence-style blocks; scalars in
+`frame.meta` — the 0.13 write-through mapping). Multi-frame sampling unit =
+`Trajectory`. `Targets`/`MetaCodec` and the record dataclasses
+(HessianRecord/EnergyForceTrajectory/TorsionProfile/MBISRecord) are deleted —
+no wrapper objects on top of Frame, per the operator's explicit instruction.
+
+**Why.** 「shard-000 语义不清 / 删除 Targets 都基于 Frame / SplitTable 和
+pytorch 对齐 / conveyor 参考 huggingface / 跨仓 API 直接抄 huggingface」
+(2026-08-15). This is the scoped operator override of the no-façade default
+(CLAUDE.md § Design preferences escape hatch): the FAÇADE is sanctioned for
+the loader surface only; internal layers (sources/, conveyor/) keep primitive
+single-responsibility types and the loader composes them.
+
+**Status.** Redesign spec chain `hf-facade` in flight 2026-08-15.
