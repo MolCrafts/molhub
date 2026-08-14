@@ -1,6 +1,7 @@
 ---
 title: Builder and info — HF-shaped name resolution, content-first DatasetInfo, map-style load_dataset(split=...)
 status: approved
+grilled: true
 slug: hf-facade-03-builder-info
 repo: molhub
 chain: hf-facade (01-meta-dissolution → 02-frame-records → 03-builder-info → 04-streaming-prepare)
@@ -47,6 +48,16 @@ responsibility each:
   `Feature.level ∈ {atom, meta, block}`; `SplitInfo(name, num_examples,
   provenance)` where provenance is the human sentence derived from
   `_SplitTable.provenance` or the dataset's declared rule).
+  **Feature data source (corrected 2026-08-15 after spec-audit —
+  `TargetSchema` carries neither units nor a level enum):** `Feature.level`
+  derives from which declaration set a name sits in (`atom_level` → `atom`,
+  `graph_level` → `meta`, and a NEW optional `blocks` declaration → `block`);
+  `Feature.units` comes from a NEW optional `units: Mapping[str, str]` field on
+  the `@dataset` declaration (`DatasetManifest` in
+  `src/molhub/dataset/definition.py` — a **generalize**, defaulting to empty:
+  a dataset that declares no units renders `units=""`). THEMol adapters
+  declare from the existing `THEMOL_UNITS` dict; `TargetSchema` itself is
+  untouched.
 - `builder.py` — `DatasetBuilder(name, *, revision=None, registry=None,
   hub=None)` with `.info` and `.split_view(split)`.
 - `mapstyle.py` — `SplitDataset` satisfying `molhub.dataset.protocol.Dataset`;
@@ -65,7 +76,12 @@ flavours behind one `DatasetInfo.splits`:
 
 - *declared* (water-les tail slice, 3BPA's four tags, zinc `splits.json`,
   phalkethoh): the dataset class already owns it; the builder delegates to the
-  existing `split=` constructor. Counts are exact and free.
+  existing constructor. Three of the four take `split=` directly;
+  **`ThreeBPADataset` takes `tag=` with a required positional `path`** — the
+  builder's delegation table therefore carries a per-dataset adapter entry
+  (`split → tag`, path resolved through the hub), not a uniform
+  `Ctor(split=split)` dispatch. [Corrected 2026-08-15 after spec-audit.]
+  Counts are exact and free.
 - *table-backed* (THEMol via `class1-universal-splits@1` at
   `$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/`): `len(ds)`
   comes from `_SplitTable.counts()[split]` — one gz CSV load (mbis ≈ 1.5 M
@@ -124,9 +140,9 @@ constructors are unchanged — only the export goes.
 - `src/molhub/loader/builder.py` (new)
 - `src/molhub/loader/mapstyle.py` (new)
 - `src/molhub/registry.py`
-- `src/molhub/conveyor/splits.py`, `src/molhub/conveyor/__init__.py`
+- `src/molhub/dataset/definition.py` (optional `units` + `blocks` declaration fields — generalize)
+- `src/molhub/conveyor/splits.py`, `src/molhub/conveyor/roster.py` (imports/annotations follow the rename), `src/molhub/conveyor/__init__.py`
 - `src/molhub/__init__.py`
-- `scripts/build_class1_splits.py` (rename follow-through only)
 - `tests/test_loader/__init__.py`, `test_naming.py`, `test_info.py`,
   `test_builder.py`, `test_mapstyle.py`, `test_layering.py` (all new)
 - `tests/test_registry.py`, `tests/test_conveyor/test_splits.py`
@@ -138,11 +154,11 @@ constructors are unchanged — only the export goes.
 - [ ] Write failing unit tests for name and revision resolution (`tests/test_loader/test_naming.py` → `TestDatasetName`): shorthand, explicit revision, newest-by-default, ambiguous-version refusal
 - [ ] Implement `DatasetName` in `src/molhub/loader/naming.py` and `Registry.versions` in `src/molhub/registry.py`
 - [ ] Write failing unit tests for content-first description (`tests/test_loader/test_info.py` → `TestDatasetInfo`, `TestSplitInfo`) including the assertion that no role name appears in any field
-- [ ] Implement `DatasetInfo`, `SplitInfo` and `Feature` in `src/molhub/loader/info.py` from the manifest, the declared `TargetSchema` and the split source
+- [ ] Implement `DatasetInfo`, `SplitInfo` and `Feature` in `src/molhub/loader/info.py` from the manifest, the declaration sets (atom_level→atom, graph_level→meta, new blocks→block) and the split source, and add the optional `units` + `blocks` fields to `DatasetManifest` in `src/molhub/dataset/definition.py` with THEMol declaring from `THEMOL_UNITS`
 - [ ] Write failing unit tests for map-style split views over a fake `ArtifactHub` and a synthetic split table (`tests/test_loader/test_mapstyle.py` → `TestSplitDataset`, `TestShardIndex`)
 - [ ] Implement `DatasetBuilder` in `src/molhub/loader/builder.py` and `SplitDataset` / `ShardIndex` in `src/molhub/loader/mapstyle.py`
-- [ ] Expose `load_dataset` and `load_dataset_builder` in `src/molhub/loader/__init__.py` and `src/molhub/__init__.py`, with a layering test in `tests/test_loader/test_layering.py`
-- [ ] Rename `SplitTable` to `_SplitTable` in `src/molhub/conveyor/splits.py`, drop it from `molhub.conveyor.__all__`, and follow through in `scripts/build_class1_splits.py` and `tests/test_conveyor/test_splits.py`
+- [ ] Expose `load_dataset` and `load_dataset_builder` in `src/molhub/loader/__init__.py` and `src/molhub/__init__.py` (incl. the ac-003 tests: split required keyword → TypeError when omitted; no DatasetDict-like container), with a layering test in `tests/test_loader/test_layering.py`
+- [ ] Rename `SplitTable` to `_SplitTable` in `src/molhub/conveyor/splits.py`, drop it from `molhub.conveyor.__all__`, and follow through in `src/molhub/conveyor/roster.py` (import + `splits:` annotation + the prepare.py docstring cross-reference) and `tests/test_conveyor/{test_splits,test_roster}.py` (scripts/build_class1_splits.py imports no SplitTable — verified, nothing to change there)
 - [ ] Add regression example `regressions/hf-facade-03-builder-info.py` (public API only; hard-coded goldens, no third-party runtime)
 - [ ] Run full check + test suite
 

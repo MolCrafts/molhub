@@ -15,7 +15,9 @@ criteria:
     type: code
     pass_when: |
       DatasetInfo exposes description, citation, license, features (name, level,
-      units), splits (name, num_examples, provenance), record_type and
+      units — level from the declaration sets atom_level/graph_level/blocks,
+      units from the DatasetManifest's optional units mapping, empty string when
+      undeclared), splits (name, num_examples, provenance), record_type and
       download_size, and tests/test_loader/test_info.py asserts the substring
       "shard-" appears in no field of a rendered DatasetInfo.
     status: pending
@@ -49,8 +51,10 @@ criteria:
     type: code
     pass_when: |
       molhub.conveyor.__all__ does not contain "SplitTable", src/molhub/conveyor/
-      splits.py defines _SplitTable, and no module outside src/molhub/loader/ and
-      src/molhub/conveyor/ imports it.
+      splits.py defines _SplitTable, and no PRODUCTION module outside
+      src/molhub/loader/ and src/molhub/conveyor/ imports it (tests/ are exempt
+      — white-box unit tests of the conveyor legitimately import the private
+      name).
     status: pending
   - id: ac-007
     summary: The loader layer is one-way

@@ -1,6 +1,7 @@
 ---
 title: Frame records — dissolve the THEMol record dataclasses into molpy Frame/Trajectory
 status: approved
+grilled: true
 slug: hf-facade-02-frame-records
 repo: molhub
 chain: hf-facade (01-meta-dissolution → 02-frame-records → 03-builder-info → 04-streaming-prepare)
@@ -43,13 +44,18 @@ declared task), with no change to any column it emits.
   sparsity assumption — a DFT Hessian is dense, and a discarded lower triangle
   is a convention every reader must then remember; row-major order is
   guaranteed so a consumer may `value.reshape(3N, 3N)` directly). Cost:
-  16 B/entry vs 8 B dense → **2× the dense payload**; the tiers strategy's
-  hot-tier Hessian core moves from ≈5.8 GB to ≈11.6 GB, which exceeds the
-  `streaming-data-tiers-01-strategy.md` §6 budget — if the implementer measures
-  this as binding, drop `row`/`col` to `int16` (3N ≤ 32767 covers every
-  drug-like molecule) → 12 B/entry ≈ 8.7 GB, and record the choice. Either way
-  the block-format encoder still does not encode the Hessian (the named gap in
-  `conveyor/encoder.py`'s docstring stands).
+  corrected 2026-08-15 after spec-audit (the first draft compared against a
+  float64 dense baseline while the strategy's ≈5.8 GB hot-tier figure is
+  float32-based): int32+int32+float64 = 16 B/entry is **4×** the strategy's
+  4 B/entry baseline → ≈23 GB if stored as-is; int16 indices → 12 B/entry
+  ≈ 17.3 GB. **Scope clarification:** these numbers price the exchange
+  representation, not the storage plan — the in-memory `Frame` record carries
+  the SOURCE precision (float64 values, as the h5 stores them); the future
+  hot-tier Hessian artifact (out of scope, its own spec) chooses its own
+  precision/layout, and the strategy's float32-dense ≈5.8 GB remains that
+  artifact's design target. Either way the block-format encoder still does not
+  encode the Hessian (the named gap in `conveyor/encoder.py`'s docstring
+  stands).
 - `mbis` → one `Frame` with per-atom `atoms` columns: `atomic_charge`,
   `atomic_volume`, `dipole_x/y/z`, one column per independent quadrupole
   component named by its Cartesian indices, and the per-atom Slater parameters.
@@ -86,7 +92,8 @@ unchanged apart from its `reader` return type. `Sample` widens to
 
 In `conveyor/encoder.py`, `encode` becomes: `Frame` → one-frame unit;
 `Trajectory` → multi-frame unit; torsion columns emitted when the record
-carries the `scan` block. The MBIS refusal moves from
+carries the `scan` block (inspected on frame 0 — every frame of a scan carries
+it identically, pinned by test). The MBIS refusal moves from
 `isinstance(record, MBISRecord)` to **construction time** —
 `THEMolUnitEncoder(task="mbis")` raises `UnsupportedRecordError` — because
 after dissolution an MBIS frame and a Hessian frame are the same type and one
@@ -127,6 +134,7 @@ named Hessian gap and the dropped `optimization_steps` (now
 - [ ] Emit a `Frame` carrying the COO `hessian` block from `_read_hessian` and per-atom MBIS columns from `_read_mbis` in `src/molhub/dataset/themol.py`
 - [ ] Emit a `molpy.Trajectory` from `_read_hessian_relax`, `_read_torsion` and `_read_torsion_relax`, with the dihedral indices in a 1-row `scan` block
 - [ ] Delete `HessianRecord`, `EnergyForceTrajectory`, `TorsionProfile`, `MBISRecord`, `_LazyFrameSequence` and `_LazyAngles`, widen `Sample` in `src/molhub/dataset/protocol.py`, and update `src/molhub/dataset/__init__.py` and the CLAUDE.md sample bullet
+- [ ] Rewrite `scripts/audit_themol_shards.py`'s `_audit_record` onto Frame/Trajectory (record.frame/.hessian/.molecule_id/.frames/.angles/.scan_id → frame["hessian"], frame.meta["molecule_id"], iteration + per-frame meta — every branch currently duck-types the deleted dataclass attributes and would AttributeError)
 - [ ] Write failing unit tests for the encoder's `(Frame | Trajectory, task)` dispatch and its construction-time `task="mbis"` refusal (`tests/test_conveyor/test_encoder.py` → `TestTHEMolUnitEncoder`)
 - [ ] Re-dispatch `THEMolUnitEncoder.encode` on `Frame`/`Trajectory` and move the MBIS refusal into `__init__` in `src/molhub/conveyor/encoder.py`
 - [ ] Re-pin the record constructors in `regressions/streaming-data-tiers-03-conveyor-03-prepare.py` with every RawUnit column, dtype and sealed-manifest golden unchanged

@@ -5,9 +5,13 @@ criteria:
     summary: Targets, MetaCodec and write_meta no longer exist anywhere
     type: code
     pass_when: |
-      `_meta.py` and `meta.py` are absent from src/molhub/dataset/, and no file
-      under src/, tests/, scripts/ or regressions/ contains the identifiers
-      `Targets`, `MetaCodec` or `write_meta`.
+      `_meta.py` and `meta.py` are absent from src/molhub/dataset/, and an
+      identifier-boundary-aware scan (regex \bTargets\b / \bMetaCodec\b /
+      \bwrite_meta\b(?!data), excluding *.egg-info/) over src/, tests/,
+      scripts/ and regressions/ finds no hit — `write_metadata`
+      (DerivedLayout's unrelated conveyor API) and `TargetSchema` /
+      `TargetDeclaration` must not match, and the universal_class_i.py
+      docstring coincidence is reworded rather than carved out.
     status: pending
   - id: ac-002
     summary: Every adapter writes graph scalars through frame.meta directly

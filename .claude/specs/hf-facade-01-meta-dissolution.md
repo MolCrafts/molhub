@@ -1,6 +1,7 @@
 ---
 title: Meta dissolution — delete Targets/MetaCodec/write_meta, everything reads and writes frame.meta
 status: approved
+grilled: true
 slug: hf-facade-01-meta-dissolution
 repo: molhub
 chain: hf-facade (01-meta-dissolution → 02-frame-records → 03-builder-info → 04-streaming-prepare)
@@ -59,6 +60,7 @@ contract.
 - `src/molhub/dataset/qm9.py`, `themol.py`, `transforms.py`
 - `src/molhub/dataset/__init__.py`
 - `src/molhub/conveyor/encoder.py`
+- `src/molhub/dataset/universal_class_i.py` (one docstring word — prose coincidence with the deleted class name)
 - `scripts/audit_themol_shards.py`
 - `tests/test_dataset/test__meta.py` (delete)
 - `tests/test_dataset/test_transforms.py`, `test_qm9.py`, `test_water_les.py`,
@@ -75,13 +77,13 @@ contract.
 
 - [ ] Write failing unit tests for direct `frame.meta` read/write on the adapter surface with no `Targets` import (`tests/test_dataset/test_water_les.py` → `TestWaterLESDataset`, `tests/test_dataset/test_qm9.py` → `TestQM9Dataset`, `tests/test_dataset/test_transforms.py` → `TestUnitConvert`)
 - [ ] Replace `write_meta(frame, …)` with `frame.meta.update(…)` in `src/molhub/dataset/{water_les,threebpa,revmd17,csv_dataset,molrec,zinc_typing,phalkethoh_mm}.py`
-- [ ] Replace `Targets(...).read()/.write()` with `frame.meta` / `dict(frame.meta)` in `src/molhub/dataset/{qm9,themol,transforms}.py` and `src/molhub/conveyor/encoder.py`
+- [ ] Replace `Targets(...).read()/.write()` with `frame.meta` / `dict(frame.meta)` in `src/molhub/dataset/{qm9,themol,transforms}.py` and `src/molhub/conveyor/encoder.py` — NOTE: `qm9._filter_targets`'s write is DROP semantics and must become whole replacement `frame.meta = {...}` (never `.update()`, which would let unfiltered keys survive); its fresh-frame write may use either
 - [ ] Delete `src/molhub/dataset/_meta.py` and `src/molhub/dataset/meta.py` and drop `Targets` / `MetaCodec` from `src/molhub/dataset/__init__.py`
 - [ ] Delete `tests/test_dataset/test__meta.py` and rewrite the meta assertions in `tests/test_dataset/*.py`, `tests/test_conveyor/test_encoder.py` and `tests/test_conveyor/test_prepare.py`
 - [ ] Read `frame.meta` directly in `scripts/audit_themol_shards.py`
 - [ ] Re-pin `regressions/molix-data-dissolution-05-molhub-reception.py`, `regressions/mm-param-val-01-molhub-contract.py` and `regressions/streaming-data-tiers-03-conveyor-03-prepare.py` to `frame.meta` with every numeric golden unchanged
 - [ ] Add regression example `regressions/hf-facade-01-meta-dissolution.py` (public API only; hard-coded goldens, no third-party runtime)
-- [ ] Verify no file under `src/`, `tests/`, `scripts/` or `regressions/` names `Targets`, `MetaCodec` or `write_meta`
+- [ ] Verify no file under `src/`, `tests/`, `scripts/` or `regressions/` names the identifiers `Targets`, `MetaCodec` or `write_meta` (identifier-boundary-aware: `write_metadata` is an unrelated conveyor API and must not match; exclude `*.egg-info/`), and reword the one prose coincidence `universal_class_i.py:31` ("Targets available from the role" → "Target schemas available from the role")
 - [ ] Run full check + test suite
 
 ## Testing strategy

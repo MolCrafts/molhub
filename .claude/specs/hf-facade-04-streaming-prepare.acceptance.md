@@ -13,9 +13,13 @@ criteria:
     summary: The streaming walk stays inside its byte budget
     type: runtime
     pass_when: |
-      tests/test_loader/test_streaming.py asserts that after every yielded record
-      the injected TierStore's resident_bytes is at most its budget_bytes, and that
-      each shard is released before the next is admitted.
+      tests/test_loader/test_streaming.py asserts, over a fake hub landing real
+      temp files at the cache paths, that after every yielded record the sum of
+      on-disk bytes of all fetched-and-not-yet-deleted shard files is at most
+      disk_budget; that the previous shard's cache file is unlinked (REMOTE
+      written) before the next shard is fetched; that the raw-shard ledger
+      lifecycle is exactly REMOTE->DOWNLOADING->READY->CONSUMED->REMOTE; and
+      that the reader handle is closed before any unlink.
     status: pending
   - id: ac-003
     summary: Conveyor vocabulary never reaches the user path
@@ -31,25 +35,31 @@ criteria:
     type: runtime
     pass_when: |
       molhub.prepare(name, split=..., output_dir=...) with an injected fake writer
-      returns a molhub.conveyor.PreparedBlocks whose roots exist under output_dir,
-      one per split-and-size fan-out, with unit_count and frame_count matching the
-      literals in tests/test_loader/test_materialize.py.
+      returns a molhub.conveyor.PreparedBlocks whose roots exist under output_dir
+      and belong ONLY to the requested split (size fan-out within it allowed),
+      with unit_count and frame_count matching the literals in
+      tests/test_loader/test_materialize.py; a mixed-split fixture proves no
+      val/test root is created when split="train".
     status: pending
   - id: ac-005
     summary: prepare fails closed without molnex rather than degrading
     type: runtime
     pass_when: |
       With the default writer factory and molix absent, prepare raises ImportError
-      naming the prepare extra and the MOLNEX_SRC escape hatch, and writes no
-      partial block directory.
+      naming the prepare extra and the MOLNEX_SRC escape hatch (raised by
+      BlockExport's own try/except around writer-factory resolution — never the
+      bare ModuleNotFoundError), and writes no partial block directory (the
+      wrap fires before any mkdir).
     status: pending
   - id: ac-006
     summary: molhub info is content-first with roles behind a flag
     type: runtime
     pass_when: |
-      `molhub info themol/mbis` prints description, features, splits with counts and
-      an example record shape, and prints no artifact role; `molhub info themol/mbis
-      --files` additionally prints roles, filenames, sizes, digests and locators.
+      `molhub info themol/mbis` prints description, features and splits with
+      counts sourced from DatasetBuilder.info (fetch-free — no example record,
+      which would require shard bytes), and prints no artifact role;
+      `molhub info themol/mbis --files` additionally prints roles, filenames,
+      sizes, digests and locators.
     status: pending
   - id: ac-007
     summary: Documented examples execute
