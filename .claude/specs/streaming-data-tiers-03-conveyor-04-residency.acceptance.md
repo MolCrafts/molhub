@@ -93,9 +93,11 @@ criteria:
     pass_when: |
       For the fixture record stream in tests/test_conveyor/test_coverage.py,
       bytes_downloaded counts a retried fetch twice, bytes_prepared sums READY
-      records, bytes_evicted sums only REMOTE records that follow a READY for
-      the same block, and blocks_seen / blocks_consumed / units_seen /
-      fraction(total) / the cumulative timeline all equal their pinned literals.
+      records, bytes_evicted sums only REMOTE-after-READY records for derived
+      blocks (BlockId.split is not None), bytes_raw_released sums
+      REMOTE-after-READY for raw blocks (split is None), and blocks_seen /
+      blocks_consumed / units_seen / fraction(total) / the cumulative timeline
+      all equal their pinned literals.
     status: pending
   - id: ac-011
     summary: Sampler-handoff metadata carries the named fields, digests verbatim
@@ -136,12 +138,14 @@ criteria:
       regressions/streaming-data-tiers-03-conveyor-04-residency.py exits 0 using
       only public molhub APIs, asserting the hard-coded goldens: eviction
       sequences ("b00",) then ("b02",), the infeasible evict_until raising
-      TierOverBudget with residency unchanged at 3_000_000 B and the leased and
-      flagged blocks still present, peak blocks-tier residency 3_000_000 B, raw
-      tier unaffected at 2_000_000 B, queue held_bytes trace (1_000_000,
-      2_000_000, 2_000_000, 2_000_000, 1_000_000, 2_000_000), coverage
-      bytes_downloaded 5_000_000 / bytes_prepared 5_000_000 / bytes_evicted
-      2_000_000 / blocks_consumed ("b00","b01","b02") / units_seen 12 /
+      TierOverBudget with residency unchanged at 3_000_000 B (three resident
+      entries b01/b02/b03) and the leased and flagged blocks still present, peak
+      blocks-tier residency 3_000_000 B, raw tier unaffected at 2_000_000 B,
+      queue held_bytes trace (1_000_000, 2_000_000, 2_000_000, 2_000_000,
+      1_000_000, 2_000_000), coverage bytes_downloaded 5_000_000 /
+      bytes_prepared 5_000_000 / bytes_evicted 2_000_000 (derived) /
+      bytes_raw_released 1_000_000 (raw, split=None) /
+      blocks_consumed ("b00","b01","b02") / units_seen 12 /
       fraction(8) 0.375 / timeline ((1,3),(2,5),(3,8)), and b03 metadata
       split "train", units 2, frames 8, task_names ("equilibrium","torsion").
       No network and no third-party oracle runs.

@@ -45,11 +45,13 @@ criteria:
     summary: split table is provenance-verified against metadata.json
     type: code
     pass_when: |
-      SplitTable.from_derived verifies every .csv.gz it reads with
-      Digest.of_file(path).matches(...) against that file's entry in
-      metadata.json output_sha256, raises SplitProvenanceMismatch naming the
-      file when they disagree, and exposes coordinate, seed, ratios and
-      generator from metadata.json verbatim; unit facts used by the roster come
+      SplitTable.from_derived (per-source, uuid-keyed, explicit literal
+      filename mapping incl. torsion_scan_splits.csv.gz without _uuid_) and
+      SplitTable.from_identity (identity_splits.csv.gz, identity-keyed) both
+      verify every .csv.gz they read with Digest.of_file(path).matches(...)
+      against that file's entry in metadata.json output_sha256, raise
+      SplitProvenanceMismatch naming the file when they disagree, and expose
+      coordinate, seed, ratios and generator from metadata.json verbatim; unit facts used by the roster come
       from the injected CollectionRole (roster.role) and are never copied onto
       RemoteBlock.
     status: pending

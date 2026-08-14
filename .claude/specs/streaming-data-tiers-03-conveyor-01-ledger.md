@@ -1,6 +1,7 @@
 ---
 title: Conveyor block identity, four-state machine, and crash-safe ledger
 status: approved
+grilled: true
 slug: streaming-data-tiers-03-conveyor-01-ledger
 repo: molhub
 chain: streaming-data-tiers
@@ -76,7 +77,7 @@ ordered pairs are decided here:
 | **READY** | legal — local copy released *without* being consumed (byte-budget eviction under I4, or crash cleanup of prepared files); the only honest way to reclaim bytes without claiming consumption | **illegal** — a re-fetch restarts from REMOTE, otherwise the prepared files are unaccounted for | legal (idempotent re-verify) | legal (consumed) |
 | **CONSUMED** | legal — deleted locally; a later pass re-fetches it (coverage-over-time, strategy § 7) | **illegal** — must re-declare REMOTE first, so each cycle is a clean one | **illegal** | legal (idempotent; several consumers finishing) |
 
-Nine legal, seven illegal. Self-transitions are legal on purpose: I5 requires
+Ten legal, six illegal. Self-transitions are legal on purpose: I5 requires
 every stage to be idempotent, so re-running a stage after a crash must record a
 fact, not raise. Two methods, one job each: `may_become(other) -> bool` asks,
 `transition_to(other) -> BlockState` enforces and raises `IllegalTransition`
@@ -87,11 +88,19 @@ naming both endpoints.
 ```python
 @dataclass(frozen=True)
 class BlockId:
-    source: str      # pinned MolHub coordinate, e.g. "dataset:themol/torsion-scan@1"
-    task: str        # CollectionRole.name — src/molhub/dataset/universal_class_i.py:23
-    split: str       # "train" | "validation" | "test", as published upstream
-    block_id: str    # manifest artifact role name, e.g. "shard-003"
+    source: str        # pinned MolHub coordinate, e.g. "dataset:themol/torsion-scan@1"
+    task: str          # CollectionRole.name — src/molhub/dataset/universal_class_i.py:39
+    split: str | None  # "train" | "val" | "test" for split-pure derived blocks;
+                       # None for a split-MIXED published shard (the roster cannot
+                       # honestly assign one — see -02-roster). Never a sentinel string.
+    block_id: str      # manifest artifact role name, e.g. "shard-003"
 ```
+
+`split is None` is the honest encoding of "this block is not split-pure":
+`-02-roster` proves a published shard's split cannot be known without opening
+its bytes, and a fabricated sentinel would leak into paths and reports as if it
+were a real split. [Revised 2026-08-14 after spec-audit: the original
+`split: str` contradicted `-02-roster`'s design.]
 
 Field names follow strategy § 10 verbatim (`BlockId.block_id` is mildly
 redundant and kept anyway — the four-tuple is quoted in the strategy, the note,
@@ -102,12 +111,18 @@ is the upstream split label, `source` is a MolHub coordinate.
 
 `source` is validated in `__post_init__` through `Coordinate.parse`
 (`src/molhub/coordinate.py:70`), re-raised as `InvalidBlockId` with the parse
-error as `__cause__`. `task` / `split` / `block_id` must be non-empty and match
-`[A-Za-z0-9._@-]+` — a single path-safe segment — else `InvalidBlockId`.
+error as `__cause__`. `task` / `block_id` — and `split` when not `None` — must
+be non-empty and match `[A-Za-z0-9._@-]+` — a single path-safe segment — else
+`InvalidBlockId`. The literal split value `"unsplit"` is additionally rejected:
+it is the reserved path segment `key()` uses for `split is None`, and allowing
+it as a real split would break key injectivity.
 
 `key() -> str` returns
-`f"{Coordinate.parse(source).cache_path()}/{task}/{split}/{block_id}"`, e.g.
-`dataset/themol/torsion-scan@1/torsion/train/shard-003`. It reuses
+`f"{Coordinate.parse(source).cache_path()}/{task}/{split or 'unsplit'}/{block_id}"`,
+e.g. `dataset/themol/torsion-scan@1/torsion/train/shard-003` for a derived
+block and `dataset/themol/mbis@1/electrostatic/unsplit/shard-003` for a
+published shard (`"unsplit"` is reserved — see validation above — so the map
+stays injective). It reuses
 `Coordinate.cache_path()` (`coordinate.py:137`) precisely because that method
 already owns the repo's one rule for turning a coordinate into path segments —
 the layout the TypeScript client reads on the same machine. Note what is
@@ -134,8 +149,11 @@ discriminated by the `record` key:
 Value types are frozen dataclasses: `LedgerRecord` (block fields, `state`,
 `actor`, `at`, `size_bytes: int | None`, `payload: Mapping[str, str]`) and
 `LeaseRecord` (block fields, `holder`, `at`, `expires_at`). `size_bytes` is
-`None`, never `0`, when unknown — `0` is a real byte count and must not double
-as a sentinel. `payload` is string→string, diagnostics only: **no code in this
+`None` when unknown, and must be **strictly positive** when given — `0` is
+rejected with `InvalidRecord`, aligning with the repo's manifest rule
+(`manifest.py` enforces `size > 0`; `.claude/notes/notes.md`: "零不是更小的
+制品，是传输失败的形状"). A transition that certifies bytes landed cannot
+legitimately certify zero of them. `payload` is string→string, diagnostics only: **no code in this
 package or its successors may branch on payload content.** That rule is what
 keeps `payload` from becoming the ambient context blob `CLAUDE.md § Forbid`
 rejects; anything a decision depends on gets a typed field.
@@ -264,6 +282,16 @@ of a block this holder does not actively hold appends nothing and is simply
 absent from the returned set — idempotent, as I5 requires, and observable
 without an exception.
 
+**Plan-scoped refcounting (I9) is by `actor`.** The lease primitive keys on
+`(block, holder)` where `holder` is the `Ledger` instance's `actor`. A process
+that manages several consumer plans must therefore hold **one `Ledger` instance
+per plan**, each constructed with an explicit `actor=<plan-id>` (e.g.
+`"plan:train-epoch-3"`), all pointing at the same ledger path — lease reads
+always re-read from disk, so cross-instance visibility is immediate. Two plans
+sharing one default-actor instance would collapse onto one holder key and one
+plan's `release()` would drop the other's grip; the test suite pins the
+two-instance case. [Added 2026-08-14 after spec-audit.]
+
 Leases are state-independent: a consumer may lease a block that is still REMOTE,
 which is precisely the "next I need H31, T72, R291" pre-registration of strategy
 § 10. That independence is why a lease composes with the state machine instead
@@ -303,7 +331,7 @@ direct inspection of the named files in the current tree.
   `ConveyorError` / `IllegalTransition` / `InvalidBlockId` / `UnknownBlockState`
   live in `block.py` and `InvalidRecord` / `LedgerCorruption` in `ledger.py`,
   keeping each module self-contained.
-- `molhub.dataset.hub.ArtifactHub` (`dataset/hub.py:21`) — **pattern** for the
+- `molhub.dataset.hub.ArtifactHub` (`dataset/hub.py:22`) — **pattern** for the
   injected `Clock`: `@runtime_checkable Protocol`, shape not subclassing, one
   verb.
 - `molhub.dataset.cache.DownloadCache.__init__` (`dataset/cache.py:71`) —
@@ -312,7 +340,7 @@ direct inspection of the named files in the current tree.
 - `CollectionRole` (`src/molhub/dataset/universal_class_i.py:23`) — **reuse** as
   the `task` vocabulary; `BlockId.task` is a `CollectionRole.name`, not a new
   label space.
-- `Manifest.artifact(role)` / `Artifact.role` (`src/molhub/manifest.py:97`,
+- `Artifact.role` / `Manifest.artifact(role)` (`src/molhub/manifest.py:97`,
   `:286`) — **reuse** as the `block_id` vocabulary (`shard-003`).
 - `tests/test_sources/test_layering.py` — **pattern** for the AST-based import
   guard; `tests/test_conveyor/test_layering.py` reads the same way.
@@ -338,9 +366,9 @@ direct inspection of the named files in the current tree.
 
 ## Tasks
 
-- [ ] Write failing tests for the four-state machine and block identity in `tests/test_conveyor/test_block.py` (all sixteen ordered state pairs parametrized against the legality table, exactly four enum members, map keys equal to the member set, `BlockState.parse` rejecting an unknown name, `BlockId.key()` pinned to literal strings, `InvalidBlockId` for a bad coordinate and for a segment containing `/`)
+- [ ] Write failing tests for the four-state machine and block identity in `tests/test_conveyor/test_block.py` (all sixteen ordered state pairs parametrized against the legality table, exactly four enum members, map keys equal to the member set, `BlockState.parse` rejecting an unknown name, `BlockId.key()` pinned to literal strings for both a real split and `split=None` (reserved `unsplit` segment), `InvalidBlockId` for a bad coordinate, for a segment containing `/`, and for the literal split value `"unsplit"`)
 - [ ] Implement `BlockState`, `BlockId` and the conveyor error types in `src/molhub/conveyor/block.py`, with the legality map frozen at module level and `key()` derived from `Coordinate.cache_path()`
-- [ ] Write failing tests for the ledger in `tests/test_conveyor/test_ledger.py` (append stamping and legality refusal, `records()` order, `replay()` last-state-wins and absence-is-not-REMOTE, torn final line discarded, mid-file corrupt line raising `LedgerCorruption` with `path:line`, flipped byte detected, recorded-illegal-history raising on read, lease grant / strict TTL boundary / release / two holders on one block / idempotent release of an unheld block, `InvalidRecord` for naive timestamp and over-cap payload)
+- [ ] Write failing tests for the ledger in `tests/test_conveyor/test_ledger.py` (append stamping and legality refusal, `records()` order, `replay()` last-state-wins and absence-is-not-REMOTE, torn final line discarded, newline-terminated digest-corrupt final line raising `LedgerCorruption` (not torn-tail), mid-file corrupt line raising `LedgerCorruption` with `path:line`, flipped byte detected, recorded-illegal-history raising on read, lease grant / strict TTL boundary / release / two holders on one block / two same-path `Ledger` instances with explicit plan actors holding independent leases / idempotent release of an unheld block, `InvalidRecord` for naive timestamp, `size_bytes=0`, negative `size_bytes` and over-cap payload)
 - [ ] Implement `LedgerRecord`, `LeaseRecord`, `Clock` / `SystemClock` and `Ledger` in `src/molhub/conveyor/ledger.py`, digesting every record through `molhub.sources.digest.Sha256Stream` and truncating to the last good boundary before the first append after a torn tail
 - [ ] Export the package surface in `src/molhub/conveyor/__init__.py`, add `tests/test_conveyor/__init__.py`, and add the import-purity guard `tests/test_conveyor/test_layering.py` (AST scan: every import in `src/molhub/conveyor/*.py` is stdlib or `molhub.*`; no `torch`, `numpy`, `molpy`, `molrs`, `requests`, `h5py`; no `hashlib` — digests go through `molhub.sources.digest`)
 - [ ] Add regression example `regressions/streaming-data-tiers-03-conveyor-01-ledger.py` (public API only; hard-coded goldens, no third-party runtime)
@@ -366,15 +394,17 @@ boots no sibling module.
 - `TestBlockId` — happy: `key()` equals the literal
   `"dataset/themol/torsion-scan@1/torsion/train/shard-003"`; equality, hashing
   and frozen-ness (assignment raises). Edge: empty field, `block_id` containing
-  `/`, `split` containing a space, and a `source` that is not a coordinate each
-  raise `InvalidBlockId`; an unversioned `source` raises (version pinning is a
-  molhub never-change rule).
+  `/`, `split` containing a space, `split="unsplit"` (reserved), and a `source`
+  that is not a coordinate each raise `InvalidBlockId`; `split=None` is
+  accepted and `key()` uses the `unsplit` segment; an unversioned `source`
+  raises (version pinning is a molhub never-change rule).
 
 `tests/test_conveyor/test_ledger.py`
 
-- `TestLedgerRecord` — invariants: naive `datetime`, negative `size_bytes`,
-  non-string payload value, and an over-4096-byte serialised line each raise
-  `InvalidRecord`; `size_bytes=None` is accepted and serialises as `null`.
+- `TestLedgerRecord` — invariants: naive `datetime`, `size_bytes=0`, negative
+  `size_bytes`, non-string payload value, and an over-4096-byte serialised line
+  each raise `InvalidRecord`; `size_bytes=None` is accepted and serialises as
+  `null`.
 - `TestLedgerAppend` — a first append writes exactly one line ending in `\n`
   whose parsed body has the eleven expected keys; the record carries the injected
   actor and clock time; appending `READY` onto `REMOTE` raises
@@ -386,7 +416,10 @@ boots no sibling module.
   pre-crash mapping and the next append yields a file with no fragment left; a
   corrupt line in the middle raises `LedgerCorruption` whose message contains
   `":2:"`; a single flipped hex character in a record body raises
-  `LedgerCorruption` naming that line; a hand-written `remote → ready` pair in
+  `LedgerCorruption` naming that line; a **newline-terminated** final line with
+  a corrupted digest raises `LedgerCorruption` (only an *unterminated* tail is
+  a torn-tail discard — a complete-but-corrupt last record is bit rot, not a
+  crash artifact); a hand-written `remote → ready` pair in
   the file raises `IllegalTransition` on read.
 - `TestLedgerLeases` — a lease is active at `expires_at - 1s` and absent at
   `expires_at` exactly (strict boundary) and after; two holders on one block both

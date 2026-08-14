@@ -6,9 +6,9 @@ criteria:
     type: code
     pass_when: |
       tests/test_conveyor/test_block.py passes with all sixteen ordered
-      (from, to) pairs parametrized: the nine legal pairs of the spec's table
+      (from, to) pairs parametrized: the ten legal pairs of the spec's table
       return True from may_become and are accepted by transition_to, and the
-      seven illegal ones raise IllegalTransition naming both endpoints.
+      six illegal ones raise IllegalTransition naming both endpoints.
       len(BlockState) == 4 and the legality map's key set equals the member set.
     status: pending
   - id: ac-002
@@ -28,9 +28,10 @@ criteria:
       tests/test_conveyor/test_block.py asserts
       BlockId("dataset:themol/torsion-scan@1", "torsion", "train",
       "shard-003").key() == "dataset/themol/torsion-scan@1/torsion/train/shard-003"
-      as a literal, and that an unparseable or unversioned source, an empty
-      field, or a field containing "/" or whitespace each raise InvalidBlockId
-      rather than being sanitised.
+      as a literal, that BlockId(..., split=None, ...).key() uses the reserved
+      "unsplit" segment while split="unsplit" raises InvalidBlockId, and that an
+      unparseable or unversioned source, an empty field, or a field containing
+      "/" or whitespace each raise InvalidBlockId rather than being sanitised.
     status: pending
   - id: ac-004
     summary: replay reconstructs the state map and refuses impossible histories
@@ -56,7 +57,9 @@ criteria:
     pass_when: |
       Flipping one character inside the body of line 2 of a valid ledger makes
       replay() raise LedgerCorruption whose message contains the file path and
-      ":2:", while an unterminated final line is discarded silently instead.
+      ":2:"; a newline-terminated final line with a corrupted digest also raises
+      LedgerCorruption (bit rot, not a crash artifact); only an unterminated
+      final line is discarded silently.
     status: pending
   - id: ac-007
     summary: digests go through molhub.sources.digest, never ad hoc
@@ -74,7 +77,9 @@ criteria:
       exactly expires_at and after it, including it strictly before, excluding it
       immediately after release, listing both holders when two hold one block,
       and returning an empty frozenset (writing no new line) when a holder
-      releases a block it does not hold.
+      releases a block it does not hold; additionally two Ledger instances over
+      the same path constructed with distinct explicit actor plan ids hold
+      independent leases on one block (the plan-scoped I9 convention).
     status: pending
   - id: ac-009
     summary: the conveyor package is stdlib plus molhub only
@@ -104,6 +109,16 @@ criteria:
       `uv run pytest -v`, `uv run ruff check src/ tests/` and
       `uv run ruff format --check src/ tests/` all pass with the new package and
       tests included.
+    status: pending
+  - id: ac-012
+    summary: record invariants reject the failure-shaped values
+    type: code
+    pass_when: |
+      tests/test_conveyor/test_ledger.py shows InvalidRecord raised for a naive
+      datetime, for size_bytes=0 (aligning with the manifest size>0 rule — zero
+      is the shape of a failed transfer, .claude/notes/notes.md), for negative
+      size_bytes, for a non-string payload value, and for a serialised line over
+      4096 bytes; size_bytes=None is accepted and serialises as null.
     status: pending
 ---
 

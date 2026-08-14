@@ -1,6 +1,7 @@
 ---
 title: Conveyor REMOTE-tier block roster and digest-verified shard transfer
 status: approved
+grilled: true
 slug: streaming-data-tiers-03-conveyor-02-roster
 repo: molhub
 chain: streaming-data-tiers-03-conveyor
@@ -153,14 +154,28 @@ Anything needing a per-molecule split reads `SplitTable.split_of(uuid)` directly
 ### `SplitTable` — the split assignment of record, with its provenance
 
 `SplitTable.from_derived(root: Path, *, source: str)` reads
-`$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/` — one
-`<source>_..._splits.csv.gz` plus `metadata.json` — and verifies each file it
-reads with `Digest.of_file(path).matches(...)` against that file's recorded
+`$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/` — one per-source
+file plus `metadata.json` — and verifies each file it reads with
+`Digest.of_file(path).matches(...)` against that file's recorded
 `output_sha256` in `metadata.json`, raising `SplitProvenanceMismatch` on any
-disagreement. It exposes `split_of(uuid) -> str`, `counts() -> Mapping[str, int]`,
+disagreement. The per-source filenames are **not** uniform, so resolution is an
+explicit literal mapping (mirroring `scripts/build_class1_splits.py`'s own
+`out_name` table), never a glob: `hessian → hessian_uuid_splits.csv.gz`,
+`mbis → mbis_uuid_splits.csv.gz`, `torsion-scan → torsion_scan_splits.csv.gz`
+(note the last omits `_uuid_`); an unknown source raises `KeyError` naming the
+known ones. It exposes `split_of(uuid) -> str`, `counts() -> Mapping[str, int]`,
 and `provenance: SplitProvenance` (frozen: coordinate, seed, ratios, generator,
 per-file sha256). It loads **one** source's table per instance, not all four,
 because the whole set is millions of rows and the caller only ever needs one.
+
+A second alternate constructor, `SplitTable.from_identity(root: Path)`, loads
+`identity_splits.csv.gz` (header `identity,split` — molecule identities, no
+uuids) under the same provenance verification, exposing the same `split_of`
+(keyed by identity) and `counts`. This is the table `-03-prepare`'s
+`PrepareJob(split_of=...)` mapping is built from — one implementation, one
+provenance check, two key spaces, each honest about which it holds. [Added
+2026-08-14 after spec-audit: `-03` needs identity-keyed routing and must not
+grow a second split loader.]
 
 Computing a digest here does **not** contradict `.claude/notes/notes.md`
 ("molhub 绝不自行计算 digest"). That rule forbids inventing a digest for an
@@ -194,7 +209,7 @@ without a clock and tests inject a recording fake.
 `transfer(block)` performs exactly this sequence, and the sequence is the
 contract:
 
-1. `ledger.lease([block.id], lease_ttl)` — **before** the first fetch. This is
+1. `ledger.lease([block.id], ttl=lease_ttl)` — **before** the first fetch (`ttl` is keyword-only per `-01-ledger` §4). This is
    the mitigation for the fixed `.part` hazard: two conveyor processes can no
    longer be inside `BlobStore.temp_path(key)` for the same key at once.
 2. `ledger.append(block.id, BlockState.DOWNLOADING)` — **once per call**,
@@ -315,8 +330,8 @@ refresh before `-03` is advisable.
 
 ## Tasks
 
-- [ ] Write failing unit tests for `SplitTable` in `tests/test_conveyor/test_splits.py` (`TestSplitTable`): gz row parsing, `split_of`, `counts`, provenance fields, and `SplitProvenanceMismatch` on a tampered `.csv.gz` (RED)
-- [ ] Implement `SplitTable`, `SplitProvenance` and `SplitProvenanceMismatch` in `src/molhub/conveyor/splits.py`, verifying each file against `metadata.json` `output_sha256` with `Digest.of_file(...).matches(...)`
+- [ ] Write failing unit tests for `SplitTable` in `tests/test_conveyor/test_splits.py` (`TestSplitTable`): gz row parsing, `split_of`, `counts`, provenance fields, the explicit per-source filename mapping (incl. the `torsion-scan` irregular name and `KeyError` on an unknown source), `from_identity` over `identity_splits.csv.gz`, and `SplitProvenanceMismatch` on a tampered `.csv.gz` (RED)
+- [ ] Implement `SplitTable` (`from_derived` + `from_identity`), `SplitProvenance` and `SplitProvenanceMismatch` in `src/molhub/conveyor/splits.py`, verifying each file against `metadata.json` `output_sha256` with `Digest.of_file(...).matches(...)`
 - [ ] Write failing unit tests for the roster in `tests/test_conveyor/test_roster.py` (`TestRemoteBlock`, `TestBlockRoster`) over the two-shard fixture manifest added to `tests/test_conveyor/conftest.py`: field-identity carry, `hot_roles`, `total_bytes`, `block(id)`, `split is None`, and each typed guard (RED)
 - [ ] Implement `RemoteBlock`, `BlockRoster` and the guards `NoShardArtifacts` / `UnsizedBlock` / `UnverifiableBlock` / `RoleSourceMismatch` in `src/molhub/conveyor/roster.py`
 - [ ] Write failing unit tests for `ShardTransfer` in `tests/test_conveyor/test_transfer.py` (`TestShardTransfer`, `TestExponentialBackoff`) against a fake `ArtifactHub` and fake `TransferLedger`: lease-before-fetch, release-in-finally, transient retry with unlink, one `DOWNLOADING` append per call, never `READY`, delete-then-`REMOTE` on persistent failure, `retries` counted as total attempts (RED)

@@ -1,6 +1,7 @@
 ---
 title: Conveyor prepare stage — split-routing, unit-integral block production
 status: approved
+grilled: true
 slug: streaming-data-tiers-03-conveyor-03-prepare
 repo: molhub
 chain: streaming-data-tiers-03-conveyor
@@ -48,10 +49,13 @@ that they are READY*. It writes no ledger, deletes no shard, bounds no queue.
 
 **Ledger seam is a value, not a call.** `PrepareJob.run()` returns
 `PreparedBlocks`; it does not import or invoke the ledger. `PreparedBlocks` is
-the complete payload of one READY record (I5): every sealed root, its split,
-unit count, frame count, committed bytes and `block_digest`. Whether
-`-01-ledger`'s recorder consumes that object or its fields is `-01`'s call; this
-spec binds only that the evidence is complete, and produced in one place.
+the complete evidence for the READY records (I5): every sealed root, its split,
+unit count, frame count, committed bytes and `block_digest`. The **conveyor
+driver** (the single ledger-transition writer, `-04-residency` §"single-writer
+discharge") consumes it: one READY append per sealed root's derived `BlockId`,
+then READY → CONSUMED for the raw shard. This spec binds only that the evidence
+is complete, and produced in one place. [Ownership named 2026-08-14 after
+spec-audit.]
 
 ### 1. Split fan-out ruling (binding)
 
@@ -60,16 +64,27 @@ at *molecule identity* (blake2b-128 of `mapped_isomeric_smiles`, 8:1:1, seed
 20260814), never at shard boundaries, so one shard carries train, val and test
 molecules interleaved. I2/I7 and the block format make a block **split-PURE**,
 and `BlockWriter` takes `split` once, in the constructor
-(`molnex:src/molix/store/block.py:751`). Therefore:
+(`molnex:src/molix/store/block.py:788`). Therefore:
 
 > One prepare job over one downloaded shard opens **up to three writers at
 > once** (`train` / `val` / `test`) and seals all of them, plus a **size fan-out**
-> whenever a split's share crosses the 1–5 GB block ceiling. Every sealed root
-> is named in the **single** READY ledger record for that shard.
+> whenever a split's share crosses the 1–5 GB block ceiling. Each sealed root is
+> a **derived block with its own `BlockId`** (same `source` coordinate, `task` =
+> role name, `split` filled, `block_id = f"{shard}-{split}-{seq:03d}"`), and the
+> conveyor driver appends **one READY ledger record per sealed root** from the
+> returned `PreparedBlocks`; the raw shard itself then advances READY → CONSUMED
+> (it has been consumed by the prepare stage). [Revised 2026-08-14 after
+> spec-audit: a single shard-level READY record could not be admitted
+> one-path-per-BlockId by `-04`'s TierStore.]
 
 Routing is a lookup, never a derivation: `PrepareJob` takes
-`split_of: Mapping[str, str]` (identity → `"train" | "val" | "test"`, the
-hot-tier `identity_splits.csv.gz` of `class1-universal-splits@1`) and raises
+`split_of: Mapping[str, str]` (identity → `"train" | "val" | "test"`). The
+caller builds it with `-02-roster`'s `SplitTable.from_identity(root)` — the
+provenance-verified loader of the hot-tier `identity_splits.csv.gz` of
+`class1-universal-splits@1` (identity-keyed; the per-source
+`SplitTable.from_derived` tables are uuid-keyed and serve a different question).
+`PrepareJob` keeps the plain `Mapping` seam so its unit tests need no files;
+one split loader exists, in `-02`. It raises
 `UnroutableUnitError` naming the identity and the unit key when a molecule is
 absent. There is no default split, no "assume train", no re-splitting (I7).
 Loading the manifest is the caller's job — this stage performs no IO of its own
@@ -95,7 +110,7 @@ returns **one complete sampling unit** per index — a `HessianRecord`, an
   There is no frame-level encoder method.
 - `PrepareJob`'s only ingestion call is `writer.append_unit(unit)`. There is no
   `append_frame` anywhere in the seam, in the adapter, or in molnex
-  (`molnex:src/molix/store/block.py:853` is the sole ingestion method).
+  (`molnex:src/molix/store/block.py:890` is the sole ingestion method).
 - The size fan-out check runs **after** `append_unit`, against
   `writer.committed_bytes`. A unit that alone exceeds the ceiling still lands
   whole, in its own block. Cutting a unit to hit a byte target is therefore not
@@ -118,7 +133,7 @@ is appended twice); the guarantee itself comes from the shape.
 | `frames` | frame-space columns, `{name: np.ndarray}` |
 
 with derived `n_atoms` / `n_frames`. Column names are exactly molnex's route
-names (`molnex:src/molix/store/block.py:239-285`), because an unroutable column
+names (`molnex:src/molix/store/block.py:239-322`), because an unroutable column
 cannot enter a block:
 
 | column | space | dtype | unit |
@@ -134,7 +149,8 @@ cannot enter a block:
 **No unit conversion happens here, by construction.** `THEMOL_UNITS`
 (`src/molhub/dataset/themol.py:40-50`) declares Å / kcal mol⁻¹ /
 kcal mol⁻¹ Å⁻¹, which is exactly the block-format convention
-(`molnex:.claude/specs/streaming-data-tiers-02-block-format.md` § Domain basis). The
+(recorded in `molnex:src/molix/store/block.py`'s module docstring — the format
+spec was closed and deleted per molnex convention). The
 encoder's only numeric transformation is the dtype narrowing float64 → float32
 that the store refuses to do silently, and `THEMOL_UNITS` is what the caller
 puts in `provenance["units"]`. No conversion factor appears in the module.
@@ -181,16 +197,16 @@ Two `@runtime_checkable` Protocols mirror the **verified** molnex surface
 
 ```python
 class BlockWriterLike(Protocol):
-    def append_unit(self, unit: Any) -> int: ...     # :853
+    def append_unit(self, unit: Any) -> int: ...     # :890
     @property
-    def committed_bytes(self) -> int: ...            # :843
+    def committed_bytes(self) -> int: ...            # :880
     @property
-    def unit_count(self) -> int: ...                 # :838
-    def seal(self) -> None: ...                      # :903
+    def unit_count(self) -> int: ...                 # :875
+    def seal(self) -> None: ...                      # :940
 
 class BlockWriterFactory(Protocol):
     def __call__(self, root: Path, *, split: str,
-                 provenance: Mapping[str, Any]) -> BlockWriterLike: ...   # :751
+                 provenance: Mapping[str, Any]) -> BlockWriterLike: ...   # :788
 ```
 
 `BlockWriterFactory` is **not** a `make_*` wrapper: it is the *constructor* seam,
@@ -231,7 +247,14 @@ READY machine-checkable. `frame_count` is summed from the `RawUnit`s, giving
 worker only**: `MolnexBlockWriter`, a small adapter class in `prepare.py` whose
 `__init__` performs the import, constructs the real `BlockWriter(root,
 split=…, provenance=…)`, and whose `append_unit(raw)` converts the numpy columns
-to torch tensors and builds a real `SamplingUnit`. It satisfies `BlockWriterLike`
+to torch tensors and builds a real `SamplingUnit(key, task, topology, frames)`.
+`RawUnit.identity` is **dropped at this boundary, deliberately**: `SamplingUnit`
+has no identity field, and identity's one job is split routing inside
+`PrepareJob.run()`. Post-hoc split-purity audit therefore reads the *ledger*
+(the READY records name each sealed root together with its split), never the
+block bytes — a sealed block records `key` (`molecule_id`/`scan_id`) only. The
+unit test pins the four-field `SamplingUnit` call so an accidental fifth field
+cannot appear. [Stated explicitly 2026-08-14 after spec-audit.] It satisfies `BlockWriterLike`
 (instances) and `BlockWriterFactory` (the class object) at once, which is why the
 worker is a class rather than a `create_writer` function — a bare worker function
 returning writers is exactly the factory shape CLAUDE.md forbids. Consequences:
@@ -277,8 +300,8 @@ direct inspection of the current trees. A blueprint refresh before `-04` is
 advisable — `.claude/notes/architecture.md` still claims `regressions/` does not
 exist.
 
-- `molix.store.block.BlockWriter` / `SamplingUnit` (`molnex:src/molix/store/block.py:751`,
-  `:853`, `:903`, `:373`) — **reuse** across the repo boundary through
+- `molix.store.block.BlockWriter` / `SamplingUnit` (`molnex:src/molix/store/block.py:788`,
+  `:890`, `:940`, `:410`) — **reuse** across the repo boundary through
   `MolnexBlockWriter`. molhub forks no block format and reimplements no writer.
 - `molhub.dataset.themol` record types + `THEMolShardDataset` + `THEMOL_UNITS`
   (`src/molhub/dataset/themol.py:40`, `:53-79`, `:98`) — **reuse**. The conveyor
@@ -304,7 +327,7 @@ exist.
 
 ## Files to create or modify
 
-- `src/molhub/conveyor/__init__.py` (new)
+- `src/molhub/conveyor/__init__.py` — created by `-01-ledger`; this spec appends the encoder/prepare exports
 - `src/molhub/conveyor/errors.py` (new)
 - `src/molhub/conveyor/encoder.py` (new)
 - `src/molhub/conveyor/prepare.py` (new)
@@ -323,8 +346,8 @@ exist.
 - [ ] Write failing unit tests for `PrepareJob` in `tests/test_conveyor/test_prepare.py` → `TestPrepareJob` against an injected `BlockWriterLike` fake: whole-unit ingestion, split fan-out over a mixed-split fixture, size fan-out that never splits a unit, `UnroutableUnitError`, `IncompleteProvenanceError`, and the `PreparedBlocks` READY evidence
 - [ ] Implement `BlockWriterLike` / `BlockWriterFactory` protocols, `PreparedBlock` / `PreparedBlocks` and `PrepareJob.run` in `src/molhub/conveyor/prepare.py`, exporting the package surface from `src/molhub/conveyor/__init__.py`
 - [ ] Write `tests/test_conveyor/test_layering.py`: no module-scope `torch` / `molix` import under `src/molhub/conveyor/`, `molhub.dataset` imports no `molhub.conveyor`, and `numpy` declared in `[project].dependencies` (RED on the declaration half)
-- [ ] Implement `MolnexBlockWriter` in `src/molhub/conveyor/prepare.py` — the single lazily-imported `from molix.store.block import BlockWriter, SamplingUnit` site plus the numpy→torch `SamplingUnit` conversion
-- [ ] Declare `numpy` in `[project] dependencies`, add the `prepare` optional-dependency extra and the `molix` `ty` `unresolved-import` override in `pyproject.toml`
+- [ ] Implement `MolnexBlockWriter` in `src/molhub/conveyor/prepare.py` — the single lazily-imported `from molix.store.block import BlockWriter, SamplingUnit` site plus the numpy→torch `SamplingUnit` conversion — and write `prepare.py`'s module docstring naming the Option-A ruling, the single import site, the identity-drop boundary, and the three rejected alternatives (ac-010)
+- [ ] Declare `numpy` in `[project] dependencies`, add the `prepare` optional-dependency extra with a comment naming molnex's non-PyPI status and the `MOLNEX_SRC` escape hatch (ac-010), and the `molix` `ty` `unresolved-import` override in `pyproject.toml`
 - [ ] Add regression example `regressions/streaming-data-tiers-03-conveyor-03-prepare.py` (public API only; ungated fake-writer goldens plus a `MOLNEX_SRC`-gated real-`BlockWriter` parity leg; hard-coded goldens, no third-party runtime)
 - [ ] Run full check + test suite
 
@@ -397,8 +420,10 @@ produce a value at run time.
 - **Queue backpressure, byte budgets, leases, refcounted deletion, shard deletion
   after READY** (I3/I4/I9) — owned by the chain's last sub-spec.
 - **The block format** — columns, commit protocol, `seal()` semantics, digests.
-  Owned by `molnex:.claude/specs/streaming-data-tiers-02-block-format.md`;
-  molhub consumes it and reads five manifest fields.
+  Owned by molnex (`molix.block/1`; the surviving contract of record is
+  `molnex:src/molix/store/block.py`'s module docstring — its spec was closed
+  and deleted per molnex convention); molhub consumes it and reads five
+  manifest fields.
 - **Cartesian Hessian and B-matrix storage** — no routable column space in
   `molix.block/1`; the Hessian core is hot-tier by strategy § 6. Named in the
   encoder docstring with its successor.

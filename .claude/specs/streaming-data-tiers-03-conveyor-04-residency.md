@@ -1,6 +1,7 @@
 ---
 title: Conveyor residency, backpressure and coverage — byte-budgeted tiers, prepare workers, CLI
 status: approved
+grilled: true
 slug: streaming-data-tiers-03-conveyor-04-residency
 repo: molhub
 chain: streaming-data-tiers-03-conveyor
@@ -42,6 +43,23 @@ stays a data-plane repo and the block reader stays molnex's.
 | `conveyor/tier.py` | one tier's on-disk residency: byte budget, admit / release / evict, the derived-artifact path + provenance convention | block state, leases, transfers, prepare |
 | `conveyor/backpressure.py` | byte-weighted admission control between stages, and the worker processes that run `-03`'s prepare jobs | what a prepare job *is* (`-03`) |
 | `conveyor/coverage.py` | what the run has seen (ledger replay) and what it can consume right now (sealed manifests) | batch composition, sampler construction (molnex `-04`) |
+
+### 1b. Single-writer discharge — who appends transitions
+
+`-01-ledger` R1 requires a single transition writer per ledger. This chain
+discharges it operationally: **the conveyor driver — the one process that owns
+the `ShardTransfer`, submits jobs to `PrepareWorkers`, and holds the
+`TierStore`s — is the sole ledger-transition writer.** `PrepareWorkers` workers
+never touch the ledger (they return `outcome`/`PreparedBlocks` values); the
+driver appends DOWNLOADING/REMOTE through `-02`'s `ShardTransfer` (which it
+invokes in-process), READY per sealed derived root and READY → CONSUMED for the
+raw shard from `-03`'s `PreparedBlocks`, and REMOTE-on-deletion through
+`TierStore`. Lease records are exempt from R1 (any number of holders). Running
+**two drivers over one ledger is out of contract**: multi-node / multi-driver
+writer election is explicitly deferred to a named future spec,
+`streaming-data-tiers-05-multinode` — single-node single-driver is the v0
+operating mode. [Added 2026-08-14 after spec-audit: `-01` R1's deferral
+previously had no accepting owner.]
 
 ### 2. `TierStore` — one store, one subdirectory, one budget
 
@@ -198,7 +216,10 @@ into a frozen report: `blocks_seen` (reached READY), `blocks_consumed`,
 `units_seen`, `bytes_downloaded` (Σ over DOWNLOADING records, so a retried fetch
 counts twice — it measures network bytes honestly), `bytes_prepared` (Σ over
 READY), `bytes_evicted` (Σ over REMOTE records that follow a READY record for
-the same block — the initial REMOTE registration is not a deletion), and
+the same **derived** block — `BlockId.split is not None`; the initial REMOTE
+registration is not a deletion), `bytes_raw_released` (Σ over REMOTE records
+following READY for **raw** blocks — `BlockId.split is None` — i.e. raw shards
+deleted after their prepare consumed them, the I3 reclaim), and
 `timeline`, a tuple of `CoveragePoint(at, blocks, units)` cumulative at each
 CONSUMED record. `fraction(total_blocks)` is consumed over corpus. `units_by_block`
 is a plain `Mapping[BlockId, int]` supplied by the caller from `-02`'s roster —
@@ -292,7 +313,7 @@ direct read of the named file and line.
 - `-03` `PrepareJob` / `PreparedBlocks` / `THEMolUnitEncoder` — **reuse**;
   `PrepareWorkers` runs them and defines no job type of its own.
 - molnex `BlockReader` / `BlockManifest`
-  (`molnex:src/molix/store/block.py:535,1139`) — **new — not adopted**: both
+  (`molnex:src/molix/store/block.py:572,1176`) — **new — not adopted**: both
   import torch and live in molnex. molhub reads the same `manifest.json` as JSON,
   which is what keeps the handoff torch-free and the reader single-owner.
 - `molhub.sources.Digest.of_file` (`src/molhub/sources/digest.py`) — **new — not
@@ -331,7 +352,7 @@ direct read of the named file and line.
 - [ ] Write failing unit tests for `ByteBoundedQueue` and `PrepareWorkers` (`tests/test_conveyor/test_backpressure.py`) — `timeout=0` full/free probes, pinned `held_bytes` trace, `QueueOversized` on an unsatisfiable reservation, event-synchronized bounded-wait wake, fake picklable runner whose `__getstate__` drops its per-pid handle, default context is spawn (RED)
 - [ ] Implement `ByteBoundedQueue` and `PrepareWorkers` in `src/molhub/conveyor/backpressure.py` — byte-weighted FIFO with `reserve` / `take` / `release` (bytes freed by deletion, never by dequeue), injectable `mp_context` defaulting to spawn, `JobRunner` protocol and the per-pid handle contract
 - [ ] Write failing tests for the reporting surface and the guards: `tests/test_conveyor/test_coverage.py` (`TestCoverageReport` pinned replay counts and timeline, `TestReadyBlocks` metadata fields, unsealed and unsupported-schema refusals, digests copied verbatim), `tests/test_conveyor/test_layering.py` (AST guard, per `tests/test_sources/test_layering.py`), and the `cache status` / `cache coverage` cases in `tests/test_cli.py` (RED)
-- [ ] Implement `CoverageReport`, `CoveragePoint`, `ReadyBlocks` and `BlockMetadata` in `src/molhub/conveyor/coverage.py` using stdlib `json` only, and re-export this spec's public names from `src/molhub/conveyor/__init__.py`
+- [ ] Implement `CoverageReport`, `CoveragePoint`, `ReadyBlocks` and `BlockMetadata` in `src/molhub/conveyor/coverage.py` using stdlib `json` only, re-export this spec's public names from `src/molhub/conveyor/__init__.py`, and write the three module docstrings ac-015 binds (tier.py: declared-bytes budget + plan-before-delete; backpressure.py: processes + spawn default; coverage.py: digests-copied-never-computed citing .claude/notes/notes.md + the metadata.json vs manifest.json boundary)
 - [ ] Implement the `cache status` and `cache coverage` verbs in `src/molhub/cli.py` on the existing `cache` sub-app, shaped like `cache_verify` (`--home`, per-tier lines, summary line, exit 1 on an over-budget tier or a missing roster)
 - [ ] Add regression example `regressions/streaming-data-tiers-03-conveyor-04-residency.py` (public API only; hard-coded goldens, no third-party runtime)
 - [ ] Run full check + test suite
@@ -396,8 +417,9 @@ public API only, hard-coded goldens, no third-party oracle at runtime:
    `VisitOrder((b00..b04), cursor=2)`. `evict_until(1_000_000)` → **`("b00",)`**,
    `resident_bytes == 2_000_000`.
 3. Admit `b03`; `flag_resident("b01")`; `evict_until(1_000_000)` → raises
-   `TierOverBudget`, `resident_bytes` still **3 000 000** and all four entries
-   still on disk (leased and flagged blocks survive; nothing partially deleted).
+   `TierOverBudget`, `resident_bytes` still **3 000 000** and all three resident
+   entries (`b01`, `b02`, `b03`) still on disk (leased and flagged blocks
+   survive; nothing partially deleted).
 4. Release `b02`'s lease, mark it CONSUMED, cursor → 3; `evict_until(1_000_000)`
    → **`("b02",)`**. Admit `b04`. Peak blocks-tier residency never exceeds
    **3 000 000 B**; the raw tier stays at **2 000 000 B** throughout and loses no
@@ -409,7 +431,10 @@ public API only, hard-coded goldens, no third-party oracle at runtime:
    a 3 000 000 B reservation raises `QueueOversized`.
 6. `CoverageReport.replay` over the ledger the run actually wrote:
    `bytes_downloaded == 5_000_000`, `bytes_prepared == 5_000_000`,
-   `bytes_evicted == 2_000_000`, `blocks_seen` = the five ids,
+   `bytes_evicted == 2_000_000` (derived blocks `b00`, `b02`),
+   `bytes_raw_released == 1_000_000` (the raw shard released in step 4 —
+   split=None, so it counts here, not in bytes_evicted), `blocks_seen` = the
+   five ids,
    `blocks_consumed == ("b00", "b01", "b02")`, `units_seen == 12`,
    `fraction(8) == 0.375`, cumulative timeline `((1, 3), (2, 5), (3, 8))`.
    Timestamps are asserted monotone, never pinned to a literal.
@@ -428,8 +453,10 @@ public API only, hard-coded goldens, no third-party oracle at runtime:
   in molnex. Here only the metadata surface is guaranteed sufficient.
 - **The block format** — `molix.block/1` is molnex's (`-02-block-format`);
   molhub reads its `manifest.json` and never writes, verifies or re-derives it.
-- **Multi-node lease visibility** — leases are single-filesystem here, as
-  `-01` defined them. Cross-node coordination is a separate spec, not a flag.
+- **Multi-node lease visibility and writer election** — leases are
+  single-filesystem here, as `-01` defined them; the single-writer discharge is
+  §1b's single-driver operating mode. Cross-node coordination is the named
+  future spec `streaming-data-tiers-05-multinode`, not a flag.
 - **Throughput measurement** — no `B_net` or `c_prep` number is asserted or
   calibrated; the strategy's rate condition is design input, and any production
   submission remains gated by `molnex:.claude/notes/production-training-checklist.md`.
