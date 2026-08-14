@@ -89,3 +89,42 @@ wiring; an ambient "streaming context" blob threaded through every layer;
 `make_*` / `create_*` factory wrappers around construction. Composition of the
 three stages is the caller's job (scripts, `regressions/`, molexp).
 
+
+
+## Conveyor chain landed (2026-08-14)
+
+The `-03-conveyor` chain is implemented and closed (specs deleted per
+convention; commits e521dd6 / 75b1bdf / ebf16de / e5f991a). Surviving surface
+of record — `src/molhub/conveyor/`:
+
+- `block.py` — `BlockState` (REMOTE/DOWNLOADING/READY/CONSUMED, 10 legal / 6
+  illegal transitions), `BlockId` (`split: str | None`; None = split-mixed
+  published shard, key segment `unsplit` reserved).
+- `ledger.py` — append-only JSONL `Ledger`, per-record digests via
+  `Sha256Stream`, torn-tail truncate-repair, TTL leases (plan-scoped actors).
+  Single transition writer = the conveyor driver; multinode writer election
+  deferred to the named future spec `streaming-data-tiers-05-multinode`.
+- `roster.py` / `splits.py` / `transfer.py` — manifest-projected REMOTE
+  roster; `SplitTable.from_derived`/`from_identity` (provenance-verified);
+  `ShardTransfer` (lease-before-fetch, bounded retry, unlink-before-refetch,
+  never writes READY).
+- `encoder.py` / `prepare.py` — THEMol records → numpy `RawUnit`s (house
+  column vocabulary: `Z`/`pos`/`forces`/`energy`/`torsion_angle`/
+  `torsion_atoms`; molnex `_COLUMN_ROUTES` closed registry is the authority);
+  `PrepareJob` split/size fan-out; `MolnexBlockWriter` lazy Option-A import,
+  end-to-end verified against molnex `BlockReader` (pos bit-identical).
+- `tier.py` / `backpressure.py` / `coverage.py` — byte-budgeted `TierStore`
+  per tier with plan-ordered eviction (`VisitOrder`), `ByteBoundedQueue`
+  (bytes freed by deletion, not dequeue), `PrepareWorkers` (spawn),
+  `CoverageReport` (bytes_evicted = derived split≠None; bytes_raw_released =
+  raw split=None) and `ReadyBlocks.metadata()` — the torch-free sampler
+  handoff. CLI: `molhub cache status` / `cache coverage`.
+
+Environment of record: molpy/molrs >= 0.13 (b8e61a9) — no 0.12 workarounds.
+
+Open routes: molnex `streaming-data-tiers-04-scheduler-integration` (consume
+ReadyBlocks metadata → TaskMixtureBatchSampler plan → VisitOrder back to
+eviction); `/mol:fix` for L1 `BlobStore.temp_path` fixed `.part` +
+`Fetcher` unverified cache hits; `uv.lock` relock (pulls torch/nvidia —
+operator decision); upstream molrs: register `FrameMeta` with
+`collections.abc.Mapping`.
