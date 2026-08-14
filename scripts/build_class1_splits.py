@@ -16,12 +16,20 @@ Global identity
     torsion-scan ``uuid`` column is a *scan* identity, not a molecule
     identity (zero uuid overlap with hessian/mbis) — do not key splits on it.
 
-Outputs (under ``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/``):
+Outputs (in the artifact directory ``DerivedLayout`` files this coordinate
+under, ``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/``):
     identity_splits.csv.gz        identity,split          one row per molecule
     hessian_uuid_splits.csv.gz    uuid,identity,split     per hessian molecule
     mbis_uuid_splits.csv.gz       uuid,identity,split     per mbis molecule
     torsion_scan_splits.csv.gz    uuid,identity,split     per torsion scan
-    metadata.json                 seed, ratios, counts, input sha256s
+    provenance record             seed, ratios, counts, input sha256s, written
+                                  by ``DerivedLayout.write_metadata``
+
+The directory shape and the provenance record are not this script's rules any
+more: :class:`molhub.conveyor.tier.DerivedLayout` owns both, and the conveyor's
+blocks tier uses the same object. The bytes are unchanged — same ``indent=2``,
+same key order, same trailing newline — so re-running against the same inputs
+and seed still reproduces the shipped artifact exactly.
 
 Deterministic and re-runnable: same inputs + seed -> byte-identical outputs.
 
@@ -43,7 +51,7 @@ import sys
 import time
 from pathlib import Path
 
-from molhub.conveyor import THEMolUnitEncoder
+from molhub.conveyor import DerivedLayout, THEMolUnitEncoder
 
 RATIOS = (8, 1, 1)  # train : val : test, molecule level (espaloma precedent)
 SOURCES = {
@@ -101,8 +109,8 @@ def main() -> int:
     args = parser.parse_args()
 
     home = args.molhub_home
-    out_dir = home / "derived" / "molcrafts" / "class1-universal-splits" / "1"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    layout = DerivedLayout(home, subdir="derived")
+    out_dir = layout.artifact_dir("molcrafts", "class1-universal-splits", "1")
 
     index_paths = {name: home / "files" / f"dataset/themol/{name}@1" / "index" for name in SOURCES}
     for name, path in index_paths.items():
@@ -177,7 +185,7 @@ def main() -> int:
         "torsion_scan_splits.csv.gz",
     ):
         metadata["output_sha256"][out_name] = sha256_of(out_dir / out_name)
-    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    layout.write_metadata(out_dir, metadata)
 
     print(json.dumps({k: v for k, v in metadata.items() if k != "output_sha256"}, indent=2))
     print(f"outputs -> {out_dir}")

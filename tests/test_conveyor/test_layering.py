@@ -92,6 +92,14 @@ _NO_MODULE_SCOPE_ROOTS = frozenset({"torch", "molix", "molrs"})
 # Modules that may import numpy — the two that hold numeric columns.
 _NUMPY_MODULES = frozenset({"encoder.py", "prepare.py"})
 
+# `-04-residency`'s three modules, named here so their strict rule is a written
+# fact rather than a default nobody checked. They are bookkeeping —  byte
+# budgets, a queue, a fold over records and a JSON read — so they keep `-01`'s
+# package-wide surface exactly: stdlib + `molhub`, at any depth. ac-012 turns on
+# this: `ReadyBlocks` reads molnex's `manifest.json` as JSON precisely so the
+# sampler handoff never pulls torch into a data-plane repo.
+_RESIDENCY_MODULES = frozenset({"tier.py", "backpressure.py", "coverage.py"})
+
 # Modules that may reach torch / molix at all, and then only inside a function.
 _LAZY_MOLNEX_MODULES = frozenset({"prepare.py"})
 
@@ -294,6 +302,15 @@ class TestConveyorPackageIsPresent:
     def test_the_prepare_module_exists(self):
         assert (_PACKAGE_ROOT / "prepare.py").is_file()
 
+    def test_the_tier_module_exists(self):
+        assert (_PACKAGE_ROOT / "tier.py").is_file()
+
+    def test_the_backpressure_module_exists(self):
+        assert (_PACKAGE_ROOT / "backpressure.py").is_file()
+
+    def test_the_coverage_module_exists(self):
+        assert (_PACKAGE_ROOT / "coverage.py").is_file()
+
 
 class TestTheLayeringEdgeIsOneWay:
     """The conveyor reads bytes and semantics; neither of them may read it back."""
@@ -330,6 +347,22 @@ class TestTheConveyorSeamsAcceptTheLandedTypes:
             "release",
         ]
 
+    def test_the_ledger_satisfies_the_tier_seam(self):
+        """``test_tier.py`` drives a fake; this is where the real one must still fit."""
+        from molhub.conveyor.tier import BlockLedger
+
+        assert issubclass(Ledger, BlockLedger)
+
+    def test_the_tier_seam_is_exactly_the_three_verbs_it_needs(self):
+        """State, live leases, one append. A fourth verb would be a second ledger."""
+        from molhub.conveyor.tier import BlockLedger
+
+        assert sorted(name for name in vars(BlockLedger) if not name.startswith("_")) == [
+            "active_leases",
+            "append",
+            "replay",
+        ]
+
 
 class TestConveyorImportsAreDeclaredPerModule:
     """One undeclared import here and a layer stops being unit-testable.
@@ -356,6 +389,18 @@ class TestConveyorImportsAreDeclaredPerModule:
         if module_file.name in _NUMPY_MODULES:
             pytest.skip(f"{module_file.name} holds numeric columns and may import numpy")
         assert "numpy" not in _imported_roots(module_file), f"{module_file.name} imports numpy"
+
+    @pytest.mark.parametrize("name", sorted(_RESIDENCY_MODULES))
+    def test_the_residency_modules_are_not_widened(self, name):
+        """The tables, not the files: a widening for these three is a visible edit."""
+        assert _allowed_roots(_PACKAGE_ROOT / name) == _ALLOWED_ROOTS
+
+    @pytest.mark.parametrize("name", sorted(_RESIDENCY_MODULES))
+    def test_the_residency_modules_import_only_stdlib_and_molhub(self, name):
+        """ac-012, at any depth: no torch, no molix, no molrs, and no numpy either."""
+        module_file = _PACKAGE_ROOT / name
+        assert module_file.is_file(), f"{name} has not landed"
+        assert _imported_roots(module_file) <= _ALLOWED_ROOTS
 
     @pytest.mark.parametrize("module_file", _MODULE_FILES, ids=lambda p: p.name)
     def test_no_ad_hoc_hashing(self, module_file):

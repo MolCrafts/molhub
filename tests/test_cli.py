@@ -6,6 +6,8 @@ shows a Python traceback instead of an exit code.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
@@ -154,6 +156,166 @@ class TestCacheVerify:
         )
         assert result.exit_code == 0
         assert "1 without a published digest" in result.stdout
+
+
+class TestCacheStatus:
+    """Residency, printed: one line per conveyor tier, exit 1 over a budget.
+
+    The tier paths are spelled out by hand for the same reason
+    ``TestCacheVerify._cache`` spells the blob key out: ``conveyor/raw`` and
+    ``conveyor/blocks`` (never under ``files/``) are the layout contract, and a
+    test that asked production where to write could not tell a wrong layout from
+    a right one. Assertions read ``result.output`` so a message the command
+    chooses to send to stderr still counts.
+    """
+
+    def _entry(self, home, tier: str, block_id: str, body: bytes) -> None:
+        """File *body* as one tier entry of ``dataset:themol/mbis@1``."""
+        from molhub.conveyor.block import BlockId
+
+        key = BlockId("dataset:themol/mbis@1", "electrostatic", None, block_id).key()
+        path = home / "conveyor" / tier / key / "column.bin"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+
+    def _both_tiers(self, home) -> None:
+        """1 024 B resident in the raw tier, 4 096 B in the blocks tier."""
+        self._entry(home, "raw", "shard-000", b"\0" * 1024)
+        self._entry(home, "blocks", "shard-001", b"\0" * 4096)
+
+    def _line(self, output: str, tier: str) -> str:
+        """The one line *tier* reports itself on."""
+        matches = [line for line in output.splitlines() if line.strip().startswith(tier)]
+        assert matches, output
+        return matches[0]
+
+    def _invoke(self, home, *, budget_blocks: int = 8192):
+        return runner.invoke(
+            app,
+            [
+                "cache",
+                "status",
+                "--home",
+                str(home),
+                "--budget-raw",
+                "2048",
+                "--budget-blocks",
+                str(budget_blocks),
+            ],
+        )
+
+    def test_reports_an_empty_root(self, tmp_path):
+        result = runner.invoke(app, ["cache", "status", "--home", str(tmp_path)])
+        assert result.exit_code == 0
+        assert f"No conveyor tiers under {tmp_path}." in result.output
+
+    def test_prints_one_line_per_tier(self, tmp_path):
+        self._both_tiers(tmp_path)
+        output = self._invoke(tmp_path).output
+        assert self._line(output, "raw")
+        assert self._line(output, "blocks")
+
+    def test_a_tier_line_carries_its_entry_count(self, tmp_path):
+        self._both_tiers(tmp_path)
+        assert re.search(r"\b1\b", self._line(self._invoke(tmp_path).output, "blocks"))
+
+    def test_a_tier_line_carries_its_resident_bytes(self, tmp_path):
+        self._both_tiers(tmp_path)
+        assert "4096" in self._line(self._invoke(tmp_path).output, "blocks")
+
+    def test_a_tier_line_carries_its_budget_bytes(self, tmp_path):
+        self._both_tiers(tmp_path)
+        assert "8192" in self._line(self._invoke(tmp_path).output, "blocks")
+
+    def test_the_two_tiers_report_their_own_budgets(self, tmp_path):
+        """ac-002 at the surface: two budgets, never one shared number."""
+        self._both_tiers(tmp_path)
+        line = self._line(self._invoke(tmp_path).output, "raw")
+        assert "1024" in line and "2048" in line
+
+    def test_tiers_within_their_budgets_exit_zero(self, tmp_path):
+        self._both_tiers(tmp_path)
+        assert self._invoke(tmp_path).exit_code == 0
+
+    def test_a_tier_over_its_budget_exits_nonzero(self, tmp_path):
+        """I4 failing on disk is what this exit code means."""
+        self._both_tiers(tmp_path)
+        assert self._invoke(tmp_path, budget_blocks=1024).exit_code == 1
+
+
+class TestCacheCoverage:
+    """What the run can prove it saw — and a refusal when it cannot prove it.
+
+    The ledger is written where the conveyor keeps its own bookkeeping,
+    ``<home>/conveyor/ledger.jsonl``, alongside the two tier directories.
+    """
+
+    def _ledger(self, home) -> None:
+        """One shard fetched, prepared, consumed and reclaimed; one block evicted."""
+        from molhub.conveyor import BlockId, BlockState, Ledger
+
+        ledger = Ledger(home / "conveyor" / "ledger.jsonl", actor="plan:test")
+        shard = BlockId("dataset:themol/mbis@1", "electrostatic", None, "shard-000")
+        block = BlockId("dataset:themol/mbis@1", "electrostatic", "train", "block-000")
+        ledger.append(shard, BlockState.REMOTE)
+        ledger.append(shard, BlockState.DOWNLOADING, size_bytes=640)
+        ledger.append(shard, BlockState.READY, size_bytes=512)
+        ledger.append(shard, BlockState.CONSUMED)
+        ledger.append(shard, BlockState.REMOTE, size_bytes=512)
+        ledger.append(block, BlockState.READY, size_bytes=384)
+        ledger.append(block, BlockState.REMOTE, size_bytes=384)
+
+    def _invoke(self, home):
+        """Run against the bundled registry — the roster's production source."""
+        return runner.invoke(app, ["cache", "coverage", "--home", str(home)])
+
+    def test_a_missing_roster_exits_nonzero(self, tmp_path):
+        """I10: a coverage number without the corpus denominator is implicit coverage."""
+        empty = tmp_path / "registry"
+        empty.mkdir()
+        self._ledger(tmp_path)
+        result = runner.invoke(
+            app, ["cache", "coverage", "--home", str(tmp_path), "--registry", str(empty)]
+        )
+        assert result.exit_code == 1
+
+    def test_a_missing_roster_says_so(self, tmp_path):
+        empty = tmp_path / "registry"
+        empty.mkdir()
+        self._ledger(tmp_path)
+        result = runner.invoke(
+            app, ["cache", "coverage", "--home", str(tmp_path), "--registry", str(empty)]
+        )
+        assert "roster" in result.output.lower()
+        assert "Traceback" not in result.output
+
+    def test_it_reports_the_blocks_seen(self, tmp_path):
+        self._ledger(tmp_path)
+        result = self._invoke(tmp_path)
+        assert result.exit_code == 0
+        assert "blocks" in result.output.lower()
+
+    def test_it_reports_the_consumed_share_of_the_corpus(self, tmp_path):
+        self._ledger(tmp_path)
+        assert "%" in self._invoke(tmp_path).output
+
+    def test_it_reports_the_units_seen(self, tmp_path):
+        self._ledger(tmp_path)
+        assert "units" in self._invoke(tmp_path).output.lower()
+
+    def test_it_reports_the_downloaded_bytes(self, tmp_path):
+        """A retried fetch counts twice; this ledger fetched once, for 640 B."""
+        self._ledger(tmp_path)
+        assert "640" in self._invoke(tmp_path).output
+
+    def test_it_reports_the_prepared_bytes(self, tmp_path):
+        self._ledger(tmp_path)
+        assert "896" in self._invoke(tmp_path).output
+
+    def test_it_reports_the_evicted_bytes(self, tmp_path):
+        """Only the derived block counts here; the raw shard's 512 B is the I3 reclaim."""
+        self._ledger(tmp_path)
+        assert "384" in self._invoke(tmp_path).output
 
 
 class TestBrokenRegistry:

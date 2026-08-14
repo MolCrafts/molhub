@@ -63,12 +63,42 @@ returning the evidence a ``READY`` record needs::
 molnex enters through :class:`~molhub.conveyor.prepare.MolnexBlockWriter` alone,
 which imports ``molix`` lazily, so the base install stays torch-free.
 
-No network, no environment variable and no disk-layout decision: the caller
-supplies the ledger's path and the block root, the bookkeeping half is stdlib
-plus ``molhub``, the prepare half adds numpy, and ``READY`` itself plus the
-byte-bounded queue belong to the stage after this one.
+The residency half decides what stays on local disk and what the run can prove
+it saw. :class:`~molhub.conveyor.tier.TierStore` bounds one subdirectory in
+bytes and evicts in the order the consumer's
+:class:`~molhub.conveyor.tier.VisitOrder` implies — planning the whole deletion
+before unlinking anything, and never at the cost of a live lease;
+:class:`~molhub.conveyor.backpressure.ByteBoundedQueue` and
+:class:`~molhub.conveyor.backpressure.PrepareWorkers` bound the handoff between
+stages in bytes and run the prepare jobs in processes; and
+:class:`~molhub.conveyor.coverage.CoverageReport` plus
+:class:`~molhub.conveyor.coverage.ReadyBlocks` report what was seen and what can
+be consumed right now::
+
+    blocks = TierStore(subdir="conveyor/blocks", budget_bytes=40_000_000_000, ledger=ledger)
+    blocks.admit(block, nbytes=2_000_000_000)
+    blocks.evict_until(2_000_000_000, plan=VisitOrder(order, cursor=7))
+
+    CoverageReport.replay(ledger.records(), units_by_block=units).fraction(total)
+    ReadyBlocks(blocks).metadata()[0].block_digest   # copied, never computed
+
+No network, no environment variable of its own and no disk-layout decision: the
+caller supplies the ledger's path, the tier root comes from
+:class:`~molhub.sources.blobs.BlobStore`, the bookkeeping half is stdlib plus
+``molhub``, and the prepare half adds numpy.
 """
 
+from molhub.conveyor.backpressure import (
+    ByteBoundedQueue,
+    DuplicateReservation,
+    JobRunner,
+    PrepareWorkers,
+    QueueError,
+    QueueOversized,
+    QueueTimeout,
+    UnknownReservation,
+    WorkerRefusal,
+)
 from molhub.conveyor.block import (
     BlockId,
     BlockState,
@@ -76,6 +106,14 @@ from molhub.conveyor.block import (
     IllegalTransition,
     InvalidBlockId,
     UnknownBlockState,
+)
+from molhub.conveyor.coverage import (
+    BlockMetadata,
+    BlockNotSealed,
+    CoveragePoint,
+    CoverageReport,
+    ReadyBlocks,
+    UnsupportedBlockFormat,
 )
 from molhub.conveyor.encoder import (
     RawUnit,
@@ -119,6 +157,17 @@ from molhub.conveyor.splits import (
     SplitProvenance,
     SplitProvenanceMismatch,
     SplitTable,
+)
+from molhub.conveyor.tier import (
+    BlockLedger,
+    BlockNotResident,
+    BlockUnevictable,
+    DerivedLayout,
+    IncompleteDerivation,
+    TierError,
+    TierOverBudget,
+    TierStore,
+    VisitOrder,
 )
 from molhub.conveyor.transfer import (
     Backoff,
@@ -175,4 +224,28 @@ __all__ = [
     "UnroutableUnitError",
     "IncompleteProvenanceError",
     "BlockFormatError",
+    "BlockLedger",
+    "VisitOrder",
+    "DerivedLayout",
+    "TierStore",
+    "TierError",
+    "TierOverBudget",
+    "BlockUnevictable",
+    "BlockNotResident",
+    "IncompleteDerivation",
+    "ByteBoundedQueue",
+    "QueueError",
+    "QueueTimeout",
+    "QueueOversized",
+    "DuplicateReservation",
+    "UnknownReservation",
+    "JobRunner",
+    "PrepareWorkers",
+    "WorkerRefusal",
+    "CoveragePoint",
+    "CoverageReport",
+    "BlockMetadata",
+    "ReadyBlocks",
+    "BlockNotSealed",
+    "UnsupportedBlockFormat",
 ]
