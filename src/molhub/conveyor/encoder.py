@@ -7,13 +7,13 @@ writer, decides no split, and imports neither torch nor molix — so a shard can
 be encoded, inspected and unit-tested in an environment where molnex is not
 installed at all.
 
-**Column names are molnex's route names, not molhub's.** An unroutable column
-cannot enter a block (``molnex:src/molix/store/block.py:239-322`` resolves a
-column to a row space by *name*), so the encoder emits exactly:
-``atom_Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` /
-``mol_target_torsion_atoms`` in molecule space, and ``frame_pos`` /
-``frame_atom_target_forces`` / ``frame_target_energy`` /
-``frame_target_torsion_angle`` in frame space.
+**Column names are molnex's route names, not molhub's.** They are rows of the
+closed ``_COLUMN_ROUTES`` registry in ``molnex:src/molix/store/block.py``, which
+resolves a column to a row space and a payload route by *name* — an
+unregistered column is a ``ValueError``, not a new prefix — so the encoder emits
+exactly: ``Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` /
+``torsion_atoms`` in molecule space, and ``pos`` / ``forces`` / ``energy`` /
+``torsion_angle`` in frame space.
 
 **No unit conversion happens here, by construction.**
 :data:`~molhub.dataset.themol.THEMOL_UNITS` declares Å / kcal mol⁻¹ /
@@ -28,10 +28,10 @@ yields a one-frame equilibrium-geometry unit and its ``(3N, 3N)`` Cartesian
 Hessian is deliberately dropped, for two independent reasons:
 
 1. ``molix.block/1`` has no routable column space for a per-molecule ragged 2-D
-   payload. Its only Hessian column is ``internal_target_hessian_diag``, a
-   *projected internal* target, and the projection needs a B-matrix that is
-   equally unroutable — so storing the Cartesian block would mean forking the
-   block format, which is the one thing this boundary exists to prevent.
+   payload. Its only Hessian column is ``hessian_diag``, a *projected internal*
+   target, and the projection needs a B-matrix that is equally unroutable — so
+   storing the Cartesian block would mean forking the block format, which is the
+   one thing this boundary exists to prevent.
 2. The streaming strategy classifies the Hessian core as **hot tier**
    (``.claude/specs/streaming-data-tiers-01-strategy.md`` § 6), permanently
    resident at ≈ 5.8 GB. It does not belong in a rolling block at all.
@@ -73,9 +73,10 @@ from molhub.dataset.themol import (
 __all__ = ["RawUnit", "THEMolUnitEncoder"]
 
 # The two columns every block declares, and the names this module derives its
-# counts from. Mirrored from `molnex:src/molix/store/block.py`'s required pair.
-_ATOM_Z = "atom_Z"
-_FRAME_POS = "frame_pos"
+# counts from. Mirrored from `molnex:src/molix/store/block.py`'s required pair,
+# name for name.
+_REQUIRED_TOPOLOGY = "Z"
+_REQUIRED_FRAME = "pos"
 
 # molpy's atom-block spelling of the two vectors a frame can carry.
 _POSITION_COLUMNS = ("x", "y", "z")
@@ -128,17 +129,17 @@ class RawUnit:
 
     @property
     def n_atoms(self) -> int:
-        """Atoms in this unit's topology, ``N = len(atom_Z)``."""
-        return int(self.topology[_ATOM_Z].shape[0])
+        """Atoms in this unit's topology, ``N = len(Z)``."""
+        return int(self.topology[_REQUIRED_TOPOLOGY].shape[0])
 
     @property
     def n_frames(self) -> int:
-        """Frames of this unit, ``len(frame_pos) // n_atoms``.
+        """Frames of this unit, ``len(pos) // n_atoms``.
 
         Exact by construction: :meth:`THEMolUnitEncoder.encode` refuses a record
         whose frames disagree with its topology's atom count.
         """
-        return int(self.frames[_FRAME_POS].shape[0]) // self.n_atoms
+        return int(self.frames[_REQUIRED_FRAME].shape[0]) // self.n_atoms
 
 
 class THEMolUnitEncoder:
@@ -271,7 +272,7 @@ class THEMolUnitEncoder:
             if index == 0:
                 topology = self._topology(key, frame)
                 identity = self.identity(self._smiles(key, targets))
-                n_atoms = int(topology[_ATOM_Z].shape[0])
+                n_atoms = int(topology[_REQUIRED_TOPOLOGY].shape[0])
                 with_forces = _FORCE_COLUMNS[0] in atoms
                 with_energy = "energy" in targets
 
@@ -297,14 +298,14 @@ class THEMolUnitEncoder:
                 "plus at least one frame of it, and molnex refuses a unit without one."
             )
 
-        frame_columns: dict[str, np.ndarray] = {_FRAME_POS: _stack(positions)}
+        frame_columns: dict[str, np.ndarray] = {_REQUIRED_FRAME: _stack(positions)}
         if with_forces:
-            frame_columns["frame_atom_target_forces"] = _stack(forces)
+            frame_columns["forces"] = _stack(forces)
         if with_energy:
-            frame_columns["frame_target_energy"] = np.asarray(energies, dtype=np.float32)
+            frame_columns["energy"] = np.asarray(energies, dtype=np.float32)
         if torsion is not None:
-            topology["mol_target_torsion_atoms"] = self._torsion_atoms(key, torsion, n_atoms)
-            frame_columns["frame_target_torsion_angle"] = np.asarray(angles, dtype=np.float32)
+            topology["torsion_atoms"] = self._torsion_atoms(key, torsion, n_atoms)
+            frame_columns["torsion_angle"] = np.asarray(angles, dtype=np.float32)
 
         return RawUnit(
             key=key,
@@ -322,15 +323,15 @@ class THEMolUnitEncoder:
         if "number" not in atoms:
             raise IncompleteRecordError(
                 f"THEMol record {key!r} has no 'number' atom column, so its atomic numbers "
-                "cannot be read; every block declares atom_Z."
+                "cannot be read; every block declares Z."
             )
         atom_z = np.asarray(atoms["number"], dtype=np.int16)
         if atom_z.ndim != 1 or atom_z.shape[0] == 0:
             raise IncompleteRecordError(
                 f"THEMol record {key!r} declares {atom_z.shape} atomic numbers; a unit needs "
-                "a one-dimensional, non-empty atom_Z."
+                "a one-dimensional, non-empty Z."
             )
-        return {_ATOM_Z: atom_z, **self._bonds(key, frame)}
+        return {_REQUIRED_TOPOLOGY: atom_z, **self._bonds(key, frame)}
 
     def _bonds(self, key: str, frame: Any) -> dict[str, np.ndarray]:
         """Valence columns of *frame* — empty rather than missing when bondless.

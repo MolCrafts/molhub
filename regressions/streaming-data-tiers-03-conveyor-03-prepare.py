@@ -25,10 +25,10 @@ on ``seal()`` it writes the five manifest fields (``format``, ``split``,
 block as READY evidence. Pinned as literals: the three sealed roots and their
 ``<name>-<split>-<seq>`` names, the per-split unit / frame / payload-byte counts,
 the per-split unit keys, the digests read back out of each manifest, and the
-concatenated ``frame_pos`` / ``frame_target_energy`` of each block. Whole-unit
-ingestion (I2) is checked as a multiset: every input record appears exactly once
-across all blocks, as one :class:`~molhub.conveyor.encoder.RawUnit` carrying all
-of its source record's frames.
+concatenated ``pos`` / ``energy`` of each block. Whole-unit ingestion (I2) is
+checked as a multiset: every input record appears exactly once across all
+blocks, as one :class:`~molhub.conveyor.encoder.RawUnit` carrying all of its
+source record's frames.
 
 **Leg B — ``MOLNEX_SRC``-gated, the real molnex writer.** Gated exactly like
 ``tests/test_dataset/test_neighbor.py`` — ``MOLNEX_SRC`` onto :data:`sys.path`,
@@ -40,7 +40,7 @@ re-runs the same shard through :class:`MolnexBlockWriter` into a
 counts as leg A, exactly one ``split`` per ``manifest.json`` (and no column in
 the frozen schema whose name mentions a split — purity is structural), the unit
 keys in append order, ``verify()`` passing over the sealed bytes, and
-``frame_pos`` equal **bit-for-bit** (``tobytes()``) to the float32 arrays the
+``pos`` equal **bit-for-bit** (``tobytes()``) to the float32 arrays the
 encoder produced independently on this side of the seam.
 
 Determinism: no network, no clock, no environment lookup other than the
@@ -55,9 +55,8 @@ Provenance of the goldens (no tool runs here):
   ``tests/test_conveyor/test_prepare.py`` uses. Coordinates are
   ``x = 0.5 * atom_index + 0.5 * step``, ``y = z = 0``; energies are
   ``-0.5 * step``; payload bytes are ``sum(column.nbytes)`` over the encoder's
-  own columns (``atom_Z`` ``<i2``, three ``<i4`` bond columns, ``frame_pos`` and
-  ``frame_atom_target_forces`` ``(F*N, 3)`` ``<f4``, ``frame_target_energy``
-  ``(F,)`` ``<f4``).
+  own columns (``Z`` ``<i2``, three ``<i4`` bond columns, ``pos`` and ``forces``
+  ``(F*N, 3)`` ``<f4``, ``energy`` ``(F,)`` ``<f4``).
 * The three identity hexes are the literals pinned by
   ``tests/test_conveyor/test_encoder.py``: blake2b-128 of the mapped isomeric
   SMILES, the rule ``scripts/build_class1_splits.py`` uses to *produce* the
@@ -195,11 +194,11 @@ KEYS_PER_SPLIT: Mapping[str, tuple[str, ...]] = {
 }
 
 #: The encoder's own column payload, in bytes, per sealed block:
-#: ``atom_Z`` ``2N`` + three ``<i4`` bond columns ``12B`` + per frame
+#: ``Z`` ``2N`` + three ``<i4`` bond columns ``12B`` + per frame
 #: ``(3N + 3N + 1) * 4``. water ``N=3, B=2`` -> ``30 + 76F``; hooh ``N=4, B=3``
 #: -> ``44 + 100F``; hf ``N=2, B=1`` -> ``16 + 52F``.
 #: This is what the fake writer commits. molnex additionally commits its own
-#: synthesised index columns (``mol_n_atoms``, ``unit_key_bytes``, ``bond_n``,
+#: synthesised index columns (``n_atoms``, ``unit_key_bytes``, ``bond_n``,
 #: …), so leg B checks that its number is strictly larger rather than equal.
 PAYLOAD_BYTES_PER_SPLIT: Mapping[str, int] = {"train": 440, "val": 388, "test": 68}
 
@@ -211,12 +210,12 @@ DIGEST_PER_SPLIT: Mapping[str, str] = {
     "test": f"{2:064x}",
 }
 
-#: ``frame_pos`` of each sealed block, one row per **frame**, as x coordinates:
+#: ``pos`` of each sealed block, one row per **frame**, as x coordinates:
 #: the fixture puts every atom on the x axis at ``0.5 * atom_index + 0.5 * step``,
 #: so ``y`` and ``z`` are exactly ``0.0`` and the rows below flatten to the whole
 #: ``(F * N, 3)`` column. train = water-a (2 frames of 3 atoms) then water-b (3
 #: of 3); val = hooh-a (1 frame of 4) then hooh-b (2 of 4); test = hf-a (1 of 2).
-FRAME_POS_X_PER_SPLIT: Mapping[str, tuple[tuple[float, ...], ...]] = {
+POS_X_PER_SPLIT: Mapping[str, tuple[tuple[float, ...], ...]] = {
     "train": (
         (0.0, 0.5, 1.0),
         (0.5, 1.0, 1.5),
@@ -232,20 +231,20 @@ FRAME_POS_X_PER_SPLIT: Mapping[str, tuple[tuple[float, ...], ...]] = {
     "test": ((0.0, 0.5),),
 }
 
-#: ``frame_target_energy`` of each sealed block, in append order: ``-0.5 * step``
-#: per frame, one value per frame, so a unit that lost or gained a frame moves
-#: this list as well as the counts above.
-FRAME_ENERGY_PER_SPLIT: Mapping[str, tuple[float, ...]] = {
+#: ``energy`` of each sealed block, in append order: ``-0.5 * step`` per frame,
+#: one value per frame, so a unit that lost or gained a frame moves this list as
+#: well as the counts above.
+ENERGY_PER_SPLIT: Mapping[str, tuple[float, ...]] = {
     "train": (0.0, -0.5, 0.0, -0.5, -1.0),
     "val": (0.0, 0.0, -0.5),
     "test": (0.0,),
 }
 
 
-def _expected_frame_pos(split: str) -> np.ndarray:
+def _expected_pos(split: str) -> np.ndarray:
     """The ``(F * N, 3)`` ``<f4`` positions of *split*'s block, from the literals."""
     return np.asarray(
-        [[x, 0.0, 0.0] for frame in FRAME_POS_X_PER_SPLIT[split] for x in frame],
+        [[x, 0.0, 0.0] for frame in POS_X_PER_SPLIT[split] for x in frame],
         dtype=np.float32,
     )
 
@@ -526,14 +525,14 @@ def check_fake_writer(workdir: Path) -> None:
 
     # -- the payload itself, per block ---------------------------------------
     for writer in factory.sealed:
-        positions = np.concatenate([unit.frames["frame_pos"] for unit in writer.appended])
-        energies = np.concatenate([unit.frames["frame_target_energy"] for unit in writer.appended])
+        positions = np.concatenate([unit.frames["pos"] for unit in writer.appended])
+        energies = np.concatenate([unit.frames["energy"] for unit in writer.appended])
         assert positions.dtype.str == "<f4"
         assert energies.dtype.str == "<f4"
-        assert positions.tolist() == _expected_frame_pos(writer.split).tolist(), (
+        assert positions.tolist() == _expected_pos(writer.split).tolist(), (
             f"{writer.split} positions drifted"
         )
-        assert energies.tolist() == list(FRAME_ENERGY_PER_SPLIT[writer.split])
+        assert energies.tolist() == list(ENERGY_PER_SPLIT[writer.split])
 
     print(
         f"  Leg A (fake writer): {len(prepared.blocks)} sealed roots "
@@ -611,21 +610,21 @@ def check_molnex_writer(workdir: Path) -> None:
         )
 
         units = encoded[block.split]
-        expected = np.concatenate([unit.frames["frame_pos"] for unit in units])
+        expected = np.concatenate([unit.frames["pos"] for unit in units])
         assert expected.dtype.str == "<f4"
-        assert expected.tolist() == _expected_frame_pos(block.split).tolist(), (
+        assert expected.tolist() == _expected_pos(block.split).tolist(), (
             "the encoder's positions drifted from this script's literals"
         )
-        stored = reader.column("frame_pos")
-        assert stored.dtype.itemsize == 4, f"frame_pos came back as {stored.dtype}"
+        stored = reader.column("pos")
+        assert stored.dtype.itemsize == 4, f"pos came back as {stored.dtype}"
         assert tuple(stored.shape) == expected.shape
         # Bit-for-bit: the block's bytes are the encoder's bytes, not a rounded
         # copy of them — MolnexBlockWriter wraps the numpy buffer, never casts it.
         assert stored.numpy().tobytes() == expected.tobytes(), (
-            f"{block.root} frame_pos differs bit-for-bit from the encoder's float32 array"
+            f"{block.root} pos differs bit-for-bit from the encoder's float32 array"
         )
-        stored_energy = reader.column("frame_target_energy")
-        assert stored_energy.numpy().tolist() == list(FRAME_ENERGY_PER_SPLIT[block.split])
+        stored_energy = reader.column("energy")
+        assert stored_energy.numpy().tolist() == list(ENERGY_PER_SPLIT[block.split])
 
     assert sorted(splits) == ["test", "train", "val"], f"splits drifted: {splits}"
 
@@ -634,7 +633,7 @@ def check_molnex_writer(workdir: Path) -> None:
         f"{[block.root.name for block in prepared.blocks]}, one split per manifest "
         f"{splits}, units { {block.split: block.unit_count for block in prepared.blocks} }, "
         f"frames { {block.split: block.frame_count for block in prepared.blocks} }, "
-        "verify() clean, frame_pos bit-for-bit identical to the encoder's float32 arrays"
+        "verify() clean, pos bit-for-bit identical to the encoder's float32 arrays"
     )
 
 

@@ -97,7 +97,7 @@ NEON_IDENTITY = "7a8a2304bb79b7d3459719ef0c416aef"
 
 # The four columns a bonded molecule declares; a bondless one must declare the
 # same four (empty), because the block freezes its schema on the first unit.
-HESSIAN_TOPOLOGY_COLUMNS = frozenset({"atom_Z", "bond_atomi", "bond_atomj", "bond_type"})
+HESSIAN_TOPOLOGY_COLUMNS = frozenset({"Z", "bond_atomi", "bond_atomj", "bond_type"})
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +351,10 @@ class TestTHEMolUnitEncoder:
         ``*hessian*`` column ever appears here, it arrived without a route.
         """
         assert set(hessian_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
-        assert set(hessian_unit.frames) == {"frame_pos"}
+        assert set(hessian_unit.frames) == {"pos"}
 
     def test_a_hessian_unit_stores_atomic_numbers_as_int16(self, hessian_unit: RawUnit) -> None:
-        atom_z = hessian_unit.topology["atom_Z"]
+        atom_z = hessian_unit.topology["Z"]
         assert atom_z.dtype.str == "<i2"
         assert atom_z.tolist() == [1, 8, 1]
 
@@ -374,10 +374,10 @@ class TestTHEMolUnitEncoder:
         self, hessian_unit: RawUnit
     ) -> None:
         """The fixture's angstrom numbers, narrowed and otherwise untouched."""
-        frame_pos = hessian_unit.frames["frame_pos"]
-        assert frame_pos.dtype.str == "<f4"
-        assert frame_pos.shape == (3, 3)
-        assert frame_pos.tolist() == [[-0.5, 0.0, 0.0], [0.0, 0.0, 0.0], [0.5, 0.0, 0.0]]
+        pos = hessian_unit.frames["pos"]
+        assert pos.dtype.str == "<f4"
+        assert pos.shape == (3, 3)
+        assert pos.tolist() == [[-0.5, 0.0, 0.0], [0.0, 0.0, 0.0], [0.5, 0.0, 0.0]]
 
     def test_a_hessian_unit_holds_one_frame(self, hessian_unit: RawUnit) -> None:
         assert (hessian_unit.n_atoms, hessian_unit.n_frames) == (3, 1)
@@ -392,19 +392,19 @@ class TestTHEMolUnitEncoder:
     ) -> None:
         assert set(trajectory_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
         assert set(trajectory_unit.frames) == {
-            "frame_pos",
-            "frame_target_energy",
-            "frame_atom_target_forces",
+            "pos",
+            "energy",
+            "forces",
         }
 
     def test_a_trajectory_unit_stacks_every_frames_positions(
         self, trajectory_unit: RawUnit
     ) -> None:
-        """``frame_pos`` is ``(F * N, 3)`` — the ``k * N`` stride the block relies on."""
-        frame_pos = trajectory_unit.frames["frame_pos"]
-        assert frame_pos.dtype.str == "<f4"
-        assert frame_pos.shape == (6, 3)
-        assert frame_pos.tolist() == [
+        """``pos`` is ``(F * N, 3)`` — the ``k * N`` stride the block relies on."""
+        pos = trajectory_unit.frames["pos"]
+        assert pos.dtype.str == "<f4"
+        assert pos.shape == (6, 3)
+        assert pos.tolist() == [
             [-0.5, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.5, 0.0, 0.0],
@@ -415,7 +415,7 @@ class TestTHEMolUnitEncoder:
 
     def test_a_trajectory_unit_stacks_every_frames_forces(self, trajectory_unit: RawUnit) -> None:
         """kcal mol^-1 angstrom^-1, unchanged."""
-        forces = trajectory_unit.frames["frame_atom_target_forces"]
+        forces = trajectory_unit.frames["forces"]
         assert forces.dtype.str == "<f4"
         assert forces.shape == (6, 3)
         assert forces.tolist() == [
@@ -429,7 +429,7 @@ class TestTHEMolUnitEncoder:
 
     def test_a_trajectory_unit_carries_one_energy_per_frame(self, trajectory_unit: RawUnit) -> None:
         """kcal mol^-1, unchanged."""
-        energy = trajectory_unit.frames["frame_target_energy"]
+        energy = trajectory_unit.frames["energy"]
         assert energy.dtype.str == "<f4"
         assert energy.shape == (2,)
         assert energy.tolist() == list(WATER_ENERGIES)
@@ -452,29 +452,29 @@ class TestTHEMolUnitEncoder:
 
     def test_a_torsion_unit_declares_the_two_torsion_columns(self, torsion_unit: RawUnit) -> None:
         assert set(torsion_unit.topology) == {
-            "atom_Z",
+            "Z",
             "bond_atomi",
             "bond_atomj",
             "bond_type",
-            "mol_target_torsion_atoms",
+            "torsion_atoms",
         }
         assert set(torsion_unit.frames) == {
-            "frame_pos",
-            "frame_target_energy",
-            "frame_atom_target_forces",
-            "frame_target_torsion_angle",
+            "pos",
+            "energy",
+            "forces",
+            "torsion_angle",
         }
 
     def test_a_torsion_unit_records_the_scanned_dihedral(self, torsion_unit: RawUnit) -> None:
         """One molecule-space row of four molecule-local atom indices."""
-        target_atoms = torsion_unit.topology["mol_target_torsion_atoms"]
+        target_atoms = torsion_unit.topology["torsion_atoms"]
         assert target_atoms.dtype.str == "<i4"
         assert target_atoms.shape == (1, 4)
         assert target_atoms.tolist() == [[0, 1, 2, 3]]
 
     def test_a_torsion_unit_records_one_angle_per_frame(self, torsion_unit: RawUnit) -> None:
         """Degrees, unchanged: the fixture's geometries are exactly cis and trans."""
-        angles = torsion_unit.frames["frame_target_torsion_angle"]
+        angles = torsion_unit.frames["torsion_angle"]
         assert angles.dtype.str == "<f4"
         assert angles.shape == (2,)
         assert angles.tolist() == [0.0, 180.0]
@@ -483,9 +483,9 @@ class TestTHEMolUnitEncoder:
         assert (torsion_unit.n_atoms, torsion_unit.n_frames) == (4, 2)
 
     def test_a_torsion_unit_stacks_both_geometries(self, torsion_unit: RawUnit) -> None:
-        frame_pos = torsion_unit.frames["frame_pos"]
-        assert frame_pos.shape == (8, 3)
-        assert frame_pos.tolist() == [list(row) for row in HOOH_CIS_POS + HOOH_TRANS_POS]
+        pos = torsion_unit.frames["pos"]
+        assert pos.shape == (8, 3)
+        assert pos.tolist() == [list(row) for row in HOOH_CIS_POS + HOOH_TRANS_POS]
 
     # -- edges -------------------------------------------------------------
 
@@ -499,7 +499,7 @@ class TestTHEMolUnitEncoder:
 
     def test_a_bondless_molecule_still_carries_its_atoms(self) -> None:
         unit = THEMolUnitEncoder(task="hessian").encode(_bondless_record())
-        assert unit.topology["atom_Z"].tolist() == [10]
+        assert unit.topology["Z"].tolist() == [10]
         assert (unit.n_atoms, unit.n_frames) == (1, 1)
 
     def test_a_ragged_trajectory_is_rejected(self) -> None:
@@ -571,14 +571,14 @@ class TestRawUnit:
             key="water-relax",
             identity=WATER_IDENTITY,
             task="hessian-relax",
-            topology={"atom_Z": np.asarray([1, 8, 1], dtype=np.int16)},
-            frames={"frame_pos": np.zeros((6, 3), dtype=np.float32)},
+            topology={"Z": np.asarray([1, 8, 1], dtype=np.int16)},
+            frames={"pos": np.zeros((6, 3), dtype=np.float32)},
         )
 
-    def test_n_atoms_is_the_length_of_atom_z(self) -> None:
+    def test_n_atoms_is_the_length_of_z(self) -> None:
         assert self._unit().n_atoms == 3
 
-    def test_n_frames_divides_frame_pos_rows_by_n_atoms(self) -> None:
+    def test_n_frames_divides_pos_rows_by_n_atoms(self) -> None:
         assert self._unit().n_frames == 2
 
     def test_a_raw_unit_is_frozen(self) -> None:
