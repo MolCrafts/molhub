@@ -69,11 +69,11 @@ successor decision, but the invariant is fixed here.
 
 | Spec | Owned surface | Must satisfy | Exit criterion |
 |---|---|---|---|
-| **-02-block-format** (repo: **molnex**) | the READY-tier block store format (`PackedCache` v2 / `PackedStore`) as a *streaming-appendable column store* | I1, I2, I5, I7 | format is: **appendable** (a block can be written incrementally without rewriting predecessors), **unit-aligned** (I2 structural, not checked), **mmap zero-copy** on read, **few files per block** (HPC inode discipline, per `molnex:src/molix/data/cache.py:1-49`), **per-block provenance + sha256** embedded. Requirements only — the class design is out of scope here. |
+| **-02-block-format** (repo: **molnex**) | the READY-tier block store format (`PackedCache` v2 / `PackedStore`) as a *streaming-appendable column store* | I1, I2, I5, I7 | format is: **appendable** (a block can be written incrementally without rewriting predecessors), **unit-aligned** (I2 structural, not checked), **mmap zero-copy** on read, **few files per block** (HPC inode discipline, per `molnex:src/molix/store/cache.py:1-49`), **per-block provenance + sha256** embedded. Requirements only — the class design is out of scope here. |
 | **-03-conveyor** (repo: **molhub**) | prefetch / prepare stages, the block ledger, queue backpressure, leases | I3, I4, I5, I6, I9, I10 | a bounded-residency conveyor that keeps a ready queue non-empty under measured `B_net`, recovers from a mid-block crash, and provably never exceeds the byte budget. |
-| **-04-scheduler-integration** (repo: **molnex**) | block-aware batch iterator behind `batch_sampler_source`, plan↔block mapping, R1 resolution | I7, I8, I10 | the eager plan of `molnex:src/molix/data/sampler.py:267` drives consumption unchanged at small scale, with the per-frame-table crossover measured and the chosen representation landed. |
+| **-04-scheduler-integration** (repo: **molnex**) | block-aware batch iterator behind `batch_sampler_source`, plan↔block mapping, R1 resolution | I7, I8, I10 | the eager plan of `molnex:src/molix/batch/sampler.py:267` drives consumption unchanged at small scale, with the per-frame-table crossover measured and the chosen representation landed. |
 
-`PackedCache` v1 (`molnex:src/molix/data/cache.py:91`) keeps its documented **run-scoped,
+`PackedCache` v1 (`molnex:src/molix/store/cache.py:91`) keeps its documented **run-scoped,
 non-persistence** charter (`cache.py:1-49`) and is **not** retrofitted into the
 block store; the READY-tier format is a new artifact owned by `-02`.
 
