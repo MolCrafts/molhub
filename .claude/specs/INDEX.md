@@ -1,4 +1,8 @@
 - [streaming-data-tiers-01-strategy](streaming-data-tiers-01-strategy.md) — remote/rolling/ready 三层分级 + 传送带流水线策略之锚；后继 -02 块格式[molnex]、-03 传送带[molhub]、-04 调度集成[molnex]。 [approved]
+- [streaming-data-tiers-03-conveyor-01-ledger](streaming-data-tiers-03-conveyor-01-ledger.md) — Conveyor 基座：BlockId + 四态状态机 + 崩溃安全 JSONL 台账与 TTL 租约（I5/I9）。 [approved]
+- [streaming-data-tiers-03-conveyor-02-roster](streaming-data-tiers-03-conveyor-02-roster.md) — REMOTE 层块名册（registry manifest 投影）+ 有界重试 digest 校验传输（I1/I6）。 [approved]
+- [streaming-data-tiers-03-conveyor-03-prepare](streaming-data-tiers-03-conveyor-03-prepare.md) — 准备阶段：拆分路由、单元完整的块生产（懒导入 molnex BlockWriter，I2/I7）。 [approved]
+- [streaming-data-tiers-03-conveyor-04-residency](streaming-data-tiers-03-conveyor-04-residency.md) — 字节预算驻留、背压队列与工作池、覆盖报告、采样器元数据交接（I3/I4/I9/I10）。 [approved]
 # MolHub product specifications
 
 这里保存 MolHub 的长期产品合同。与一次性 implementation spec 不同，
