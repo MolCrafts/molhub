@@ -70,11 +70,11 @@ criteria:
       the block visit order, and is realized by the conveyor; asserts that the
       sampling policy needs no redesign and that the block-aware iterator enters
       through the existing batch_sampler_source seam owned by
-      -04-scheduler-integration; and cites molnex:src/molix/data/sampler.py:267,
-      molnex:src/molix/data/sampler.py:811, molnex:src/molix/data/datamodule.py:148 and
+      -04-scheduler-integration; and cites molnex:src/molix/batch/sampler.py:267,
+      molnex:src/molix/batch/sampler.py:811, molnex:src/molix/batch/datamodule.py:148 and
       :264-266, each resolving to the cited symbol in the current tree. The
       per-frame Python-table scaling wall is recorded as a named owned risk with
-      molnex:src/molix/data/sampler.py:89 evidence, quantified memory estimates, and the
+      molnex:src/molix/batch/sampler.py:89 evidence, quantified memory estimates, and the
       two candidate resolutions assigned to -04.
     status: pending
   - id: ac-006

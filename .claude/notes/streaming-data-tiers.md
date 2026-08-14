@@ -45,10 +45,12 @@ re-derivable from *files present ∧ ledger*, and any block in an intermediate
 state is simply re-run. Digest verification happens at the remote→local boundary
 with bounded retry: transient corruption of a downloaded shard has been observed
 in practice, so a mismatch must trigger re-fetch, and a mismatching block must
-never reach READY. The in-repo precedent for digest-pinned fetching is
-`WaterLESSource` (`molnex:src/molix/datasets/_data_acquisition.md`,
-`molnex:src/molix/datasets/water_les.py`); which layer implements the fetcher is a
-successor decision, but the invariant is fixed here.
+never reach READY. The in-repo precedent for digest-pinned fetching is molhub's own
+`Molhub.fetch` + `sources/digest.py` (`Digest.of_file`/`matches`), consumed by
+the reception adapters (`src/molhub/dataset/water_les.py`; the former molnex
+`WaterLESSource` was deleted at molnex `6d425f7` — see
+`molnex-etl-tombstone.md`); which layer implements the fetcher is a successor
+decision, but the invariant is fixed here.
 
 ### 11. Invariant register (binding on every successor)
 

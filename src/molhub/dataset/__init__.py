@@ -1,33 +1,56 @@
 """Dataset module — protocols and built-in dataset sources."""
 
 from molhub.dataset.csv_dataset import CSVDataset
+from molhub.dataset.definition import (
+    DatasetManifest,
+    Datasets,
+    UnknownDataset,
+    dataset,
+)
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.meta import MetaCodec, Targets
-from molhub.dataset.molecular import (
-    CONFORMER_ID,
-    KNOWN_SPLIT_SCHEMES,
-    MOLECULE_ID,
-    MolecularFrame,
-    MolecularUnits,
-    MoleculeSplit,
-)
+from molhub.dataset.molrec import MolRecDataset
+from molhub.dataset.neighbor import NeighborDelegate
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import (
+    Dataset,
     InMemoryDataset,
     IterableDataset,
-    MapDataset,
     Sample,
     SubsetDataset,
     TargetSchema,
 )
 from molhub.dataset.qm9 import QM9Dataset
 from molhub.dataset.revmd17 import RevMD17Dataset
+from molhub.dataset.themol import (
+    EnergyForceTrajectory,
+    HessianRecord,
+    MBISRecord,
+    THEMolHessian,
+    THEMolHessianRelax,
+    THEMolMBIS,
+    THEMolShardDataset,
+    THEMolTorsionRelax,
+    THEMolTorsionScan,
+    TorsionProfile,
+)
 from molhub.dataset.threebpa import ThreeBPADataset
+from molhub.dataset.transforms import AtomicDress, ConstantLabel, UnitConvert
+from molhub.dataset.universal_class_i import (
+    Class1Universal2026,
+    CollectionRole,
+    MultiSourceDatasetCollection,
+)
+from molhub.dataset.water_les import WaterLESDataset
 from molhub.dataset.zinc_typing import ZincTypingDataset
 
 __all__ = [
+    "dataset",
+    "DatasetManifest",
+    "Datasets",
+    "UnknownDataset",
     "ArtifactHub",
-    "MapDataset",
+    "Dataset",
     "IterableDataset",
     "Sample",
     "TargetSchema",
@@ -39,12 +62,25 @@ __all__ = [
     "ThreeBPADataset",
     "ZincTypingDataset",
     "PhalkethohMMDataset",
+    "WaterLESDataset",
+    "MolRecDataset",
+    "AtomicDress",
+    "UnitConvert",
+    "ConstantLabel",
+    "NeighborDelegate",
     "Targets",
     "MetaCodec",
-    "MolecularUnits",
-    "MolecularFrame",
-    "MoleculeSplit",
-    "KNOWN_SPLIT_SCHEMES",
-    "MOLECULE_ID",
-    "CONFORMER_ID",
+    "HessianRecord",
+    "EnergyForceTrajectory",
+    "TorsionProfile",
+    "MBISRecord",
+    "THEMolShardDataset",
+    "THEMolHessian",
+    "THEMolHessianRelax",
+    "THEMolTorsionScan",
+    "THEMolTorsionRelax",
+    "THEMolMBIS",
+    "CollectionRole",
+    "MultiSourceDatasetCollection",
+    "Class1Universal2026",
 ]
