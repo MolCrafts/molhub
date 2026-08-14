@@ -41,10 +41,32 @@ rather than letting an unverified block advance::
 :class:`~molhub.conveyor.splits.SplitTable` is the split assignment of record,
 loaded only once the derivation's own ``metadata.json`` sha256 agrees.
 
-No network, no environment variable, no disk-layout decision, and stdlib plus
-``molhub`` only: the caller supplies the ledger's path, unpack / prepare /
-``READY`` and the byte-bounded queue belong to the stages after this one, and
-none of them invents its own memory.
+The prepare stage is the CPU half that turns those verified bytes into training
+blocks: :class:`~molhub.conveyor.encoder.THEMolUnitEncoder` maps one THEMol
+record onto one whole :class:`~molhub.conveyor.encoder.RawUnit` of numpy columns,
+and :class:`~molhub.conveyor.prepare.PrepareJob` routes each unit to its
+molecule's split and feeds it — whole, never in pieces — to a block writer,
+returning the evidence a ``READY`` record needs::
+
+    table = SplitTable.from_identity(splits_root)      # provenance-verified
+    prepared = PrepareJob(
+        shard,
+        encoder=THEMolUnitEncoder(task="torsion-scan"),
+        split_of={identity: table.split_of(identity) for identity in identities},
+        writer_factory=MolnexBlockWriter,
+        root=blocks_root,
+        name="themol-torsion-scan-shard-000",
+        provenance=provenance,
+    ).run()
+    prepared.blocks[0].block_digest   # what the READY record quotes
+
+molnex enters through :class:`~molhub.conveyor.prepare.MolnexBlockWriter` alone,
+which imports ``molix`` lazily, so the base install stays torch-free.
+
+No network, no environment variable and no disk-layout decision: the caller
+supplies the ledger's path and the block root, the bookkeeping half is stdlib
+plus ``molhub``, the prepare half adds numpy, and ``READY`` itself plus the
+byte-bounded queue belong to the stage after this one.
 """
 
 from molhub.conveyor.block import (
@@ -55,6 +77,18 @@ from molhub.conveyor.block import (
     InvalidBlockId,
     UnknownBlockState,
 )
+from molhub.conveyor.encoder import (
+    RawUnit,
+    THEMolUnitEncoder,
+)
+from molhub.conveyor.errors import (
+    BlockFormatError,
+    IncompleteProvenanceError,
+    IncompleteRecordError,
+    PrepareError,
+    UnroutableUnitError,
+    UnsupportedRecordError,
+)
 from molhub.conveyor.ledger import (
     Clock,
     InvalidRecord,
@@ -63,6 +97,14 @@ from molhub.conveyor.ledger import (
     LedgerCorruption,
     LedgerRecord,
     SystemClock,
+)
+from molhub.conveyor.prepare import (
+    BlockWriterFactory,
+    BlockWriterLike,
+    MolnexBlockWriter,
+    PreparedBlock,
+    PreparedBlocks,
+    PrepareJob,
 )
 from molhub.conveyor.roster import (
     BlockRoster,
@@ -119,4 +161,18 @@ __all__ = [
     "ShardTransfer",
     "TransferError",
     "PersistentDigestMismatch",
+    "RawUnit",
+    "THEMolUnitEncoder",
+    "BlockWriterLike",
+    "BlockWriterFactory",
+    "PreparedBlock",
+    "PreparedBlocks",
+    "PrepareJob",
+    "MolnexBlockWriter",
+    "PrepareError",
+    "UnsupportedRecordError",
+    "IncompleteRecordError",
+    "UnroutableUnitError",
+    "IncompleteProvenanceError",
+    "BlockFormatError",
 ]

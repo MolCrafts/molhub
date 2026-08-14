@@ -43,6 +43,8 @@ import sys
 import time
 from pathlib import Path
 
+from molhub.conveyor import THEMolUnitEncoder
+
 RATIOS = (8, 1, 1)  # train : val : test, molecule level (espaloma precedent)
 SOURCES = {
     "hessian": "dataset:themol/hessian@1",
@@ -53,7 +55,18 @@ SMILES_COL = "mapped_isomeric_smiles"
 
 
 def identity_of(smiles: str) -> str:
-    return hashlib.blake2b(smiles.encode(), digest_size=16).hexdigest()
+    """Molecular identity — the one implementation, now owned by the encoder.
+
+    Was a local ``blake2b(smiles.encode(), digest_size=16).hexdigest()`` here.
+    The conveyor's prepare stage *routes* by the same number, and split
+    production drifting apart from split routing would mis-route molecules with
+    nothing able to detect it, so the rule was promoted to
+    ``THEMolUnitEncoder.identity`` and this script imports it. The digest is
+    unchanged: the tables already shipped under
+    ``derived/molcrafts/class1-universal-splits/1`` stay reproducible byte for
+    byte from the same inputs and seed.
+    """
+    return THEMolUnitEncoder.identity(smiles)
 
 
 def sha256_of(path: Path) -> str:
