@@ -30,7 +30,10 @@ class CollectionRole:
             their frames may be concatenated indiscriminately.
         target_schema: Target schemas available from the role.
         sampling_unit: Hierarchical object that must remain intact.
-        units: Target/unit pairs stored as an immutable tuple.
+        units: Target/unit pairs stored as an immutable tuple. A name of the
+            form ``<block>.<column>`` addresses one column of a source block
+            whose columns do not share a unit, which is the only honest
+            spelling when a single string would be wrong for one of them.
         reference_method: Electronic-structure provenance for the targets.
         derived: Whether the source must be materialized by a versioned,
             reproducible derivation before production use.
@@ -84,6 +87,27 @@ class Class1Universal2026:
     Construction and :meth:`load` perform no network or filesystem IO. The
     return value is a composition manifest; consumers resolve and load each
     role source explicitly. Training mixtures belong to the Molexp experiment.
+
+    **The electrostatic role's MBIS Slater shells are not atom-level.** The
+    source ``parameters`` array is one row per Slater *shell*, not per atom —
+    the shells per atom vary (H 1, most heavy atoms 2, a third-period atom up to
+    3), so ``S > N`` — as the 2026-08-15 probe of the real published THEMol mbis
+    ``shard-000`` established; :class:`~molhub.dataset.themol.THEMolMBIS` reads
+    them into the ``mbis_shells`` block of ``atom`` / ``population`` /
+    ``inverse_width``. This role declared them as ``mbis_parameters`` under
+    ``atom_level`` with the unit "mixed; see source schema", which claimed a
+    per-atom row the source never had.
+
+    :class:`~molhub.dataset.protocol.TargetSchema` has only the ``graph_level``
+    and ``atom_level`` *layout* sets and shell-major rows are neither, so the
+    entry is dropped from ``atom_level`` and kept on the *meaning* axis as
+    ``qm={"mbis_shells"}``: that says what the shells are (QM labels of this
+    role) without claiming a layout the structure cannot express. Where the
+    shells live is declared once, by the source dataset itself
+    (``THEMolMBIS.manifest.blocks == ("mbis_shells",)``). Their two units are
+    per column — ``mbis_shells.population`` in ``e``,
+    ``mbis_shells.inverse_width`` in ``angstrom^-1`` — because one string for
+    the whole block would be wrong for one of the two.
     """
 
     COORDINATE = "dataset:molcrafts/class1-universal-2026@1"
@@ -153,7 +177,6 @@ class Class1Universal2026:
                                 "atomic_dipole",
                                 "atomic_quadrupole",
                                 "atomic_volume",
-                                "mbis_parameters",
                             }
                         ),
                         qm=frozenset(
@@ -162,7 +185,7 @@ class Class1Universal2026:
                                 "atomic_dipole",
                                 "atomic_quadrupole",
                                 "atomic_volume",
-                                "mbis_parameters",
+                                "mbis_shells",
                             }
                         ),
                     ),
@@ -173,7 +196,8 @@ class Class1Universal2026:
                         ("atomic_dipole", "e*angstrom"),
                         ("atomic_quadrupole", "e*angstrom^2"),
                         ("atomic_volume", "angstrom^3"),
-                        ("mbis_parameters", "mixed; see source schema"),
+                        ("mbis_shells.population", "e"),
+                        ("mbis_shells.inverse_width", "angstrom^-1"),
                     ),
                     reference_method="PBE0/def2-TZVPD (DZVP for iodine)",
                 ),

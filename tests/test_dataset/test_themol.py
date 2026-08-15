@@ -19,6 +19,7 @@ from molhub.dataset import (
     THEMolTorsionScan,
 )
 from molhub.dataset.themol import THEMOL_UNITS
+from molhub.loader.info import Feature
 
 WATER = "[O:2]([H:1])[H:3]"
 BUTANE = "[H:1][C:2]([H:5])([H:6])[C:3]([H:7])([H:8])[C:4]([H:9])([H:10])[H:11]"
@@ -126,6 +127,79 @@ def _write_torsion(path: Path, *, relax: bool) -> None:
                 constraint.create_dataset("forces", data=np.zeros_like(coords))
 
 
+# ---------------------------------------------------------------------------
+# The MBIS Slater shells — what the real `parameters` array actually is.
+#
+# It is **not** per atom. Probed on 2026-08-15 over 1000 groups of the real
+# published THEMol mbis shard-000 (430906 groups in total): `parameters` is
+# `(S, 3)` where S is the record's total Slater **shell** count, and the shells
+# per atom vary — H carries 1, most heavy atoms 2, a third-period atom can carry
+# 3. A 47-atom record has 70 rows, a 40-atom one 57, and only 559 of the 1000
+# probed groups happen to satisfy `S == n_atoms + n_heavy`. Reading the array as
+# a per-atom `(N, arity)` block refuses every real record: 0 of 43 sampled
+# indices were readable.
+#
+# The three columns, decoded from the same probe:
+#
+#   col0  atom index — integer-valued, inside `[0, n_atoms)`, the shells of one
+#         atom consecutive, and every atom present at least once.
+#   col1  shell population, in electrons. `sum(col1) == Z.sum() - charge.sum()`
+#         held EXACTLY on every probed group (170 / 132 / 128 for three of them).
+#   col2  inverse Slater width, in angstrom^-1 — the unit
+#         `THEMOL_UNITS["inverse_sigma"]` already declares. Core shells land at
+#         ~24-67, valence shells at ~3-8.
+# ---------------------------------------------------------------------------
+
+#: The fixture's water shells as source rows `(atom index, population, inverse
+#: width)`. Mapped-atom order is H:1, O:2, H:3, so atom 1 is the oxygen and it is
+#: the one carrying two shells (core, then valence) while each H carries one —
+#: S = 4 for N = 3, which is the whole point. Every literal is exact in binary
+#: floating point, and the populations are picked so the probed sum rule holds on
+#: the fixture itself: 0.5 + 2.0 + 6.5 + 1.0 == 10.0 == Z.sum() (1 + 8 + 1) minus
+#: this fixture's charge sum (exactly 0.0). How a molecule *divides* that total
+#: between its shells is synthetic here — the probe pinned the total, and the two
+#: hydrogens are deliberately given different populations so row order is
+#: observable at all.
+MBIS_SHELL_ROWS = np.asarray(
+    [
+        [0.0, 0.5, 3.25],
+        [1.0, 2.0, 32.0],
+        [1.0, 6.5, 6.75],
+        [2.0, 1.0, 3.5],
+    ],
+    dtype=np.float64,
+)
+
+#: The same four rows, column by column, as the block goldens.
+MBIS_SHELL_ATOMS = (0, 1, 1, 2)
+MBIS_SHELL_POPULATIONS = (0.5, 2.0, 6.5, 1.0)
+MBIS_SHELL_WIDTHS = (3.25, 32.0, 6.75, 3.5)
+
+#: `Z.sum() - charge.sum()` for the water fixture, which is what its shell
+#: populations must add up to. Both sides are exact in binary floating point.
+MBIS_ELECTRON_COUNT = 10.0
+
+#: The named block the shells land in, and its three columns.
+MBIS_SHELL_BLOCK = "mbis_shells"
+MBIS_SHELL_BLOCK_COLUMNS = ("atom", "population", "inverse_width")
+
+# Four defective shell tables, one per refusal. Each has exactly `n_atoms` rows,
+# so a reader that still treats `parameters` as a per-atom `(N, arity)` array
+# accepts every one of them without a word.
+MBIS_SHELLS_WITHOUT_THREE_COLUMNS = np.asarray(
+    [[0.0, 0.5], [1.0, 8.5], [2.0, 1.0]], dtype=np.float64
+)
+MBIS_SHELLS_WITH_A_FRACTIONAL_ATOM_INDEX = np.asarray(
+    [[0.0, 0.5, 3.25], [0.5, 8.5, 32.0], [2.0, 1.0, 3.5]], dtype=np.float64
+)
+MBIS_SHELLS_WITH_AN_OUT_OF_RANGE_ATOM_INDEX = np.asarray(
+    [[0.0, 0.5, 3.25], [1.0, 8.5, 32.0], [3.0, 1.0, 3.5]], dtype=np.float64
+)
+MBIS_SHELLS_LEAVING_AN_ATOM_WITHOUT_A_SHELL = np.asarray(
+    [[0.0, 0.5, 3.25], [1.0, 2.0, 32.0], [1.0, 7.5, 6.75]], dtype=np.float64
+)
+
+
 def _write_mbis(
     path: Path,
     *,
@@ -143,10 +217,11 @@ def _write_mbis(
     exist so a test that needs to tell one component (or one row) from another
     can say so locally instead of changing what the other tests read.
 
-    ``parameters`` is one row **per atom**: the shipped default used to be a
-    single ``(1, 3)`` row for a three-atom molecule, which the dissolved record
-    now refuses (a per-atom target is never broadcast), so the default is a
-    ``(N, arity)`` array like every other MBIS array here.
+    ``parameters`` is the one array here that is **not** per atom: it is
+    :data:`MBIS_SHELL_ROWS`, one row per Slater *shell*, four rows for this
+    three-atom molecule. The per-atom ``(N, arity)`` default this builder shipped
+    before was a shape no published record has (see the block comment above), and
+    it is what made every real record unreadable.
     """
     with h5py.File(path, "w") as handle:
         group = handle.create_group("mbis-record")
@@ -169,9 +244,7 @@ def _write_mbis(
         )
         group.create_dataset(
             "parameters",
-            data=np.asarray([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
-            if parameters is None
-            else parameters,
+            data=MBIS_SHELL_ROWS if parameters is None else parameters,
         )
 
 
@@ -257,7 +330,12 @@ class TestGroupedTasks:
         ]
 
     def test_mbis_supervision_lands_in_atom_columns(self, tmp_path: Path) -> None:
-        """The same fixture arrays, now read as `atoms` columns of one `Frame`."""
+        """The per-atom fixture arrays, read as `atoms` columns of one `Frame`.
+
+        The Slater shells are *not* among them — they are one row per shell, not
+        per atom, so they land in the `mbis_shells` block that `TestTHEMolMBIS`
+        pins.
+        """
         path = tmp_path / "shard-000.h5"
         _write_mbis(path)
         atoms = THEMolMBIS(path).load()[0]["atoms"]
@@ -266,10 +344,6 @@ class TestGroupedTasks:
         assert [
             np.asarray(atoms[name]).tolist() for name in ("dipole_x", "dipole_y", "dipole_z")
         ] == [[1.0] * 3] * 3
-        assert [np.asarray(atoms[name]).tolist() for name in MBIS_PARAMETER_COLUMNS] == [
-            [0.0, 2.0, 4.0],
-            [1.0, 3.0, 5.0],
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -306,10 +380,12 @@ MBIS_QUADRUPOLE_COLUMNS = (
     "quadrupole_zz",
 )
 
-# The Slater parameters arrive as one unnamed `(N, arity)` array, so the columns
-# are numbered by slot. Arity 2 is *this fixture's*, read off its shape and
-# pinned as a literal exactly as D1 requires.
-MBIS_PARAMETER_COLUMNS = ("mbis_parameter_0", "mbis_parameter_1")
+# The Slater shells are *not* atom columns — `mbis_parameter_<slot>` was read off
+# a `(N, arity)` array the published shards do not contain, so those columns are
+# gone and the shells are the `mbis_shells` block instead (see the evidence block
+# above `_write_mbis`). The prefix stays spelled here so a test can assert its
+# absence rather than merely not mentioning it.
+MBIS_PARAMETER_PREFIX = "mbis_parameter"
 
 MBIS_ATOM_COLUMNS = frozenset(
     {
@@ -319,16 +395,14 @@ MBIS_ATOM_COLUMNS = frozenset(
         "dipole_y",
         "dipole_z",
         *MBIS_QUADRUPOLE_COLUMNS,
-        *MBIS_PARAMETER_COLUMNS,
     }
 )
 
 # What `THEMolMBIS.TARGET_SCHEMA.atom_level` declares: the fourteen columns whose
 # names the *format* fixes, spelled out rather than composed from the tuples
 # above, so that editing one of those tuples cannot silently move the schema
-# pin with it. The Slater-parameter columns are deliberately absent — their
-# arity is the shard's, read off an `(N, arity)` array at load time, and a class
-# attribute is built without IO (see the `THEMolMBIS` docstring).
+# pin with it. This set is unchanged by the shell correction: the fourteen
+# per-atom columns were always right, and the shells were never among them.
 MBIS_SCHEMA_ATOM_COLUMNS = frozenset(
     {
         "atomic_charge",
@@ -369,9 +443,6 @@ MBIS_QUADRUPOLE = (
     + np.asarray([0.0, 10.0, 20.0], dtype=np.float64).reshape(3, 1, 1)
     + 0.5
 )
-
-# Per-atom Slater parameters, one row per atom and two slots per row.
-MBIS_PARAMETERS = np.asarray([[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]], dtype=np.float64)
 
 # The two `_write_torsion(relax=False)` geometries' dihedrals about atoms
 # (0, 1, 2, 3), in degrees. Provenance: computed once, offline, with
@@ -588,7 +659,15 @@ class TestTHEMolHessian:
 
 
 class TestTHEMolMBIS:
-    """One MBIS record is a `Frame` whose supervision lives in `atoms` columns."""
+    """One MBIS record: per-atom supervision in `atoms`, Slater shells in a block.
+
+    The fourteen per-atom columns are unchanged. What changed is ``parameters``:
+    the reader used to emit it as ``mbis_parameter_<slot>`` atom columns, which
+    is a shape no published record has (the evidence block above ``_write_mbis``
+    records the 2026-08-15 probe), so it is now the ``mbis_shells`` block —
+    ``atom`` / ``population`` / ``inverse_width``, one row per Slater shell, in
+    source order.
+    """
 
     @staticmethod
     def _record(tmp_path: Path) -> Frame:
@@ -597,15 +676,30 @@ class TestTHEMolMBIS:
             path,
             atomic_dipole=MBIS_DIPOLE,
             atomic_quadrupole=MBIS_QUADRUPOLE,
-            parameters=MBIS_PARAMETERS,
         )
         return THEMolMBIS(path).load()[0]
+
+    @staticmethod
+    def _refused(tmp_path: Path, parameters: np.ndarray) -> Path:
+        """One shard whose only defect is its shell table."""
+        path = tmp_path / "shard-000.h5"
+        _write_mbis(
+            path,
+            atomic_dipole=MBIS_DIPOLE,
+            atomic_quadrupole=MBIS_QUADRUPOLE,
+            parameters=parameters,
+        )
+        return path
 
     def test_an_mbis_record_is_a_molpy_frame(self, tmp_path: Path) -> None:
         assert isinstance(self._record(tmp_path), Frame)
 
     def test_the_atoms_block_carries_exactly_the_mbis_columns(self, tmp_path: Path) -> None:
-        """Geometry plus MBIS and nothing else — an extra column arrived unrouted."""
+        """Geometry plus the fourteen per-atom columns, and nothing else.
+
+        An extra column here arrived unrouted — which is exactly how the Slater
+        shells used to get in, one `mbis_parameter_<slot>` per source column.
+        """
         atoms = self._record(tmp_path)["atoms"]
         assert frozenset(atoms.keys()) == GEOMETRY_ATOM_COLUMNS | MBIS_ATOM_COLUMNS
 
@@ -651,15 +745,97 @@ class TestTHEMolMBIS:
             [8.5, 18.5, 28.5], abs=1e-10
         )
 
-    def test_the_parameter_columns_follow_the_source_arity(self, tmp_path: Path) -> None:
-        """`(N, 2)` in, two numbered columns out — the arity is read, not assumed."""
+    def test_no_per_atom_slater_parameter_column_survives(self, tmp_path: Path) -> None:
+        """`mbis_parameter_<slot>` promised a per-atom row the source never had.
+
+        The array it was built from is one row per Slater *shell*, so every
+        column it produced mis-assigned a shell to whichever atom shared its row
+        index. The columns are gone, not renamed.
+        """
         atoms = self._record(tmp_path)["atoms"]
-        assert np.asarray(atoms["mbis_parameter_0"]).tolist() == pytest.approx(
-            [0.5, 2.5, 4.5], abs=1e-10
+        assert [name for name in atoms.keys() if name.startswith(MBIS_PARAMETER_PREFIX)] == []
+
+    def test_the_slater_shells_are_a_named_block_of_three_columns(self, tmp_path: Path) -> None:
+        """Shell-major data cannot be an `atoms` column, so it is its own block."""
+        record = self._record(tmp_path)
+        assert MBIS_SHELL_BLOCK in record
+        assert frozenset(record[MBIS_SHELL_BLOCK].keys()) == frozenset(MBIS_SHELL_BLOCK_COLUMNS)
+
+    def test_the_shell_block_has_one_row_per_shell_not_per_atom(self, tmp_path: Path) -> None:
+        """Four shells for three atoms — the oxygen carries two, each H one."""
+        block = self._record(tmp_path)[MBIS_SHELL_BLOCK]
+        assert [np.asarray(block[name]).shape for name in MBIS_SHELL_BLOCK_COLUMNS] == [(4,)] * 3
+        assert np.asarray(self._record(tmp_path)["atoms"]["number"]).shape == (3,)
+
+    def test_the_shell_atom_column_says_which_atom_each_shell_belongs_to(
+        self, tmp_path: Path
+    ) -> None:
+        """Column 0 of the source, as integers: the oxygen's two shells are rows 1-2."""
+        block = self._record(tmp_path)[MBIS_SHELL_BLOCK]
+        assert np.asarray(block["atom"]).tolist() == list(MBIS_SHELL_ATOMS)
+
+    def test_the_shell_populations_and_widths_keep_their_source_order(self, tmp_path: Path) -> None:
+        """Columns 1 and 2, row by row: nothing is sorted, grouped or summed."""
+        block = self._record(tmp_path)[MBIS_SHELL_BLOCK]
+        assert np.asarray(block["population"]).tolist() == pytest.approx(
+            list(MBIS_SHELL_POPULATIONS), abs=1e-10
         )
-        assert np.asarray(atoms["mbis_parameter_1"]).tolist() == pytest.approx(
-            [1.5, 3.5, 5.5], abs=1e-10
+        assert np.asarray(block["inverse_width"]).tolist() == pytest.approx(
+            list(MBIS_SHELL_WIDTHS), abs=1e-10
         )
+
+    def test_the_shell_populations_sum_to_the_records_electron_count(self, tmp_path: Path) -> None:
+        """The probed identity, embedded in the fixture: sum == Z.sum() - charge.sum().
+
+        This is the evidence that column 1 is a *population* in electrons rather
+        than a second width or an amplitude — it held exactly on every group of
+        the 2026-08-15 probe, and it holds on this fixture by construction.
+        """
+        record = self._record(tmp_path)
+        numbers = np.asarray(record["atoms"]["number"], dtype=np.float64)
+        charges = np.asarray(record["atoms"]["atomic_charge"], dtype=np.float64)
+        populations = np.asarray(record[MBIS_SHELL_BLOCK]["population"], dtype=np.float64)
+        assert float(populations.sum()) == pytest.approx(MBIS_ELECTRON_COUNT, abs=1e-10)
+        assert float(populations.sum()) == pytest.approx(
+            float(numbers.sum() - charges.sum()), abs=1e-10
+        )
+
+    def test_the_shell_block_dtypes_are_int32_float64_float64(self, tmp_path: Path) -> None:
+        """An atom index is an index; a population and a width keep float64."""
+        block = self._record(tmp_path)[MBIS_SHELL_BLOCK]
+        assert [np.asarray(block[name]).dtype.str for name in MBIS_SHELL_BLOCK_COLUMNS] == [
+            "<i4",
+            "<f8",
+            "<f8",
+        ]
+
+    def test_a_shell_table_without_three_columns_is_refused(self, tmp_path: Path) -> None:
+        """A shell row is `(atom, population, inverse_width)`; two of those is not a row."""
+        path = self._refused(tmp_path, MBIS_SHELLS_WITHOUT_THREE_COLUMNS)
+        with pytest.raises(ValueError, match=r"three columns") as error:
+            THEMolMBIS(path).load()[0]
+        assert "mbis-record" in str(error.value), "the refusal names the record it read"
+
+    def test_a_fractional_shell_atom_index_is_refused(self, tmp_path: Path) -> None:
+        """Column 0 is an atom index; 0.5 addresses no atom, so it is never rounded."""
+        path = self._refused(tmp_path, MBIS_SHELLS_WITH_A_FRACTIONAL_ATOM_INDEX)
+        with pytest.raises(ValueError, match=r"not integer-valued") as error:
+            THEMolMBIS(path).load()[0]
+        assert "mbis-record" in str(error.value)
+
+    def test_a_shell_pointing_past_the_last_atom_is_refused(self, tmp_path: Path) -> None:
+        """Atom 3 of a three-atom molecule is a defect, not a shell to drop."""
+        path = self._refused(tmp_path, MBIS_SHELLS_WITH_AN_OUT_OF_RANGE_ATOM_INDEX)
+        with pytest.raises(ValueError, match=r"outside \[0, 3\)") as error:
+            THEMolMBIS(path).load()[0]
+        assert "mbis-record" in str(error.value)
+
+    def test_an_atom_left_without_any_shell_is_refused(self, tmp_path: Path) -> None:
+        """Every atom has at least one shell, so a missing index means a lost row."""
+        path = self._refused(tmp_path, MBIS_SHELLS_LEAVING_AN_ATOM_WITHOUT_A_SHELL)
+        with pytest.raises(ValueError, match=r"no shell") as error:
+            THEMolMBIS(path).load()[0]
+        assert "mbis-record" in str(error.value)
 
     def test_the_declared_atom_level_schema_is_the_fourteen_fixed_columns(self) -> None:
         """Every declared name is a column a reader will actually find on the frame.
@@ -668,7 +844,8 @@ class TestTHEMolMBIS:
         (``atomic_dipole`` / ``atomic_quadrupole`` / ``mbis_parameters``) match
         no column of any sample, so the pin is the post-dissolution set: the two
         scalars, the three dipole axes and the nine unfolded quadrupole
-        components.
+        components. The shell correction leaves it exactly as it was — the
+        shells were never per-atom columns, so none of them was ever in here.
         """
         schema = THEMolMBIS.TARGET_SCHEMA
         assert isinstance(schema.atom_level, frozenset)
@@ -676,21 +853,53 @@ class TestTHEMolMBIS:
         assert len(schema.atom_level) == 14
         assert schema.graph_level == frozenset(), "every MBIS target is per atom"
 
-    def test_the_slater_parameter_columns_are_deliberately_undeclared(self, tmp_path: Path) -> None:
-        """Declared columns are format-fixed; the parameter arity is the shard's.
-
-        ``mbis_parameter_<slot>`` exists on the frame — the fixture's arity is 2,
-        pinned above — but the schema is a class attribute built without IO, so
-        declaring the slots would mean inventing an arity the format does not
-        fix. The omission is a decision, and this is what keeps it from decaying
-        into an accident.
-        """
+    def test_no_declared_target_names_a_slater_parameter_slot(self) -> None:
+        """The slot names are not merely undeclared now — they do not exist."""
         declared = THEMolMBIS.TARGET_SCHEMA.atom_level
-        assert not [name for name in declared if name.startswith("mbis_parameter")]
-        assert MBIS_PARAMETER_COLUMNS  # the fixture's arity, read off its (N, 2) array
-        assert frozenset(self._record(tmp_path)["atoms"].keys()) >= frozenset(
-            MBIS_PARAMETER_COLUMNS
-        ), "the columns the schema declines to name are still on the record"
+        assert not [name for name in declared if name.startswith(MBIS_PARAMETER_PREFIX)]
+
+    def test_the_shell_block_is_the_datasets_one_declared_block(self) -> None:
+        """`blocks` is where a reader is told to look somewhere other than `meta`."""
+        assert THEMolMBIS.manifest.blocks == (MBIS_SHELL_BLOCK,)
+
+    def test_the_shell_block_renders_as_a_block_level_feature(self) -> None:
+        """The consequence of that declaration, read the way a user reads it.
+
+        The derivation rule itself (``blocks`` outranks ``atom_level`` outranks
+        ``graph_level``) is ``tests/test_loader/test_info.py``'s; what is pinned
+        here is that *this* dataset's shipped declaration makes ``mbis_shells``
+        come out as a block, which is only true if ``blocks`` names it.
+        """
+        feature = Feature.declared(
+            MBIS_SHELL_BLOCK, schema=THEMolMBIS.TARGET_SCHEMA, manifest=THEMolMBIS.manifest
+        )
+        assert (feature.name, feature.level) == (MBIS_SHELL_BLOCK, "block")
+
+    def test_the_shell_block_declares_no_single_unit_string(self) -> None:
+        """One `Feature` carries one unit, and the block's columns disagree.
+
+        ``population`` is in ``e`` and ``inverse_width`` in ``angstrom^-1``, so
+        any single string here would be wrong for one of the two columns. The
+        empty string says "not one quantity" honestly; the per-column units are
+        the block's own documentation, pinned by the test below.
+        """
+        assert MBIS_SHELL_BLOCK not in THEMolMBIS.manifest.units
+        feature = Feature.declared(
+            MBIS_SHELL_BLOCK, schema=THEMolMBIS.TARGET_SCHEMA, manifest=THEMolMBIS.manifest
+        )
+        assert feature.units == ""
+
+    def test_the_shell_columns_two_units_are_declared_quantities(self) -> None:
+        """`population` is a charge-like electron count; `inverse_width` is the
+        ``inverse_sigma`` THEMol already declares. Literals, not lookups: a unit
+        is a scientific claim, so restating the dict would assert nothing.
+        """
+        assert THEMOL_UNITS["charge"] == "e"
+        assert THEMOL_UNITS["inverse_sigma"] == "angstrom^-1"
+
+    def test_the_units_declaration_still_covers_the_fourteen_atom_columns(self) -> None:
+        """The shell block is added *beside* the per-atom units, not instead of them."""
+        assert frozenset(THEMolMBIS.manifest.units) == MBIS_SCHEMA_ATOM_COLUMNS
 
     def test_an_array_whose_row_count_is_not_n_is_refused(self, tmp_path: Path) -> None:
         """Never broadcast: two charges for three atoms is a defective shard."""
@@ -700,7 +909,6 @@ class TestTHEMolMBIS:
             atomic_charge=np.asarray([[0.4], [-0.8]]),
             atomic_dipole=MBIS_DIPOLE,
             atomic_quadrupole=MBIS_QUADRUPOLE,
-            parameters=MBIS_PARAMETERS,
         )
         with pytest.raises(ValueError, match="atomic_charge"):
             THEMolMBIS(path).load()[0]

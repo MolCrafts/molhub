@@ -103,11 +103,12 @@ SOURCES = (
             "B3LYP-D3(BJ)/DZVP energy and force sources."
         ),
         graph_targets=(),
-        # The atoms columns whose names the MBIS format fixes. The
-        # `mbis_parameter_<slot>` Slater columns are deliberately omitted: their
-        # arity belongs to the shard and is read off an `(N, arity)` array at
-        # load time, so a static manifest cannot name them without inventing an
-        # arity. The `THEMolMBIS` docstring in src/molhub/dataset/themol.py is
+        # The atoms columns whose names the MBIS format fixes. The MBIS Slater
+        # shells are deliberately absent: the source `parameters` array is one
+        # row per *shell*, not per atom (probed 2026-08-15 on the real published
+        # mbis shard-000 — shells per atom vary, so S > N), so the reader emits
+        # them as the `mbis_shells` block and no atom-level target can name
+        # them. The `THEMolMBIS` docstring in src/molhub/dataset/themol.py is
         # the authority for this list.
         atom_targets=(
             "atomic_charge",

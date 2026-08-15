@@ -15,7 +15,9 @@ surface only — three synthetic HDF5 shards read back through
   order (D1); a torsion scan is a ``Trajectory`` whose per-frame ``meta``
   carries ``energy`` / ``torsion_angle`` / ``scan_id`` / ``constraint_index``
   and whose scanned dihedral is the 1-row ``scan`` block; an MBIS record is a
-  ``Frame`` whose supervision is ``atoms`` columns.
+  ``Frame`` whose fourteen per-atom targets are ``atoms`` columns and whose
+  Slater shells — one row per shell, *not* per atom — are the ``mbis_shells``
+  block.
 * **Encoded columns.** Dissolution changed the record's *container*, never a
   byte the conveyor emits, so the ``RawUnit`` key sets, dtypes and values below
   are the pre-dissolution literals of ``tests/test_conveyor/test_encoder.py``,
@@ -41,9 +43,17 @@ Provenance of the goldens (hard-coded literals; nothing is recomputed here):
   script writes, and are the literals ``tests/test_dataset/test_themol.py``
   pins as ``BUTANE_SCAN_ANGLES`` (molpy 0.13.1, numpy 2.x; 2026-08-15).
   Recomputing them here with the same call would assert nothing.
+* The MBIS ``parameters`` **shape and column meanings** — ``(S, 3)`` of
+  ``(atom index, shell population in e, inverse Slater width in angstrom^-1)``,
+  with a variable shell count per atom — come from a one-off offline probe of
+  1000 groups of the real published THEMol mbis ``shard-000`` (430906 groups),
+  read with h5py; date 2026-08-15. The identity ``sum(population) == Z.sum() -
+  charge.sum()`` held exactly on every probed group. Nothing here reads that
+  shard: the fixture below is synthetic and hand-picked to satisfy the same
+  identity, and the probe is quoted, not repeated.
 * Every other number — atom counts, ``(3N)**2`` entry counts, Hessian entries,
-  coordinates, energies, charges, dipole and quadrupole components — is
-  hand-derived from the fixture recipe in this file. All of them are exact in
+  coordinates, energies, charges, dipole and quadrupole components, shell rows —
+  is hand-derived from the fixture recipe in this file. All of them are exact in
   binary floating point, so only the arctangent-derived angle needs a
   tolerance.
 
@@ -185,10 +195,16 @@ MBIS_DECLARED_COLUMNS = frozenset(
     }
 )
 
-#: The per-atom Slater parameters arrive as one unnamed ``(N, arity)`` array, so
-#: their columns are numbered by slot and the arity is *this shard's*, read off
-#: the array shape at load time and pinned here as a literal (D1).
-MBIS_PARAMETER_COLUMNS = frozenset({"mbis_parameter_0", "mbis_parameter_1"})
+#: The Slater shells are **not** per-atom columns. The source ``parameters``
+#: array is ``(S, 3)`` — one row per Slater *shell*, ``(atom index, population,
+#: inverse width)`` — with a variable number of shells per atom, so it lands in
+#: its own ``mbis_shells`` block and no ``mbis_parameter_<slot>`` column exists.
+#: Provenance of the shape and the column meanings: probe of 1000 groups of the
+#: real published THEMol mbis shard-000 (430906 groups), 2026-08-15; recorded in
+#: full above ``_write_mbis`` in ``tests/test_dataset/test_themol.py``.
+MBIS_SHELL_BLOCK = "mbis_shells"
+MBIS_SHELL_BLOCK_COLUMNS = ("atom", "population", "inverse_width")
+MBIS_PARAMETER_PREFIX = "mbis_parameter"
 
 #: Charges sum to zero and every component is exact in binary floating point;
 #: they are synthetic doubles, not real-data truth. The oxygen's ``-0.5`` is the
@@ -206,7 +222,20 @@ MBIS_QUADRUPOLE_XX = (0.5, 10.5, 20.5)
 MBIS_QUADRUPOLE_XY = (1.5, 11.5, 21.5)
 MBIS_QUADRUPOLE_YX = (3.5, 13.5, 23.5)
 MBIS_QUADRUPOLE_ZZ = (8.5, 18.5, 28.5)
-MBIS_PARAMETERS = ((0.5, 1.5), (2.5, 3.5), (4.5, 5.5))
+
+#: The water record's four Slater shells as source rows ``(atom index,
+#: population, inverse width)``. Atom-map order is H:1, O:2, H:3, so atom 1 is
+#: the oxygen and it is the one carrying two shells (core, then valence) while
+#: each hydrogen carries one — four rows for three atoms, which is the shape a
+#: per-atom reader cannot represent. Every literal is exact in binary floating
+#: point, and the populations are chosen so the probed identity holds on the
+#: fixture: ``sum(population) == Z.sum() - charge.sum()`` == 10.0 - 0.0 == 10.0.
+#: The per-shell split is synthetic; the total is the probed fact.
+MBIS_SHELL_ROWS = ((0.0, 0.5, 3.25), (1.0, 2.0, 32.0), (1.0, 6.5, 6.75), (2.0, 1.0, 3.5))
+MBIS_SHELL_ATOMS = (0, 1, 1, 2)
+MBIS_SHELL_POPULATIONS = (0.5, 2.0, 6.5, 1.0)
+MBIS_SHELL_WIDTHS = (3.25, 32.0, 6.75, 3.5)
+MBIS_ELECTRON_COUNT = 10.0
 
 # ---------------------------------------------------------------------------
 # Encoder goldens — copied literal for literal from the pre-dissolution
@@ -309,7 +338,7 @@ def _mbis_dataset(root: Path) -> THEMolShardDataset[Frame]:
         info.create_dataset("atomic_volumes", data=np.asarray(MBIS_VOLUMES)[:, None])
         info.create_dataset("atomic_dipole", data=np.asarray(MBIS_DIPOLE, dtype=np.float64))
         info.create_dataset("atomic_quadrupole", data=quadrupole)
-        group.create_dataset("parameters", data=np.asarray(MBIS_PARAMETERS, dtype=np.float64))
+        group.create_dataset("parameters", data=np.asarray(MBIS_SHELL_ROWS, dtype=np.float64))
     return THEMolMBIS(root).load()
 
 
@@ -426,15 +455,18 @@ def check_torsion_records(dataset: THEMolShardDataset[Trajectory]) -> None:
 
 
 def check_mbis_records(dataset: THEMolShardDataset[Frame]) -> None:
-    """An MBIS record IS a Frame whose per-atom targets are ``atoms`` columns."""
+    """An MBIS record IS a Frame: per-atom targets in ``atoms``, shells in a block."""
     assert len(dataset) == 1
     record = dataset[0]
     assert isinstance(record, Frame), f"an MBIS record is a molpy Frame, got {type(record)}"
 
     atoms = record["atoms"]
     columns = frozenset(atoms.keys())
-    assert columns == GEOMETRY_ATOM_COLUMNS | MBIS_DECLARED_COLUMNS | MBIS_PARAMETER_COLUMNS, (
+    assert columns == GEOMETRY_ATOM_COLUMNS | MBIS_DECLARED_COLUMNS, (
         f"the MBIS atom columns drifted: {sorted(columns)}"
+    )
+    assert not [name for name in columns if name.startswith(MBIS_PARAMETER_PREFIX)], (
+        "a per-atom Slater parameter column is back; the source array is per shell"
     )
     assert MBIS_DECLARED_COLUMNS == THEMolMBIS.TARGET_SCHEMA.atom_level, (
         "the frame's fixed MBIS columns and the declared schema disagree"
@@ -456,15 +488,45 @@ def check_mbis_records(dataset: THEMolShardDataset[Frame]) -> None:
     assert _column(atoms, "quadrupole_yx").tolist() == list(MBIS_QUADRUPOLE_YX)
     assert _column(atoms, "quadrupole_zz").tolist() == list(MBIS_QUADRUPOLE_ZZ)
 
-    assert [_column(atoms, name).tolist() for name in ("mbis_parameter_0", "mbis_parameter_1")] == [
-        list(slot) for slot in zip(*MBIS_PARAMETERS)
+    # -- the Slater shells are a block of their own, one row per shell ---------
+    shells = record[MBIS_SHELL_BLOCK]
+    assert frozenset(shells.keys()) == frozenset(MBIS_SHELL_BLOCK_COLUMNS)
+    assert [_column(shells, name).shape for name in MBIS_SHELL_BLOCK_COLUMNS] == [
+        (len(MBIS_SHELL_ROWS),)
+    ] * 3, "four shells for three atoms: the block is per shell, not per atom"
+    assert [_column(shells, name).dtype.str for name in MBIS_SHELL_BLOCK_COLUMNS] == [
+        "<i4",
+        "<f8",
+        "<f8",
     ]
+    assert _column(shells, "atom").tolist() == list(MBIS_SHELL_ATOMS), (
+        "the shell atom index column is not the source's, in source order"
+    )
+    assert _column(shells, "population").tolist() == list(MBIS_SHELL_POPULATIONS)
+    assert _column(shells, "inverse_width").tolist() == list(MBIS_SHELL_WIDTHS)
+
+    # The probed identity, embedded in the fixture: the shell populations are
+    # electrons, so they add up to the record's electron count.
+    populations = _column(shells, "population").astype(np.float64)
+    electrons = float(_column(atoms, "number").sum()) - float(charges.sum())
+    assert float(populations.sum()) == MBIS_ELECTRON_COUNT
+    assert float(populations.sum()) == electrons, (
+        f"shell populations {populations.tolist()} do not sum to Z.sum() - charge.sum() "
+        f"= {electrons}"
+    )
+
+    # The block is declared as one, so a reader is told where to look for it.
+    assert THEMolMBIS.manifest.blocks == (MBIS_SHELL_BLOCK,), (
+        f"the MBIS block declaration drifted: {THEMolMBIS.manifest.blocks}"
+    )
 
     print(
         f"  Records/mbis: one molpy Frame, {len(MBIS_DECLARED_COLUMNS)} declared atom columns "
-        f"+ {len(MBIS_PARAMETER_COLUMNS)} shard-determined Slater slots, oxygen charge "
-        f"{float(charges[1])} e, quadrupole_yx {list(MBIS_QUADRUPOLE_YX)} != quadrupole_xy "
-        f"{list(MBIS_QUADRUPOLE_XY)}"
+        f"and no mbis_parameter_* column, oxygen charge {float(charges[1])} e, quadrupole_yx "
+        f"{list(MBIS_QUADRUPOLE_YX)} != quadrupole_xy {list(MBIS_QUADRUPOLE_XY)}; "
+        f"{MBIS_SHELL_BLOCK} block {MBIS_SHELL_BLOCK_COLUMNS} = {len(MBIS_SHELL_ROWS)} shells "
+        f"over 3 atoms, atoms {list(MBIS_SHELL_ATOMS)}, populations "
+        f"{list(MBIS_SHELL_POPULATIONS)} summing to {MBIS_ELECTRON_COUNT} electrons"
     )
 
 

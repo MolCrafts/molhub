@@ -28,19 +28,19 @@ DEFINITIONS = {
     "mbis": THEMolMBIS,
 }
 
-# The MBIS atom columns whose names the format fixes; the Slater parameters are
-# ``mbis_parameter_<slot>`` and their count is the shard's, so they are counted
-# rather than listed (see :class:`molhub.dataset.themol.THEMolMBIS`).
+# The MBIS atom columns whose names the format fixes — all of them, and nothing
+# else: the Slater shells are one row per shell, so they are the ``mbis_shells``
+# block instead (see :class:`molhub.dataset.themol.THEMolMBIS`).
 _MBIS_COLUMNS = frozenset(THEMolMBIS.TARGET_SCHEMA.atom_level)
-_PARAMETER_PREFIX = "mbis_parameter_"
+
+# That block, as `molhub.dataset.themol` writes it: ``atom`` is the shell's atom
+# index, ``population`` its electron count and ``inverse_width`` its inverse
+# Slater width in angstrom^-1.
+_MBIS_SHELL_BLOCK = "mbis_shells"
+_MBIS_SHELL_FLOAT_COLUMNS = ("population", "inverse_width")
 
 # The scanned dihedral's 1-row block, as `molhub.dataset.themol` writes it.
 _SCAN_COLUMNS = ("atomi", "atomj", "atomk", "atoml")
-
-
-def _is_parameter(name: str) -> bool:
-    """Whether *name* is one of the numbered per-atom Slater parameter columns."""
-    return name.startswith(_PARAMETER_PREFIX) and name[len(_PARAMETER_PREFIX) :].isdigit()
 
 
 def _indices(length: int, count: int) -> list[int]:
@@ -87,8 +87,9 @@ def _audit_record(role: str, record: Any) -> dict[str, Any]:
 
     Every payload the deleted record dataclasses used to hold is read off the
     molpy object now: the Cartesian Hessian is the frame's ``hessian`` block, the
-    MBIS supervision is ``atoms`` columns, and a trajectory's scalars are in each
-    frame's own ``meta``.
+    per-atom MBIS multipoles are ``atoms`` columns while its Slater shells are
+    the ``mbis_shells`` block, and a trajectory's scalars are in each frame's own
+    ``meta``.
     """
     if role == "hessian":
         frame_result = _frame_audit(record)
@@ -105,20 +106,40 @@ def _audit_record(role: str, record: Any) -> dict[str, Any]:
 
     if role == "mbis":
         frame_result = _frame_audit(record)
+        n_atoms = frame_result["n_atoms"]
         atoms = record["atoms"]
-        columns = [name for name in atoms.keys() if name in _MBIS_COLUMNS or _is_parameter(name)]
+        columns = [name for name in atoms.keys() if name in _MBIS_COLUMNS]
         missing = sorted(_MBIS_COLUMNS - set(columns))
         if missing:
             raise ValueError(f"MBIS frame is missing atom column(s) {missing}")
         for name in columns:
             _finite(name, np.asarray(atoms[name]))
         charge = np.asarray(atoms["atomic_charge"])
-        if charge.shape != (frame_result["n_atoms"],):
+        if charge.shape != (n_atoms,):
             raise ValueError("MBIS charge count does not match atom count")
+
+        # The Slater shells: one row per shell, so `n_shells >= n_atoms` and the
+        # populations add up to the record's electron count.
+        shells = record[_MBIS_SHELL_BLOCK]
+        for name in _MBIS_SHELL_FLOAT_COLUMNS:
+            _finite(f"{_MBIS_SHELL_BLOCK}.{name}", np.asarray(shells[name]))
+        shell_atom = np.asarray(shells["atom"])
+        n_shells = int(shell_atom.shape[0])
+        if n_shells < n_atoms:
+            raise ValueError(
+                f"MBIS record has {n_shells} Slater shells for {n_atoms} atoms; "
+                "every atom carries at least one"
+            )
+        per_atom = np.bincount(shell_atom, minlength=n_atoms)
+        population = np.asarray(shells["population"], dtype=np.float64)
+        electrons = float(np.asarray(atoms["number"]).sum()) - float(charge.sum())
         return {
             **frame_result,
             "n_configurations": 1,
-            "n_mbis_parameters": sum(1 for name in columns if _is_parameter(name)),
+            "n_shells": n_shells,
+            "min_shells_per_atom": int(per_atom.min()),
+            "max_shells_per_atom": int(per_atom.max()),
+            "shell_population_sum_error": float(population.sum()) - electrons,
             "mbis_charge_sum_error": float(charge.sum()) - frame_result["total_charge"],
         }
 

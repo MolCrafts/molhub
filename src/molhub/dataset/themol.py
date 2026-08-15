@@ -6,9 +6,10 @@ definition construction performs no IO; :meth:`load` is the explicit fetch and
 index boundary.
 
 **A record IS a molpy object.** One geometry is a :class:`molpy.Frame` — the
-Cartesian Hessian is a COO ``hessian`` block, MBIS supervision is per-atom
-``atoms`` columns, scalars are ``frame.meta`` entries — and a multi-frame
-sampling unit (a relaxation, a torsion profile) is a :class:`molpy.Trajectory`
+Cartesian Hessian is a COO ``hessian`` block, the per-atom MBIS multipoles are
+``atoms`` columns while the MBIS Slater shells (one row per *shell*, not per
+atom) are the ``mbis_shells`` block, scalars are ``frame.meta`` entries — and a
+multi-frame sampling unit (a relaxation, a torsion profile) is a :class:`molpy.Trajectory`
 whose per-frame ``meta`` carries that frame's scalars. There is no wrapper
 object on top of ``Frame``; the four record dataclasses that used to be one
 were deleted by ``hf-facade-02-frame-records`` (D1), per the 2026-08-15
@@ -81,11 +82,31 @@ _QUADRUPOLE_COLUMNS = tuple(
     f"quadrupole_{first}{second}" for first in _CARTESIAN_AXES for second in _CARTESIAN_AXES
 )
 
-# The per-atom Slater parameters arrive as one unnamed ``(N, arity)`` array, so
-# their columns are numbered by slot. The arity is a property of the shard, read
-# off that shape at load time — never assumed, and never declared statically
-# (see :class:`THEMolMBIS`).
-_PARAMETER_PREFIX = "mbis_parameter_"
+# The block the MBIS Slater shells are read into, as ``atom`` / ``population`` /
+# ``inverse_width``. The source ``parameters`` array is ``(S, 3)`` — one row per
+# Slater *shell*, **not** per atom — so it can never be an ``atoms`` column and
+# is a shell-major block of its own instead.
+#
+# Evidence, probed on 2026-08-15 over 1000 groups of the real published THEMol
+# mbis ``shard-000`` (430906 groups in total): the shells per atom vary — H
+# carries 1, most heavy atoms 2, a third-period atom can carry 3 — so a 47-atom
+# record has 70 rows, a 40-atom one 57, and only 559 of the 1000 probed groups
+# happen to satisfy ``S == n_atoms + n_heavy``. The columns decode as
+#
+#   col 0  atom index — integer-valued, inside ``[0, n_atoms)``, one atom's
+#          shells consecutive, and every atom present at least once.
+#   col 1  shell population, in electrons: ``sum(col1) == Z.sum() -
+#          charge.sum()`` held EXACTLY on every probed group (170 / 132 / 128
+#          for three of them), which is what identifies it as a population
+#          rather than a second width or an amplitude.
+#   col 2  inverse Slater width, in angstrom^-1 — the quantity
+#          ``THEMOL_UNITS["inverse_sigma"]`` names. Core shells land at ~24-67,
+#          valence shells at ~3-8.
+#
+# Read as a per-atom ``(N, arity)`` array — which is what this reader did before
+# — the same data refuses every real record: 0 of 43 sampled indices were
+# readable.
+_MBIS_SHELL_BLOCK = "mbis_shells"
 
 # The MBIS ``atoms`` columns whose names the format fixes, and therefore the
 # whole of what :attr:`THEMolMBIS.TARGET_SCHEMA` can honestly declare.
@@ -101,9 +122,10 @@ _MBIS_ATOM_COLUMNS = (
 # from the column tuples above rather than written out, so a component name and
 # its unit cannot drift apart, and quoting no literal here keeps THEMOL_UNITS
 # the single place a THEMol unit string is spelled.
-# The `mbis_parameter_<slot>` columns are deliberately absent: their arity is
-# the shard's, read at load time (see :class:`THEMolMBIS`), so a static
-# declaration would have to invent one.
+# The ``mbis_shells`` block is deliberately absent: it is not an ``atoms``
+# column, and its two float columns disagree on their unit (``population`` is in
+# ``e``, ``inverse_width`` in ``angstrom^-1``), so no single string here could be
+# right for both. Their units are documented on :class:`THEMolMBIS`.
 _MBIS_UNITS: dict[str, str] = {
     "atomic_charge": THEMOL_UNITS["charge"],
     "atomic_volume": THEMOL_UNITS["volume"],
@@ -428,7 +450,7 @@ def _scalar_column(key: str, name: str, array: np.ndarray) -> np.ndarray:
 
 
 def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
-    """Read one MBIS record as a Frame whose supervision is ``atoms`` columns.
+    """Read one MBIS record as a Frame: multipoles per atom, shells per shell.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -438,14 +460,18 @@ def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
     Returns:
         The geometry :class:`~molpy.Frame` whose ``atoms`` block also carries
         ``atomic_charge``, ``atomic_volume`` (from the source's plural
-        ``atomic_volumes``), :data:`_DIPOLE_COLUMNS`, :data:`_QUADRUPOLE_COLUMNS`
-        and one ``mbis_parameter_<slot>`` column per Slater parameter slot.
+        ``atomic_volumes``), :data:`_DIPOLE_COLUMNS` and
+        :data:`_QUADRUPOLE_COLUMNS`, plus the shell-major
+        :data:`_MBIS_SHELL_BLOCK` block — ``atom`` / ``population`` /
+        ``inverse_width``, one row per MBIS Slater shell in source row order,
+        never regrouped or summed.
 
     Raises:
-        ValueError: An array's row count is not the atom count, a dipole is not
-            ``(N, 3)``, a quadrupole is not ``(N, 3, 3)`` — the component names
-            are Cartesian index pairs, so any other shape has no names — or the
-            parameters are not a two-dimensional ``(N, arity)`` array.
+        ValueError: A per-atom array's row count is not the atom count, a dipole
+            is not ``(N, 3)``, a quadrupole is not ``(N, 3, 3)`` — the component
+            names are Cartesian index pairs, so any other shape has no names — or
+            the shell table is not ``(S, 3)``, carries a non-integral or
+            out-of-range atom index, or leaves an atom with no shell at all.
     """
     group = handle[key]
     frame = _mapped_topology_frame(group, key, source_id)
@@ -457,7 +483,6 @@ def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
     volume = _per_atom(key, "atomic_volumes", info["atomic_volumes"], n_atoms)
     dipole = _per_atom(key, "atomic_dipole", info["atomic_dipole"], n_atoms)
     quadrupole = _per_atom(key, "atomic_quadrupole", info["atomic_quadrupole"], n_atoms)
-    parameters = _per_atom(key, "parameters", group["parameters"], n_atoms)
 
     if dipole.shape != (n_atoms, 3):
         raise ValueError(
@@ -469,10 +494,36 @@ def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
             f"THEMol atomic_quadrupole for {key} has shape {quadrupole.shape}, expected "
             f"({n_atoms}, 3, 3); its columns are named by Cartesian index pair."
         )
-    if parameters.ndim != 2:
+
+    shells = np.asarray(group["parameters"], dtype=np.float64)
+    if shells.ndim != 2 or shells.shape[1] != 3:
         raise ValueError(
-            f"THEMol parameters for {key} have shape {parameters.shape}; the per-atom "
-            "Slater parameters are read as (N, arity) and their arity is the shard's."
+            f"THEMol parameters for {key} have shape {shells.shape}; the MBIS Slater "
+            "shell table is (S, 3) — one row per shell, of three columns "
+            "(atom index, shell population, inverse Slater width)."
+        )
+    shell_atom = shells[:, 0]
+    fractional = shell_atom[shell_atom != np.trunc(shell_atom)]
+    if fractional.size:
+        raise ValueError(
+            f"THEMol parameters for {key} carry shell atom indices that are not "
+            f"integer-valued: {sorted({float(value) for value in fractional})}. Column 0 "
+            "addresses an atom, so it is never rounded."
+        )
+    out_of_range = shell_atom[(shell_atom < 0) | (shell_atom >= n_atoms)]
+    if out_of_range.size:
+        raise ValueError(
+            f"THEMol parameters for {key} carry shell atom indices outside "
+            f"[0, {n_atoms}): {sorted({int(value) for value in out_of_range})}. A shell "
+            "addressing no atom is a defect, not a row to drop."
+        )
+    shell_index = shell_atom.astype(np.int64)
+    shells_per_atom = np.bincount(shell_index, minlength=n_atoms)
+    if not shells_per_atom.all():
+        raise ValueError(
+            f"THEMol parameters for {key} leave atom(s) "
+            f"{np.flatnonzero(shells_per_atom == 0).tolist()} with no shell; every atom "
+            "carries at least one MBIS Slater shell, so a missing index is a lost row."
         )
 
     columns: dict[str, np.ndarray] = {name: np.asarray(atoms[name]) for name in atoms.keys()}
@@ -483,9 +534,14 @@ def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
     flat_quadrupole = quadrupole.reshape(n_atoms, len(_QUADRUPOLE_COLUMNS))
     for index, name in enumerate(_QUADRUPOLE_COLUMNS):
         columns[name] = np.ascontiguousarray(flat_quadrupole[:, index])
-    for slot in range(parameters.shape[1]):
-        columns[f"{_PARAMETER_PREFIX}{slot}"] = np.ascontiguousarray(parameters[:, slot])
     frame["atoms"] = Block(columns)
+    frame[_MBIS_SHELL_BLOCK] = Block(
+        {
+            "atom": shell_index.astype(np.int32),
+            "population": np.ascontiguousarray(shells[:, 1]),
+            "inverse_width": np.ascontiguousarray(shells[:, 2]),
+        }
+    )
     return frame
 
 
@@ -824,25 +880,38 @@ class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
     citation="10.48550/arXiv.2605.14973",
     tags=("electrostatics", "mbis", "class-i"),
     units=_MBIS_UNITS,
+    blocks=(_MBIS_SHELL_BLOCK,),
 )
 class THEMolMBIS(_THEMolDefinition[Frame]):
     """THEMol MBIS supervision; one record is one :class:`~molpy.Frame`.
 
-    Every target is an ``atoms`` column, so ``TARGET_SCHEMA.atom_level`` names
-    the columns a reader will actually find on the frame:
+    Every *per-atom* target is an ``atoms`` column, so ``TARGET_SCHEMA.atom_level``
+    names the columns a reader will actually find on the frame:
     :data:`_MBIS_ATOM_COLUMNS` — ``atomic_charge``, ``atomic_volume``, the three
     ``dipole_<axis>`` components and the nine ``quadrupole_<axis><axis>``
     components. The grouped names it declared before dissolution
     (``atomic_dipole`` / ``atomic_quadrupole`` / ``mbis_parameters``) match no
     column of any sample, so they are gone.
 
-    **The Slater-parameter columns are deliberately not declared.** They are
-    ``mbis_parameter_<slot>`` for ``slot < arity``, and the arity is read off
-    the shard's ``(N, arity)`` array at load time (D1: "the parameter arity is
-    read from the source array shapes"). A class attribute is built without IO,
-    so declaring them would mean inventing an arity the format does not fix —
-    which is the one thing this schema exists not to do. Their existence is
-    documented here and pinned by ``tests/test_dataset/test_themol.py``.
+    **The Slater shells are the ``mbis_shells`` block, not atom columns.** The
+    source ``parameters`` array is ``(S, 3)`` — one row per MBIS Slater *shell*,
+    with the shells per atom varying (H carries 1, most heavy atoms 2, a
+    third-period atom can carry 3), so ``S > N`` and the rows do not line up with
+    atoms at all. This reader emitted them as ``mbis_parameter_<slot>`` atom
+    columns until the 2026-08-15 probe of the real published mbis ``shard-000``
+    (1000 of its 430906 groups) showed that shape exists in no record: 0 of 43
+    sampled indices were readable, and each column silently assigned a shell to
+    whichever atom shared its row index. The block's three columns are ``atom``
+    (the shell's atom index), ``population`` (in ``e`` — ``sum == Z.sum() -
+    charge.sum()`` held exactly on every probed group, which is what identifies
+    it as an electron population) and ``inverse_width`` (in ``angstrom^-1``,
+    ``THEMOL_UNITS["inverse_sigma"]``; ~24-67 for core shells, ~3-8 for valence).
+
+    Those two units differ, so the block declares no single ``units`` string —
+    ``units`` stays the fourteen per-atom columns — and ``blocks`` is what tells
+    a reader to look for ``mbis_shells`` somewhere other than ``frame.meta``.
+    ``TARGET_SCHEMA`` cannot hold it either: it has only the ``graph_level`` /
+    ``atom_level`` layout sets, and shell-major rows are neither.
     """
 
     COORDINATE = "dataset:themol/mbis@1"

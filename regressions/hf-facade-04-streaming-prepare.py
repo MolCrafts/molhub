@@ -35,6 +35,19 @@ Provenance of the goldens (hard-coded literals; nothing is recomputed here):
   recomputed identity would hide.
   command: ``python -c "import hashlib; print(hashlib.blake2b(b'[H:1][S:2][S:3][H:4]',
   digest_size=16).hexdigest())"``; CPython 3.12, stdlib only; 2026-08-15.
+* The MBIS ``parameters`` **shape and column meanings** — ``(S, 3)`` of
+  ``(atom index, shell population in e, inverse Slater width in angstrom^-1)``,
+  with a variable shell count per atom — come from a one-off offline probe of
+  1000 groups of the real published THEMol mbis ``shard-000`` (430906 groups),
+  read with h5py; date 2026-08-15. The identity ``sum(population) == Z.sum() -
+  charge.sum()`` held exactly on every probed group. Nothing here reads that
+  shard: ``MBIS_SHELL_ROWS`` below is synthetic and hand-derived per fixture
+  molecule to satisfy the same identity, and the probe is quoted, not repeated.
+  Nothing is asserted about the shells on the *read* side — they are supervision
+  the walk carries, not vocabulary it uses, and their only job there is to be
+  loadable. Only the water records are read back at all (hooh and hf sit in the
+  splits this walk must skip), so :func:`checked_shells` validates the
+  derivation on the *write* side, where every species is seen.
 * The streamed ids ``mbis-a, mbis-c, mbis-d`` and the take(1) id ``mbis-a`` are
   hand-derived from the six-row split table this script writes: three train rows,
   two of them in the first shard and one in the second, so "walked on to the next
@@ -186,6 +199,34 @@ SPECIES: Mapping[str, Species] = {
     ),
 }
 
+#: Each MBIS species' Slater shells, as the source's ``(S, 3)`` rows ``(atom
+#: index, shell population in e, inverse Slater width in angstrom^-1)``. One row
+#: per *shell*, so ``S > n_atoms``: every hydrogen carries one shell and every
+#: heavy atom a core and a valence shell, which is why water is 4 rows over 3
+#: atoms, HOOH 6 over 4 and HF 3 over 2 — the shape no per-atom ``(N, arity)``
+#: array can hold, and the reason these fixtures had to be rewritten.
+#:
+#: Hand-derived per molecule from the charges ``write_shard`` assigns below
+#: (``0.4`` for H, ``-0.8`` otherwise), so each atom's shells sum to its own
+#: population ``Z_atom - q_atom`` — H ``0.6``, O ``8.8`` as ``2.0 + 6.8``, F
+#: ``9.8`` as ``2.0 + 7.8`` — and therefore the whole record satisfies the
+#: probed identity ``sum(population) == Z.sum() - charge.sum()`` (10.0, 18.8 and
+#: 10.4), exactly in binary floating point. The core/valence split and the
+#: widths are synthetic; the shape and the identity are the probed facts (see
+#: the provenance note above).
+MBIS_SHELL_ROWS: Mapping[str, tuple[tuple[float, float, float], ...]] = {
+    "water": ((0.0, 0.6, 3.25), (1.0, 2.0, 32.0), (1.0, 6.8, 6.75), (2.0, 0.6, 3.25)),
+    "hooh": (
+        (0.0, 0.6, 3.25),
+        (1.0, 2.0, 32.0),
+        (1.0, 6.8, 6.75),
+        (2.0, 2.0, 32.0),
+        (2.0, 6.8, 6.75),
+        (3.0, 0.6, 3.25),
+    ),
+    "hf": ((0.0, 0.6, 3.25), (1.0, 2.0, 36.0), (1.0, 7.8, 7.5)),
+}
+
 #: Which HDF5 group keys each MBIS file holds, in the order h5py lists them.
 SHARD_KEYS: Mapping[str, tuple[str, ...]] = {
     "shard-000": ("mbis-a", "mbis-b", "mbis-c"),
@@ -295,6 +336,51 @@ def torsion_coords(shift: float) -> np.ndarray:
     )
 
 
+def checked_shells(name: str, numbers: Sequence[int], charges: np.ndarray) -> np.ndarray:
+    """The hand-derived shell table of species *name*, checked before it is written.
+
+    Only the water records of this fixture are ever read back — hooh and hf sit
+    in the ``val`` and ``test`` splits the train walk must skip — so a wrong
+    literal for those two would be written, never loaded, and never noticed.
+    The derivation is therefore checked here, for every record written: the
+    three properties :func:`~molhub.dataset.themol._read_mbis` enforces (an
+    ``(S, 3)`` table, integral in-range atom indices, no atom without a shell)
+    plus the two identities those literals were derived from, which the reader
+    does not check and which are what make the populations meaningful rather
+    than arbitrary: every atom's shells sum to its own population ``Z_atom -
+    q_atom``, and therefore the record's shells sum to its electron count
+    ``Z.sum() - charge.sum()`` — the probed identity. The per-atom form is the
+    load-bearing one: moving one atom's shell onto another leaves the range, the
+    coverage and the total all intact. This validates the *fixture*, not
+    production.
+    """
+    shells = np.asarray(MBIS_SHELL_ROWS[name], dtype=np.float64)
+    n_atoms = len(numbers)
+    assert shells.ndim == 2 and shells.shape[1] == 3, (
+        f"{name}: shells are (S, 3), got {shells.shape}"
+    )
+    atom = shells[:, 0]
+    assert (atom == np.trunc(atom)).all(), f"{name}: a shell atom index is not integral"
+    assert atom.min() >= 0.0 and atom.max() < n_atoms, (
+        f"{name}: a shell addresses no atom of [0, {n_atoms})"
+    )
+    counts = np.bincount(atom.astype(np.int64), minlength=n_atoms)
+    assert counts.all(), f"{name}: atom(s) {np.flatnonzero(counts == 0).tolist()} carry no shell"
+    index = atom.astype(np.int64)
+    per_atom = [float(shells[index == i, 1].sum()) for i in range(n_atoms)]
+    expected = [float(numbers[i]) - float(charges[i, 0]) for i in range(n_atoms)]
+    assert per_atom == expected, (
+        f"{name}: an atom's shells sum to {per_atom}, not its own population "
+        f"Z_atom - q_atom = {expected}"
+    )
+    electrons = float(np.asarray(numbers, dtype=np.int64).sum()) - float(charges.sum())
+    assert float(shells[:, 1].sum()) == electrons, (
+        f"{name}: shell populations sum to {float(shells[:, 1].sum())}, not the record's "
+        f"{electrons} electrons"
+    )
+    return shells
+
+
 def write_shard(path: Path, keys: Sequence[str]) -> Path:
     """Write a THEMol MBIS file holding one record per key in *keys*."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,6 +389,10 @@ def write_shard(path: Path, keys: Sequence[str]) -> Path:
         for key in keys:
             species = SPECIES[SPECIES_BY_KEY[key]]
             n_atoms = len(species.numbers)
+            charges = np.asarray(
+                [[0.4 if number == 1 else -0.8] for number in species.numbers], dtype=np.float64
+            )
+            shells = checked_shells(SPECIES_BY_KEY[key], species.numbers, charges)
             group = handle.create_group(key)
             group.create_dataset("mapped_nonisomeric_smiles", data=species.smiles, dtype=string)
             group.create_dataset("mapped_isomeric_smiles", data=species.smiles, dtype=string)
@@ -312,15 +402,10 @@ def write_shard(path: Path, keys: Sequence[str]) -> Path:
             group.create_dataset("coords", data=species.coords)
             info = group.create_group("mbis_info")
             info.create_dataset("atomic_volumes", data=np.ones((n_atoms, 1)))
-            info.create_dataset(
-                "atomic_charge",
-                data=np.asarray([[0.4 if number == 1 else -0.8] for number in species.numbers]),
-            )
+            info.create_dataset("atomic_charge", data=charges)
             info.create_dataset("atomic_dipole", data=np.ones((n_atoms, 3)))
             info.create_dataset("atomic_quadrupole", data=np.ones((n_atoms, 3, 3)))
-            group.create_dataset(
-                "parameters", data=np.arange(2 * n_atoms, dtype=np.float64).reshape(n_atoms, 2)
-            )
+            group.create_dataset("parameters", data=shells)
     return path
 
 

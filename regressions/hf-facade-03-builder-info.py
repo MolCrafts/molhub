@@ -10,9 +10,10 @@ written into a temporary directory:
 * **ac-001.** ``"themol/mbis"`` resolves to the pinned coordinate
   ``dataset:themol/mbis@1``; a registry whose versions do not order refuses
   rather than picking one.
-* **ac-002.** ``info`` describes content — description, license, citation, 14
-  per-atom features with their units, split counts, record type, download size
-  — and the substring ``shard-`` appears in no rendered field.
+* **ac-002.** ``info`` describes content — description, license, citation, 15
+  features with their level and units (the 14 per-atom columns plus the
+  ``mbis_shells`` block), split counts, record type, download size — and the
+  substring ``shard-`` appears in no rendered field.
 * **ac-003.** ``split`` is a required keyword; omitting it is a ``TypeError``,
   not a container of splits.
 * **ac-004 / ac-005.** ``len(ds)`` is the split table's count with zero fetches
@@ -37,10 +38,19 @@ Provenance of the goldens (hard-coded literals; nothing is recomputed here):
   the manifest below (101 + 1000 + 10000). The sizes are declared metadata, not
   the fixture files' real sizes: nothing on this path verifies bytes, and three
   distinctive numbers make a wrong sum visible instead of plausible.
-* The 14 feature names and their units are ``THEMolMBIS``'s own declarations —
-  ``atomic_charge``, ``atomic_volume``, three ``dipole_<axis>`` and nine
-  ``quadrupole_<axis><axis>`` columns, with ``THEMOL_UNITS`` values — written
-  out here as literals so a schema edit shows up as a decision.
+* The 15 feature names, levels and units are ``THEMolMBIS``'s own declarations —
+  the 14 ``atom``-level columns ``atomic_charge``, ``atomic_volume``, three
+  ``dipole_<axis>`` and nine ``quadrupole_<axis><axis>``, with ``THEMOL_UNITS``
+  values, plus the ``block``-level ``mbis_shells`` — written out here as
+  literals so a schema edit shows up as a decision.
+* The MBIS ``parameters`` **shape and column meanings** — ``(S, 3)`` of
+  ``(atom index, shell population in e, inverse Slater width in angstrom^-1)``,
+  with a variable shell count per atom — come from a one-off offline probe of
+  1000 groups of the real published THEMol mbis ``shard-000`` (430906 groups),
+  read with h5py; date 2026-08-15. The identity ``sum(population) == Z.sum() -
+  charge.sum()`` held exactly on every probed group. Nothing here reads that
+  shard: ``WATER_SHELL_ROWS`` below is synthetic and hand-picked to satisfy the
+  same identity, and the probe is quoted, not repeated.
 
 tool: python
 command: python regressions/hf-facade-03-builder-info.py
@@ -86,6 +96,20 @@ WATER = "[O:2]([H:1])[H:3]"
 WATER_NUMBERS = (1, 8, 1)
 WATER_COORDS = np.asarray([[-0.5, 0.0, 0.0], [0.0, 0.0, 0.0], [0.5, 0.0, 0.0]], dtype=np.float64)
 WATER_MOLECULE_ID = "7164234ff61f524e828d817795c1e285"
+WATER_CHARGES = np.asarray([[0.5], [-1.0], [0.5]], dtype=np.float64)
+
+#: The fixture record's MBIS Slater shells, as the source's ``(S, 3)`` rows
+#: ``(atom index, shell population in e, inverse Slater width in angstrom^-1)``.
+#: Four rows for three atoms: by atom-map order (H:1, O:2, H:3) atom 1 is the
+#: oxygen and it carries a core and a valence shell while each hydrogen carries
+#: one — the shape a per-atom ``(N, arity)`` array cannot represent, which is
+#: why this fixture would load under the old reader and must not now. The
+#: populations are hand-picked so the probed identity holds here too:
+#: ``sum(population) == Z.sum() - charge.sum()`` == 10 - 0.0 == 10.0; the
+#: per-shell split is synthetic. Same four rows as
+#: ``regressions/hf-facade-02-frame-records.py``, so the two scripts' fixture
+#: water is one molecule.
+WATER_SHELL_ROWS = ((0.0, 0.5, 3.25), (1.0, 2.0, 32.0), (1.0, 6.5, 6.75), (2.0, 1.0, 3.5))
 
 SHARD_KEYS: Mapping[str, tuple[str, ...]] = {
     "shard-000": ("mbis-a", "mbis-b", "mbis-c"),
@@ -113,14 +137,21 @@ SHARD_0_SIZE = 1000
 SHARD_1_SIZE = 10000
 DOWNLOAD_SIZE = 11101
 
-#: Every ``atoms`` column ``THEMolMBIS`` declares, with the unit it declares for
-#: it, in the order ``info.features`` reports (name order).
+#: Everything ``THEMolMBIS`` declares, with the level and the unit it declares
+#: for it, in the order ``info.features`` reports (name order): its fourteen
+#: ``atoms`` columns, plus the ``mbis_shells`` block the Slater shells land in.
+#: The block renders at level ``block`` with an **empty** unit, and that blank
+#: is a declaration too: its two float columns disagree on their unit
+#: (``population`` in ``e``, ``inverse_width`` in ``angstrom^-1``), so no single
+#: string would be right for both and the dataset states none rather than
+#: picking one.
 FEATURES: tuple[tuple[str, str, str], ...] = (
     ("atomic_charge", "atom", "e"),
     ("atomic_volume", "atom", "angstrom^3"),
     ("dipole_x", "atom", "e*angstrom"),
     ("dipole_y", "atom", "e*angstrom"),
     ("dipole_z", "atom", "e*angstrom"),
+    ("mbis_shells", "block", ""),
     ("quadrupole_xx", "atom", "e*angstrom^2"),
     ("quadrupole_xy", "atom", "e*angstrom^2"),
     ("quadrupole_xz", "atom", "e*angstrom^2"),
@@ -193,12 +224,10 @@ def write_shard(path: Path, keys: Sequence[str]) -> Path:
             group.create_dataset("coords", data=WATER_COORDS)
             info = group.create_group("mbis_info")
             info.create_dataset("atomic_volumes", data=np.ones((3, 1)))
-            info.create_dataset("atomic_charge", data=np.asarray([[0.5], [-1.0], [0.5]]))
+            info.create_dataset("atomic_charge", data=WATER_CHARGES)
             info.create_dataset("atomic_dipole", data=np.ones((3, 3)))
             info.create_dataset("atomic_quadrupole", data=np.ones((3, 3, 3)))
-            group.create_dataset(
-                "parameters", data=np.asarray([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
-            )
+            group.create_dataset("parameters", data=np.asarray(WATER_SHELL_ROWS, dtype=np.float64))
     return path
 
 
