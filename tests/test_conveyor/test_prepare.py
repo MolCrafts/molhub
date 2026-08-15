@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from molpy import Block, Frame
+from molpy import Block, Frame, Trajectory
 
 import molhub
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder
@@ -35,7 +35,7 @@ from molhub.conveyor.errors import (
     UnroutableUnitError,
 )
 from molhub.conveyor.prepare import PreparedBlock, PreparedBlocks, PrepareJob
-from molhub.dataset.themol import THEMOL_UNITS, EnergyForceTrajectory
+from molhub.dataset.themol import THEMOL_UNITS
 
 _PREPARE_SOURCE = Path(molhub.__file__).parent / "conveyor" / "prepare.py"
 
@@ -155,12 +155,11 @@ def _frame(
     return frame
 
 
-def _trajectory(key: str, identity: str, n_frames: int) -> EnergyForceTrajectory:
+def _trajectory(key: str, identity: str, n_frames: int) -> Trajectory:
     """One whole relaxation of the species behind *identity*."""
     smiles, elements, numbers, bonds = _SPECIES[identity]
-    return EnergyForceTrajectory(
-        molecule_id=key,
-        frames=tuple(
+    return Trajectory(
+        [
             _frame(
                 smiles=smiles,
                 molecule_id=key,
@@ -170,11 +169,11 @@ def _trajectory(key: str, identity: str, n_frames: int) -> EnergyForceTrajectory
                 step=step,
             )
             for step in range(n_frames)
-        ),
+        ]
     )
 
 
-def _shard() -> tuple[EnergyForceTrajectory, ...]:
+def _shard() -> tuple[Trajectory, ...]:
     """The five-record, three-identity, split-MIXED fixture shard."""
     return tuple(_trajectory(key, identity, n_frames) for key, identity, n_frames in SHARD_LAYOUT)
 
@@ -293,7 +292,7 @@ class RecordingWriterFactory:
 
 
 def _job(
-    records: Iterable[EnergyForceTrajectory],
+    records: Iterable[Trajectory],
     *,
     root: Path,
     factory: RecordingWriterFactory,

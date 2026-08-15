@@ -1,10 +1,9 @@
 """Tests for the THEMol record -> ``RawUnit`` encoder.
 
 Mirrors ``src/molhub/conveyor/encoder.py``. Every fixture is a hand-built
-:class:`molpy.Frame` wrapped in the record dataclass
-``molhub.dataset.themol`` already parses out of HDF5 — no HDF5 file, no
-network, no torch, no molnex, so a failure here is about the encoder and
-nothing else.
+:class:`molpy.Frame`, or a :class:`molpy.Trajectory` of them — exactly what
+``molhub.dataset.themol`` parses out of HDF5 — with no HDF5 file, no network, no
+torch and no molnex, so a failure here is about the encoder and nothing else.
 
 Numbers are chosen so that *nothing* in this file needs a tolerance:
 
@@ -14,9 +13,9 @@ Numbers are chosen so that *nothing* in this file needs a tolerance:
   fixture put in;
 * the torsion fixture's two geometries really do have dihedrals ``0.0`` and
   ``180.0`` about atoms ``(0, 1, 2, 3)`` (verified against
-  ``molhub.dataset.themol._dihedral_angle``), so the pinned angle goldens stay
-  true whether the encoder copies ``TorsionProfile.angles`` or the per-frame
-  ``torsion_angle`` target;
+  ``molhub.dataset.themol._dihedral_angle``), so the pinned angle goldens are
+  the geometry's own and not just a copy of what the fixture wrote into
+  ``frame.meta["torsion_angle"]``;
 * the identity hexes are pinned literals. Provenance: computed once, offline,
   with the stdlib ``hashlib.blake2b(smiles.encode(), digest_size=16).hexdigest()``
   rule that ``scripts/build_class1_splits.py:55-56`` uses to *produce* the
@@ -44,16 +43,10 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pytest
-from molpy import Block, Frame
+from molpy import Block, Frame, Trajectory
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder
 from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
-from molhub.dataset.themol import (
-    EnergyForceTrajectory,
-    HessianRecord,
-    MBISRecord,
-    TorsionProfile,
-)
 
 # ---------------------------------------------------------------------------
 # Molecules. Three species, three identities, one bondless case.
@@ -213,40 +206,61 @@ def _hooh_frame(
 
 
 # ---------------------------------------------------------------------------
-# The four records, exactly as `THEMolShardDataset.__getitem__` returns them.
+# The records after dissolution — `hf-facade-02-frame-records`: one geometry is
+# a `Frame`, a multi-frame sampling unit is a `Trajectory`, and there is no
+# wrapper object left to dispatch on. The MBIS record has no builder here at
+# all: after dissolution an MBIS frame and a hessian frame are the same type, so
+# the refusal moved to `THEMolUnitEncoder(task="mbis")` and is pinned there.
 # ---------------------------------------------------------------------------
 
+_SCAN_COLUMNS = ("atomi", "atomj", "atomk", "atoml")
 
-def _hessian_record() -> HessianRecord:
-    """One equilibrium geometry; its ``(3N, 3N)`` Hessian is deliberately dropped."""
-    return HessianRecord(
-        molecule_id="water-eq",
-        frame=_water_frame(WATER_EQ_POS),
-        hessian=np.eye(9, dtype=np.float64) * 0.5,
+
+def _with_scan_block(frame: Frame, atoms: Sequence[int] = HOOH_TORSION_ATOMS) -> Frame:
+    """Attach the scanned dihedral as the 1-row block ``frame.meta`` cannot hold."""
+    frame["scan"] = Block(
+        {
+            name: np.asarray([index], dtype=np.int32)
+            for name, index in zip(_SCAN_COLUMNS, atoms, strict=True)
+        }
     )
+    return frame
 
 
-def _bondless_record() -> HessianRecord:
+def _hessian_frame() -> Frame:
+    """One equilibrium geometry carrying its Hessian as a COO block.
+
+    The block is here on purpose: the unit's pinned column set below is what
+    proves the Cartesian Hessian is *dropped* rather than never offered.
+    """
+    frame = _water_frame(WATER_EQ_POS)
+    rows, cols = np.divmod(np.arange(81), 9)
+    frame["hessian"] = Block(
+        {
+            "row": rows.astype(np.int32),
+            "col": cols.astype(np.int32),
+            "value": (np.eye(9, dtype=np.float64) * 0.5).reshape(-1),
+        }
+    )
+    return frame
+
+
+def _bondless_frame() -> Frame:
     """A single neon atom — legitimate chemistry with zero bonds."""
-    return HessianRecord(
+    return _frame(
+        smiles=NEON_SMILES,
         molecule_id="neon-eq",
-        frame=_frame(
-            smiles=NEON_SMILES,
-            molecule_id="neon-eq",
-            elements=("Ne",),
-            numbers=(10,),
-            positions=((0.0, 0.0, 0.0),),
-            bonds=None,
-        ),
-        hessian=np.zeros((3, 3), dtype=np.float64),
+        elements=("Ne",),
+        numbers=(10,),
+        positions=((0.0, 0.0, 0.0),),
+        bonds=None,
     )
 
 
-def _trajectory_record() -> EnergyForceTrajectory:
-    """One molecule's whole relaxation — two frames of the same topology."""
-    return EnergyForceTrajectory(
-        molecule_id="water-relax",
-        frames=(
+def _relax_trajectory() -> Trajectory:
+    """One molecule's whole relaxation — two frames, no scan block."""
+    return Trajectory(
+        [
             _water_frame(
                 WATER_EQ_POS,
                 molecule_id="water-relax",
@@ -259,49 +273,38 @@ def _trajectory_record() -> EnergyForceTrajectory:
                 forces=WATER_STEP_FORCES,
                 targets={"energy": WATER_ENERGIES[1]},
             ),
-        ),
+        ]
     )
 
 
-def _torsion_record() -> TorsionProfile:
-    """One whole scan: angles and frames together, keyed by the scan id."""
-    return TorsionProfile(
-        molecule_id="hooh",
-        scan_id="hooh-scan-0",
-        torsion_atom_indices=HOOH_TORSION_ATOMS,
-        angles=HOOH_ANGLES,
-        frames=(
-            _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0]),
-            _hooh_frame(HOOH_TRANS_POS, energy=HOOH_ENERGIES[1], angle=HOOH_ANGLES[1]),
-        ),
-    )
+def _torsion_trajectory(*, scan_on_frame_zero: bool = True) -> Trajectory:
+    """One whole scan; every frame carries the scan block, unless asked otherwise.
 
-
-def _mbis_record() -> MBISRecord:
-    return MBISRecord(
-        molecule_id="water-mbis",
-        frame=_water_frame(WATER_EQ_POS),
-        atomic_volumes=np.ones((3, 1), dtype=np.float64),
-        atomic_charge=np.asarray([[0.5], [-1.0], [0.5]], dtype=np.float64),
-        atomic_dipole=np.zeros((3, 3), dtype=np.float64),
-        atomic_quadrupole=np.zeros((3, 3, 3), dtype=np.float64),
-        parameters=np.zeros((1, 3), dtype=np.float64),
-    )
+    ``scan_on_frame_zero=False`` builds the pathological trajectory whose first
+    frame has no ``scan`` block and whose second does — the encoder inspects
+    frame 0, so this must encode as a plain multi-frame unit.
+    """
+    first = _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0])
+    second = _hooh_frame(HOOH_TRANS_POS, energy=HOOH_ENERGIES[1], angle=HOOH_ANGLES[1])
+    if scan_on_frame_zero:
+        _with_scan_block(first)
+    _with_scan_block(second)
+    return Trajectory([first, second])
 
 
 @pytest.fixture
-def hessian_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="hessian").encode(_hessian_record())
+def frame_unit() -> RawUnit:
+    return THEMolUnitEncoder(task="hessian").encode(_hessian_frame())
 
 
 @pytest.fixture
-def trajectory_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="hessian-relax").encode(_trajectory_record())
+def relax_unit() -> RawUnit:
+    return THEMolUnitEncoder(task="hessian-relax").encode(_relax_trajectory())
 
 
 @pytest.fixture
-def torsion_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="torsion-scan").encode(_torsion_record())
+def scan_unit() -> RawUnit:
+    return THEMolUnitEncoder(task="torsion-scan").encode(_torsion_trajectory())
 
 
 class TestTHEMolUnitEncoder:
@@ -330,203 +333,39 @@ class TestTHEMolUnitEncoder:
         """``digest_size=16``: a wider digest would not match the shipped tables."""
         assert len(THEMolUnitEncoder.identity(WATER_SMILES)) == 32
 
-    # -- HessianRecord -----------------------------------------------------
+    # -- edges -------------------------------------------------------------
+    #
+    # `hf-facade-02-frame-records` deleted the record dataclasses, so the
+    # per-record assertions that used to live here — key, identity, task, column
+    # sets, dtypes and values for a hessian / trajectory / torsion record — moved
+    # verbatim into the dispatch section below, which the tester wrote as their
+    # literal-for-literal replacement. What stays here are the cases that section
+    # does not already make: the ones the dissolution has nothing to say about.
 
-    def test_a_hessian_unit_keys_on_the_molecule_id(self, hessian_unit: RawUnit) -> None:
-        assert hessian_unit.key == "water-eq"
-
-    def test_a_hessian_unit_carries_the_molecular_identity(self, hessian_unit: RawUnit) -> None:
-        assert hessian_unit.identity == WATER_IDENTITY
-
-    def test_a_hessian_unit_carries_the_encoders_task(self, hessian_unit: RawUnit) -> None:
-        """One shard, one task label, one frozen schema."""
-        assert hessian_unit.task == "hessian"
-
-    def test_a_hessian_unit_declares_the_geometry_only_columns(self, hessian_unit: RawUnit) -> None:
-        """Pinned so the dropped Cartesian Hessian stays a decision, not an accident.
-
-        ``molix.block/1`` has no routable column space for a per-molecule ragged
-        2-D payload, and the Hessian core is hot-tier by strategy section 6. If a
-        ``*hessian*`` column ever appears here, it arrived without a route.
-        """
-        assert set(hessian_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
-        assert set(hessian_unit.frames) == {"pos"}
-
-    def test_a_hessian_unit_stores_atomic_numbers_as_int16(self, hessian_unit: RawUnit) -> None:
-        atom_z = hessian_unit.topology["Z"]
-        assert atom_z.dtype.str == "<i2"
-        assert atom_z.tolist() == [1, 8, 1]
-
-    def test_a_hessian_unit_stores_bond_columns_as_int32(self, hessian_unit: RawUnit) -> None:
-        """Molecule-local ``[0, N)`` indices plus the integer bond order."""
-        bond_columns = ("bond_atomi", "bond_atomj", "bond_type")
-        assert [hessian_unit.topology[name].dtype.str for name in bond_columns] == [
-            "<i4",
-            "<i4",
-            "<i4",
-        ]
-        assert hessian_unit.topology["bond_atomi"].tolist() == [1, 1]
-        assert hessian_unit.topology["bond_atomj"].tolist() == [0, 2]
-        assert hessian_unit.topology["bond_type"].tolist() == [1, 1]
-
-    def test_a_hessian_unit_stores_positions_as_float32_angstrom(
-        self, hessian_unit: RawUnit
-    ) -> None:
-        """The fixture's angstrom numbers, narrowed and otherwise untouched."""
-        pos = hessian_unit.frames["pos"]
-        assert pos.dtype.str == "<f4"
-        assert pos.shape == (3, 3)
-        assert pos.tolist() == [[-0.5, 0.0, 0.0], [0.0, 0.0, 0.0], [0.5, 0.0, 0.0]]
-
-    def test_a_hessian_unit_holds_one_frame(self, hessian_unit: RawUnit) -> None:
-        assert (hessian_unit.n_atoms, hessian_unit.n_frames) == (3, 1)
-
-    # -- EnergyForceTrajectory --------------------------------------------
-
-    def test_a_trajectory_unit_keys_on_the_molecule_id(self, trajectory_unit: RawUnit) -> None:
-        assert trajectory_unit.key == "water-relax"
-
-    def test_a_trajectory_unit_declares_energy_and_force_columns(
-        self, trajectory_unit: RawUnit
-    ) -> None:
-        assert set(trajectory_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
-        assert set(trajectory_unit.frames) == {
-            "pos",
-            "energy",
-            "forces",
-        }
-
-    def test_a_trajectory_unit_stacks_every_frames_positions(
-        self, trajectory_unit: RawUnit
-    ) -> None:
-        """``pos`` is ``(F * N, 3)`` — the ``k * N`` stride the block relies on."""
-        pos = trajectory_unit.frames["pos"]
-        assert pos.dtype.str == "<f4"
-        assert pos.shape == (6, 3)
-        assert pos.tolist() == [
-            [-0.5, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, 0.5, 0.0],
-            [1.0, 0.0, 0.0],
-        ]
-
-    def test_a_trajectory_unit_stacks_every_frames_forces(self, trajectory_unit: RawUnit) -> None:
-        """kcal mol^-1 angstrom^-1, unchanged."""
-        forces = trajectory_unit.frames["forces"]
-        assert forces.dtype.str == "<f4"
-        assert forces.shape == (6, 3)
-        assert forces.tolist() == [
-            [0.5, 0.0, 0.0],
-            [-1.0, 0.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [0.0, 0.5, 0.0],
-            [0.0, -1.0, 0.0],
-            [0.0, 0.5, 0.0],
-        ]
-
-    def test_a_trajectory_unit_carries_one_energy_per_frame(self, trajectory_unit: RawUnit) -> None:
-        """kcal mol^-1, unchanged."""
-        energy = trajectory_unit.frames["energy"]
-        assert energy.dtype.str == "<f4"
-        assert energy.shape == (2,)
-        assert energy.tolist() == list(WATER_ENERGIES)
-
-    def test_a_trajectory_unit_holds_the_whole_trajectory(self, trajectory_unit: RawUnit) -> None:
-        assert (trajectory_unit.n_atoms, trajectory_unit.n_frames) == (3, 2)
-
-    # -- TorsionProfile ----------------------------------------------------
-
-    def test_a_torsion_unit_keys_on_the_scan_id(self, torsion_unit: RawUnit) -> None:
-        """A scan is the sampling unit; its key is the scan, not the molecule."""
-        assert torsion_unit.key == "hooh-scan-0"
-
-    def test_a_torsion_unit_identifies_the_molecule_not_the_scan(
-        self, torsion_unit: RawUnit
-    ) -> None:
+    def test_a_torsion_unit_identifies_the_molecule_not_the_scan(self, scan_unit: RawUnit) -> None:
         """The uuid trap: a scan id has zero overlap with molecular identity."""
-        assert torsion_unit.identity == HOOH_IDENTITY
-        assert torsion_unit.identity != THEMolUnitEncoder.identity("hooh-scan-0")
+        assert scan_unit.identity == HOOH_IDENTITY
+        assert scan_unit.identity != THEMolUnitEncoder.identity("hooh-scan-0")
 
-    def test_a_torsion_unit_declares_the_two_torsion_columns(self, torsion_unit: RawUnit) -> None:
-        assert set(torsion_unit.topology) == {
-            "Z",
-            "bond_atomi",
-            "bond_atomj",
-            "bond_type",
-            "torsion_atoms",
-        }
-        assert set(torsion_unit.frames) == {
-            "pos",
-            "energy",
-            "forces",
-            "torsion_angle",
-        }
+    def test_a_torsion_unit_holds_the_whole_scan(self, scan_unit: RawUnit) -> None:
+        assert (scan_unit.n_atoms, scan_unit.n_frames) == (4, 2)
 
-    def test_a_torsion_unit_records_the_scanned_dihedral(self, torsion_unit: RawUnit) -> None:
-        """One molecule-space row of four molecule-local atom indices."""
-        target_atoms = torsion_unit.topology["torsion_atoms"]
-        assert target_atoms.dtype.str == "<i4"
-        assert target_atoms.shape == (1, 4)
-        assert target_atoms.tolist() == [[0, 1, 2, 3]]
-
-    def test_a_torsion_unit_records_one_angle_per_frame(self, torsion_unit: RawUnit) -> None:
-        """Degrees, unchanged: the fixture's geometries are exactly cis and trans."""
-        angles = torsion_unit.frames["torsion_angle"]
-        assert angles.dtype.str == "<f4"
-        assert angles.shape == (2,)
-        assert angles.tolist() == [0.0, 180.0]
-
-    def test_a_torsion_unit_holds_the_whole_scan(self, torsion_unit: RawUnit) -> None:
-        assert (torsion_unit.n_atoms, torsion_unit.n_frames) == (4, 2)
-
-    def test_a_torsion_unit_stacks_both_geometries(self, torsion_unit: RawUnit) -> None:
-        pos = torsion_unit.frames["pos"]
+    def test_a_torsion_unit_stacks_both_geometries(self, scan_unit: RawUnit) -> None:
+        pos = scan_unit.frames["pos"]
         assert pos.shape == (8, 3)
         assert pos.tolist() == [list(row) for row in HOOH_CIS_POS + HOOH_TRANS_POS]
 
-    # -- edges -------------------------------------------------------------
-
-    def test_a_molecule_with_no_bonds_yields_empty_bond_columns(self) -> None:
-        """Empty, not missing: the block freezes its schema on the first unit."""
-        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_record())
-        assert set(unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
-        for name in ("bond_atomi", "bond_atomj", "bond_type"):
-            assert unit.topology[name].shape == (0,)
-            assert unit.topology[name].dtype.str == "<i4"
-
     def test_a_bondless_molecule_still_carries_its_atoms(self) -> None:
-        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_record())
+        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_frame())
         assert unit.topology["Z"].tolist() == [10]
         assert (unit.n_atoms, unit.n_frames) == (1, 1)
 
-    def test_a_ragged_trajectory_is_rejected(self) -> None:
-        """``k * N`` is what makes the two-level layout valid; a stack would lie."""
-        record = EnergyForceTrajectory(
-            molecule_id="water-ragged",
-            frames=(
-                _water_frame(
-                    WATER_EQ_POS,
-                    molecule_id="water-ragged",
-                    forces=WATER_EQ_FORCES,
-                    targets={"energy": WATER_ENERGIES[0]},
-                ),
-                _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0]),
-            ),
-        )
-        with pytest.raises(IncompleteRecordError):
-            THEMolUnitEncoder(task="hessian-relax").encode(record)
-
     def test_bonds_without_an_order_column_are_rejected(self) -> None:
         """A fabricated zero order would invent chemistry."""
-        record = HessianRecord(
+        record = _water_frame(
+            WATER_EQ_POS,
             molecule_id="water-orderless",
-            frame=_water_frame(
-                WATER_EQ_POS,
-                bonds={"atomi": WATER_BOND_ATOMI, "atomj": WATER_BOND_ATOMJ},
-            ),
-            hessian=np.eye(9, dtype=np.float64),
+            bonds={"atomi": WATER_BOND_ATOMI, "atomj": WATER_BOND_ATOMJ},
         )
         with pytest.raises(IncompleteRecordError):
             THEMolUnitEncoder(task="hessian").encode(record)
@@ -541,24 +380,158 @@ class TestTHEMolUnitEncoder:
         the encoder. The reachable defect is the one above: no order column at
         all.
         """
-        record = HessianRecord(
+        record = _water_frame(
+            WATER_EQ_POS,
             molecule_id="water-typed",
-            frame=_water_frame(WATER_EQ_POS, bonds=_water_bonds(order_column="bond_type")),
-            hessian=np.eye(9, dtype=np.float64) * 0.5,
+            bonds=_water_bonds(order_column="bond_type"),
         )
         unit = THEMolUnitEncoder(task="hessian").encode(record)
         assert unit.topology["bond_type"].dtype.str == "<i4"
         assert unit.topology["bond_type"].tolist() == [1, 1]
 
-    def test_an_mbis_record_is_unsupported(self) -> None:
-        """Atom-level electrostatics targets need column routes that do not exist."""
-        with pytest.raises(UnsupportedRecordError):
-            THEMolUnitEncoder(task="hessian").encode(_mbis_record())
-
     def test_an_unknown_object_is_unsupported(self) -> None:
-        """``encode`` dispatches on record type; anything else is a caller error."""
+        """``encode`` dispatches on record shape; anything else is a caller error."""
         with pytest.raises(UnsupportedRecordError):
             THEMolUnitEncoder(task="hessian").encode(object())
+
+    # -- Frame / Trajectory dispatch ---------------------------------------
+    #
+    # After `hf-facade-02-frame-records` the record dataclasses are gone, so
+    # `encode` branches on `Frame` vs `Trajectory` and on the encoder's declared
+    # task. Dissolution changes the *container*, never an encoded column: every
+    # key set, dtype and value below is copied from the pre-dissolution
+    # assertions above, literal for literal.
+
+    def test_a_frame_record_keys_on_the_molecule_id(self, frame_unit: RawUnit) -> None:
+        """One geometry is one unit, keyed by ``frame.meta["molecule_id"]``."""
+        assert frame_unit.key == "water-eq"
+        assert frame_unit.identity == WATER_IDENTITY
+        assert frame_unit.task == "hessian"
+
+    def test_a_frame_record_declares_the_geometry_only_columns(self, frame_unit: RawUnit) -> None:
+        """The frame's ``hessian`` block is offered and deliberately dropped."""
+        assert set(frame_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
+        assert set(frame_unit.frames) == {"pos"}
+
+    def test_a_frame_record_keeps_the_pinned_dtypes_and_values(self, frame_unit: RawUnit) -> None:
+        """``<i2`` atomic numbers, ``<i4`` bonds, ``<f4`` angstrom positions."""
+        assert frame_unit.topology["Z"].dtype.str == "<i2"
+        assert frame_unit.topology["Z"].tolist() == [1, 8, 1]
+        assert [
+            frame_unit.topology[name].dtype.str
+            for name in ("bond_atomi", "bond_atomj", "bond_type")
+        ] == ["<i4", "<i4", "<i4"]
+        assert frame_unit.topology["bond_atomi"].tolist() == [1, 1]
+        assert frame_unit.topology["bond_atomj"].tolist() == [0, 2]
+        assert frame_unit.topology["bond_type"].tolist() == [1, 1]
+        assert frame_unit.frames["pos"].dtype.str == "<f4"
+        assert frame_unit.frames["pos"].tolist() == [list(row) for row in WATER_EQ_POS]
+
+    def test_a_frame_record_holds_one_frame(self, frame_unit: RawUnit) -> None:
+        assert (frame_unit.n_atoms, frame_unit.n_frames) == (3, 1)
+
+    def test_a_trajectory_record_declares_energy_and_force_columns(
+        self, relax_unit: RawUnit
+    ) -> None:
+        assert relax_unit.key == "water-relax"
+        assert set(relax_unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
+        assert set(relax_unit.frames) == {"pos", "energy", "forces"}
+
+    def test_a_trajectory_record_stacks_every_frame(self, relax_unit: RawUnit) -> None:
+        """``pos`` is ``(F * N, 3)`` — the ``k * N`` stride the block relies on."""
+        assert (relax_unit.n_atoms, relax_unit.n_frames) == (3, 2)
+        assert relax_unit.frames["pos"].dtype.str == "<f4"
+        assert relax_unit.frames["pos"].tolist() == [
+            list(row) for row in WATER_EQ_POS + WATER_STEP_POS
+        ]
+        assert relax_unit.frames["forces"].dtype.str == "<f4"
+        assert relax_unit.frames["forces"].tolist() == [
+            list(row) for row in WATER_EQ_FORCES + WATER_STEP_FORCES
+        ]
+
+    def test_a_trajectory_record_carries_one_energy_per_frame(self, relax_unit: RawUnit) -> None:
+        """kcal mol^-1, unchanged."""
+        energy = relax_unit.frames["energy"]
+        assert energy.dtype.str == "<f4"
+        assert energy.tolist() == list(WATER_ENERGIES)
+
+    def test_a_scan_trajectory_keys_on_the_scan_id(self, scan_unit: RawUnit) -> None:
+        """A scan is the sampling unit; its key is the scan, its identity the molecule."""
+        assert scan_unit.key == "hooh-scan-0"
+        assert scan_unit.identity == HOOH_IDENTITY
+
+    def test_a_scan_trajectory_declares_the_two_torsion_columns(self, scan_unit: RawUnit) -> None:
+        assert set(scan_unit.topology) == {
+            "Z",
+            "bond_atomi",
+            "bond_atomj",
+            "bond_type",
+            "torsion_atoms",
+        }
+        assert set(scan_unit.frames) == {"pos", "energy", "forces", "torsion_angle"}
+
+    def test_a_scan_trajectory_records_the_dihedral_and_its_angles(
+        self, scan_unit: RawUnit
+    ) -> None:
+        """Read off the ``scan`` block and the per-frame ``torsion_angle`` meta."""
+        target_atoms = scan_unit.topology["torsion_atoms"]
+        assert target_atoms.dtype.str == "<i4"
+        assert target_atoms.shape == (1, 4)
+        assert target_atoms.tolist() == [[0, 1, 2, 3]]
+        angles = scan_unit.frames["torsion_angle"]
+        assert angles.dtype.str == "<f4"
+        assert angles.tolist() == [0.0, 180.0]
+
+    def test_a_trajectory_without_a_scan_block_declares_no_torsion_columns(
+        self, relax_unit: RawUnit
+    ) -> None:
+        """The scan block, not the task label, is what makes a unit a scan."""
+        assert "torsion_atoms" not in relax_unit.topology
+        assert "torsion_angle" not in relax_unit.frames
+
+    def test_the_scan_block_is_inspected_on_frame_zero(self) -> None:
+        """Frame 0 decides the schema; a block that appears later is not a scan."""
+        unit = THEMolUnitEncoder(task="torsion-scan").encode(
+            _torsion_trajectory(scan_on_frame_zero=False)
+        )
+        assert "torsion_atoms" not in unit.topology
+        assert "torsion_angle" not in unit.frames
+
+    def test_a_bondless_frame_yields_empty_bond_columns(self) -> None:
+        """Empty, not missing: the block freezes its schema on the first unit."""
+        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_frame())
+        assert set(unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
+        for name in ("bond_atomi", "bond_atomj", "bond_type"):
+            assert unit.topology[name].shape == (0,)
+            assert unit.topology[name].dtype.str == "<i4"
+        assert (unit.n_atoms, unit.n_frames) == (1, 1)
+
+    def test_a_ragged_trajectory_of_frames_is_rejected(self) -> None:
+        """``k * N`` is what makes the two-level layout valid; a stack would lie."""
+        record = Trajectory(
+            [
+                _water_frame(
+                    WATER_EQ_POS,
+                    molecule_id="water-ragged",
+                    forces=WATER_EQ_FORCES,
+                    targets={"energy": WATER_ENERGIES[0]},
+                ),
+                _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0]),
+            ]
+        )
+        with pytest.raises(IncompleteRecordError):
+            THEMolUnitEncoder(task="hessian-relax").encode(record)
+
+    def test_constructing_an_mbis_encoder_is_refused(self) -> None:
+        """After dissolution an MBIS frame and a Hessian frame are the same type.
+
+        One shard is one task, so the refusal has to happen where the task is
+        named — at construction. Refusing per record would be both later (a
+        writer is already open) and weaker (a geometry-only MBIS frame is
+        indistinguishable from a hessian frame).
+        """
+        with pytest.raises(UnsupportedRecordError):
+            THEMolUnitEncoder(task="mbis")
 
 
 class TestRawUnit:
@@ -586,4 +559,4 @@ class TestRawUnit:
             self._unit().key = "somewhere-else"  # type: ignore[misc]
 
     def test_the_encoder_returns_a_raw_unit(self) -> None:
-        assert isinstance(THEMolUnitEncoder(task="hessian").encode(_hessian_record()), RawUnit)
+        assert isinstance(THEMolUnitEncoder(task="hessian").encode(_hessian_frame()), RawUnit)

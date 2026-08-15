@@ -3,7 +3,7 @@
 
 Exercises the public surface of the conveyor's prepare stage
 (``streaming-data-tiers-03-conveyor-03-prepare``) offline, in two legs over the
-*same* fixture shard: five ``EnergyForceTrajectory`` records carrying three
+*same* fixture shard: five :class:`molpy.Trajectory` records carrying three
 molecular identities routed ``train`` / ``val`` / ``test``, built out of
 hand-made :class:`molpy.Frame`\\ s. Every coordinate and energy is a multiple of
 ``0.5``, exact in float32, so no assertion below needs a tolerance.
@@ -106,10 +106,10 @@ assert "molix" not in sys.modules, (
 )
 
 import numpy as np  # noqa: E402
-from molpy import Block, Frame  # noqa: E402
+from molpy import Block, Frame, Trajectory  # noqa: E402
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder  # noqa: E402
-from molhub.dataset.themol import THEMOL_UNITS, EnergyForceTrajectory  # noqa: E402
+from molhub.dataset.themol import THEMOL_UNITS  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # The shard: five relaxations over three molecular identities, deliberately
@@ -305,12 +305,11 @@ def _frame(
     return frame
 
 
-def _trajectory(key: str, identity: str, n_frames: int) -> EnergyForceTrajectory:
+def _trajectory(key: str, identity: str, n_frames: int) -> Trajectory:
     """One whole relaxation of the species behind *identity* — one sampling unit."""
     smiles, elements, numbers, bonds = _SPECIES[identity]
-    return EnergyForceTrajectory(
-        molecule_id=key,
-        frames=tuple(
+    return Trajectory(
+        [
             _frame(
                 smiles=smiles,
                 molecule_id=key,
@@ -320,11 +319,11 @@ def _trajectory(key: str, identity: str, n_frames: int) -> EnergyForceTrajectory
                 step=step,
             )
             for step in range(n_frames)
-        ),
+        ]
     )
 
 
-def _shard() -> tuple[EnergyForceTrajectory, ...]:
+def _shard() -> tuple[Trajectory, ...]:
     """The five-record, three-identity, split-MIXED fixture shard."""
     return tuple(_trajectory(key, identity, n_frames) for key, identity, n_frames in SHARD_LAYOUT)
 

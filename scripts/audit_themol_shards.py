@@ -28,6 +28,20 @@ DEFINITIONS = {
     "mbis": THEMolMBIS,
 }
 
+# The MBIS atom columns whose names the format fixes; the Slater parameters are
+# ``mbis_parameter_<slot>`` and their count is the shard's, so they are counted
+# rather than listed (see :class:`molhub.dataset.themol.THEMolMBIS`).
+_MBIS_COLUMNS = frozenset(THEMolMBIS.TARGET_SCHEMA.atom_level)
+_PARAMETER_PREFIX = "mbis_parameter_"
+
+# The scanned dihedral's 1-row block, as `molhub.dataset.themol` writes it.
+_SCAN_COLUMNS = ("atomi", "atomj", "atomk", "atoml")
+
+
+def _is_parameter(name: str) -> bool:
+    """Whether *name* is one of the numbered per-atom Slater parameter columns."""
+    return name.startswith(_PARAMETER_PREFIX) and name[len(_PARAMETER_PREFIX) :].isdigit()
+
 
 def _indices(length: int, count: int) -> list[int]:
     if length <= count:
@@ -69,55 +83,74 @@ def _frame_audit(frame: Any) -> dict[str, Any]:
 
 
 def _audit_record(role: str, record: Any) -> dict[str, Any]:
+    """Audit one record — a molpy ``Frame``, or a ``Trajectory`` of them.
+
+    Every payload the deleted record dataclasses used to hold is read off the
+    molpy object now: the Cartesian Hessian is the frame's ``hessian`` block, the
+    MBIS supervision is ``atoms`` columns, and a trajectory's scalars are in each
+    frame's own ``meta``.
+    """
     if role == "hessian":
-        frame_result = _frame_audit(record.frame)
-        _finite("hessian", record.hessian)
-        expected = 3 * frame_result["n_atoms"]
-        if record.hessian.shape != (expected, expected):
-            raise ValueError(f"unexpected Hessian shape {record.hessian.shape}")
+        frame_result = _frame_audit(record)
+        block = record["hessian"]
+        value = np.asarray(block["value"])
+        _finite("hessian", value)
+        expected = (3 * frame_result["n_atoms"]) ** 2
+        if value.shape != (expected,):
+            raise ValueError(f"unexpected Hessian entry count {value.shape}, expected {expected}")
+        for name in ("row", "col"):
+            if np.asarray(block[name]).shape != (expected,):
+                raise ValueError(f"Hessian {name} index count disagrees with its values")
         return {**frame_result, "n_configurations": 1}
 
     if role == "mbis":
-        frame_result = _frame_audit(record.frame)
-        n_atoms = frame_result["n_atoms"]
-        for name in (
-            "atomic_volumes",
-            "atomic_charge",
-            "atomic_dipole",
-            "atomic_quadrupole",
-            "parameters",
-        ):
-            _finite(name, getattr(record, name))
-        if len(record.atomic_charge) != n_atoms:
+        frame_result = _frame_audit(record)
+        atoms = record["atoms"]
+        columns = [name for name in atoms.keys() if name in _MBIS_COLUMNS or _is_parameter(name)]
+        missing = sorted(_MBIS_COLUMNS - set(columns))
+        if missing:
+            raise ValueError(f"MBIS frame is missing atom column(s) {missing}")
+        for name in columns:
+            _finite(name, np.asarray(atoms[name]))
+        charge = np.asarray(atoms["atomic_charge"])
+        if charge.shape != (frame_result["n_atoms"],):
             raise ValueError("MBIS charge count does not match atom count")
-        charge_delta = float(np.asarray(record.atomic_charge).sum()) - frame_result["total_charge"]
         return {
             **frame_result,
             "n_configurations": 1,
-            "mbis_charge_sum_error": charge_delta,
+            "n_mbis_parameters": sum(1 for name in columns if _is_parameter(name)),
+            "mbis_charge_sum_error": float(charge.sum()) - frame_result["total_charge"],
         }
 
-    frames = record.frames
+    frames = list(record)
     if not frames:
         raise ValueError(f"{role} record contains no configurations")
     checked_indices = _indices(len(frames), 3)
     frame_results = [_frame_audit(frames[index]) for index in checked_indices]
     molecule_ids = {item["molecule_id"] for item in frame_results}
-    if molecule_ids != {str(record.molecule_id)}:
+    if len(molecule_ids) != 1:
         raise ValueError(f"{role} group crosses molecular identities: {molecule_ids}")
     result = {
         "n_atoms": frame_results[0]["n_atoms"],
-        "molecule_id": str(record.molecule_id),
+        "molecule_id": frame_results[0]["molecule_id"],
         "source_id": frame_results[0]["source_id"],
         "total_charge": frame_results[0]["total_charge"],
         "n_configurations": len(frames),
         "checked_configuration_indices": checked_indices,
     }
     if role.startswith("torsion"):
-        if len(record.angles) != len(frames):
-            raise ValueError("torsion angle/configuration counts disagree")
-        _finite("torsion angles", [record.angles[index] for index in checked_indices])
-        result["scan_id"] = str(record.scan_id)
+        scan_ids = {str(frames[index].meta["scan_id"]) for index in checked_indices}
+        if len(scan_ids) != 1:
+            raise ValueError(f"{role} group crosses scans: {scan_ids}")
+        _finite(
+            "torsion angles",
+            [float(frames[index].meta["torsion_angle"]) for index in checked_indices],
+        )
+        scan = frames[0]["scan"]
+        if [np.asarray(scan[name]).shape for name in _SCAN_COLUMNS] != [(1,)] * 4:
+            raise ValueError("scanned dihedral is not one row of four atom indices")
+        result["scan_id"] = scan_ids.pop()
+        result["torsion_atom_indices"] = [int(np.asarray(scan[name])[0]) for name in _SCAN_COLUMNS]
     return result
 
 

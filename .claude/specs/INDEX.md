@@ -121,6 +121,5 @@ run-specific configuration.
 
 The former MM parameter-validation baseline chain in MolNex is closed and is
 not an authority for current dataset selection or production submission.
-- [hf-facade-02-frame-records](hf-facade-02-frame-records.md) — 四 record 数据类溶解为 Frame/Trajectory（COO hessian 块、MBIS atoms 列、scan 块）；编码器按 (类型,任务) 分派。 [approved]
 - [hf-facade-03-builder-info](hf-facade-03-builder-info.md) — DatasetName 解析、内容优先 DatasetInfo、load_dataset(split=) map-style、SplitTable 内化。 [approved]
 - [hf-facade-04-streaming-prepare](hf-facade-04-streaming-prepare.md) — streaming=True 有界迭代器藏 conveyor、prepare()=save_to_disk、CLI info 内容优先。 [approved]

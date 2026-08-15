@@ -82,7 +82,7 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Transport | `BlobStore` | On-disk cache keyed by coordinate and role under `$MOLHUB_HOME`, reserved as a cross-SDK contract so one machine downloads once |
 | Transport | `Source` drivers | `https`, `zenodo`, `figshare`, `hf`, `molhub` out of the box. A third party adds a scheme by publishing a driver to the `molhub.sources` entry point — no molhub source change. `PublishingSource` adds upload to the same driver |
 | CLI | `molhub` | `search`, `info`, `fetch --into`, `cache verify` — the same verbs as the Python API |
-| Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one molecule); graph fields live in `frame.meta` |
+| Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one geometry) or a `molpy.Trajectory` (one inseparable multi-frame sampling unit, e.g. a torsion scan); scalars live in each frame's `frame.meta` |
 | Datasets | `molhub.dataset` (helpers) | `InMemoryDataset` wraps a list of frames; `SubsetDataset` slices any map-style dataset by index |
 | Datasets | `QM9Dataset` | 130,831 small organic molecules with quantum-chemical properties — auto-downloads & caches `dataset:molcrafts/qm9@v2` |
 | Datasets | `RevMD17Dataset` | Revised MD17 trajectories for 10 molecules, with energies and forces — auto-downloads & caches one molecule of `dataset:molcrafts/revmd17@v4` |

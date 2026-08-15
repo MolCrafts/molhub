@@ -5,8 +5,9 @@ Copied surface, no third-party dataset framework:
 * :class:`Dataset` — ``__len__`` and ``__getitem__``.
 * :class:`IterableDataset` — ``__iter__``.
 
-A sample is a :class:`molpy.Frame` (one molecule). Graph-level fields live
-in ``frame.meta``. Concrete helpers may also expose ``source_id``.
+A sample is a :class:`molpy.Frame` (one geometry) or a
+:class:`molpy.Trajectory` (one multi-frame sampling unit). Graph-level fields
+live in ``frame.meta``. Concrete helpers may also expose ``source_id``.
 """
 
 from __future__ import annotations
@@ -15,17 +16,29 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Iterator, Protocol, runtime_checkable
 
-from molpy import Frame
+from molpy import Frame, Trajectory
 
 # ---------------------------------------------------------------------------
-# Sample — a molpy Frame
+# Sample — a molpy Frame or Trajectory
 # ---------------------------------------------------------------------------
 
-Sample = Frame
-"""A sample is a :class:`molpy.Frame` — one molecule.
+Sample = Frame | Trajectory
+"""A sample is a :class:`molpy.Frame` or a :class:`molpy.Trajectory`.
 
-Per-atom data lives in the ``atoms`` block. Graph-level fields (energy,
-molecule id, units, …) live in ``frame.meta``.
+One geometry is a ``Frame``: per-atom data (including per-atom supervision such
+as ``atomic_charge``) lives in its ``atoms`` block, matrices in named COO blocks
+such as ``hessian{row,col,value}``, index tuples in valence-style blocks, and
+scalars in ``frame.meta``.
+
+A sampling unit that is inseparable but multi-frame — a relaxation trajectory, a
+complete torsion profile — is a ``Trajectory`` of such frames, each carrying its
+own scalars in its own ``meta``. There is no wrapper object on top of ``Frame``.
+
+Widened from ``Frame`` alone on 2026-08-15 by the operator note recorded in
+``.claude/notes/notes.md`` (``mol:note:topic:hf-style-api``, "Records ARE molpy
+objects") and implemented by the spec ``hf-facade-02-frame-records`` (D10). The
+matching CLAUDE.md "What must never change casually" bullet was amended in the
+same change.
 """
 
 
@@ -85,7 +98,7 @@ class Dataset(Protocol):
         """Return the sample at integer *index*.
 
         Returns:
-            A :class:`molpy.Frame`.
+            A :class:`molpy.Frame` or :class:`molpy.Trajectory`.
 
         Raises:
             IndexError: If *index* is out of range.
@@ -109,7 +122,8 @@ class IterableDataset(Protocol):
         """Yield samples in streaming order.
 
         Returns:
-            An iterator over :class:`molpy.Frame` objects.
+            An iterator over :class:`molpy.Frame` / :class:`molpy.Trajectory`
+            objects.
         """
         ...
 
@@ -187,7 +201,8 @@ class SubsetDataset:
     def __len__(self) -> int:
         return len(self._indices)
 
-    def __getitem__(self, idx: int) -> Frame:
+    def __getitem__(self, idx: int) -> Sample:
+        """The parent's sample, whichever of the two kinds the parent yields."""
         return self._source[self._indices[idx]]
 
 

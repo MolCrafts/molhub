@@ -1,22 +1,36 @@
-"""Lazy, group-preserving adapters for the official THEMol HDF5 shards.
+"""Group-preserving adapters for the official THEMol HDF5 shards.
 
 The adapters expose a shard as a map-style collection without flattening a
 torsion scan or optimization trajectory into interchangeable frames.  Dataset
 definition construction performs no IO; :meth:`load` is the explicit fetch and
 index boundary.
+
+**A record IS a molpy object.** One geometry is a :class:`molpy.Frame` — the
+Cartesian Hessian is a COO ``hessian`` block, MBIS supervision is per-atom
+``atoms`` columns, scalars are ``frame.meta`` entries — and a multi-frame
+sampling unit (a relaxation, a torsion profile) is a :class:`molpy.Trajectory`
+whose per-frame ``meta`` carries that frame's scalars. There is no wrapper
+object on top of ``Frame``; the four record dataclasses that used to be one
+were deleted by ``hf-facade-02-frame-records`` (D1), per the 2026-08-15
+operator note in ``.claude/notes/notes.md``.
+
+Laziness *between* records — the per-process HDF5 handle in
+:class:`THEMolShardDataset` — is what bounds memory and is unchanged. Laziness
+*within* one record is deliberately given up (D2): ``molpy.Trajectory``
+materializes on construction, and the largest unit (a torsion-relax scan,
+≈24 constraints × ≈10 steps × 40 atoms × 3 × 8 B ≈ 230 kB) is three orders
+below the block ceiling.
 """
 
 from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar, overload
 
 import numpy as np
-from molpy import Block, Element, Frame
+from molpy import Block, Element, Frame, Trajectory
 
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
@@ -24,10 +38,6 @@ from molhub.dataset.protocol import TargetSchema
 
 __all__ = [
     "THEMOL_UNITS",
-    "HessianRecord",
-    "EnergyForceTrajectory",
-    "TorsionProfile",
-    "MBISRecord",
     "THEMolShardDataset",
     "THEMolHessian",
     "THEMolHessianRelax",
@@ -48,48 +58,38 @@ THEMOL_UNITS = {
     "inverse_sigma": "angstrom^-1",
 }
 
+# The scanned dihedral's four atoms. ``frame.meta`` rejects a len-4 sequence, so
+# the index tuple lives in a 1-row valence-style block named ``scan`` — the same
+# shape molpy already uses for bonds and angles.
+_SCAN_COLUMNS = ("atomi", "atomj", "atomk", "atoml")
 
-@dataclass(frozen=True)
-class HessianRecord:
-    """One equilibrium molecular graph, geometry, and Cartesian Hessian."""
+# The Cartesian axes the per-atom MBIS tensors are named by. A dipole is one
+# column per axis; a quadrupole is one column per *ordered* index pair, in
+# row-major order — ``quadrupole_yx`` is a column of its own, not a synonym for
+# ``quadrupole_xy``. Unfolding the lower triangle applies D1's Hessian
+# reasoning ("a discarded lower triangle is a convention every reader must then
+# remember") to the rank-2 per-atom tensor: the column count follows the source
+# shape and assumes no symmetry of the data.
+_CARTESIAN_AXES = ("x", "y", "z")
+_DIPOLE_COLUMNS = tuple(f"dipole_{axis}" for axis in _CARTESIAN_AXES)
+_QUADRUPOLE_COLUMNS = tuple(
+    f"quadrupole_{first}{second}" for first in _CARTESIAN_AXES for second in _CARTESIAN_AXES
+)
 
-    molecule_id: str
-    frame: Frame
-    hessian: np.ndarray
+# The per-atom Slater parameters arrive as one unnamed ``(N, arity)`` array, so
+# their columns are numbered by slot. The arity is a property of the shard, read
+# off that shape at load time — never assumed, and never declared statically
+# (see :class:`THEMolMBIS`).
+_PARAMETER_PREFIX = "mbis_parameter_"
 
-
-@dataclass(frozen=True)
-class EnergyForceTrajectory:
-    """One molecule's ordered, lazily materialized E/F frames."""
-
-    molecule_id: str
-    frames: Sequence[Frame]
-
-
-@dataclass(frozen=True)
-class TorsionProfile:
-    """One complete torsion profile, kept intact as the training object."""
-
-    molecule_id: str
-    scan_id: str
-    torsion_atom_indices: tuple[int, int, int, int]
-    angles: Sequence[float]
-    frames: Sequence[Frame]
-    optimization_steps: tuple[int, ...] | None = None
-
-
-@dataclass(frozen=True)
-class MBISRecord:
-    """One geometry with rich MBIS supervision kept outside ``Frame.meta``."""
-
-    molecule_id: str
-    frame: Frame
-    atomic_volumes: np.ndarray
-    atomic_charge: np.ndarray
-    atomic_dipole: np.ndarray
-    atomic_quadrupole: np.ndarray
-    parameters: np.ndarray
-
+# The MBIS ``atoms`` columns whose names the format fixes, and therefore the
+# whole of what :attr:`THEMolMBIS.TARGET_SCHEMA` can honestly declare.
+_MBIS_ATOM_COLUMNS = (
+    "atomic_charge",
+    "atomic_volume",
+    *_DIPOLE_COLUMNS,
+    *_QUADRUPOLE_COLUMNS,
+)
 
 RecordT = TypeVar("RecordT")
 
@@ -179,11 +179,6 @@ def _open_h5(path: Path) -> Any:
 def _read_string(dataset: Any) -> str:
     value = dataset.asstr()[()]
     return value.decode("utf-8") if isinstance(value, bytes) else str(value)
-
-
-def _molecule_id(group: Any) -> str:
-    mapped_isomeric = _read_string(group["mapped_isomeric_smiles"])
-    return uuid.uuid5(uuid.UUID(int=0), mapped_isomeric).hex
 
 
 def _mapped_topology_frame(
@@ -319,7 +314,23 @@ def _frame_with_energy_forces(
     return frame
 
 
-def _read_hessian(handle: Any, key: str, source_id: str) -> HessianRecord:
+def _read_hessian(handle: Any, key: str, source_id: str) -> Frame:
+    """Read one equilibrium record as a Frame carrying a COO ``hessian`` block.
+
+    Args:
+        handle: Open HDF5 file of the shard.
+        key: The record's group key.
+        source_id: Provenance string written to ``frame.meta``.
+
+    Returns:
+        The topology/geometry :class:`~molpy.Frame` plus a ``hessian`` block of
+        ``row``/``col``/``value`` holding **all** ``(3N)**2`` entries in
+        row-major order — no triangle folding and no sparsity assumption, so a
+        consumer may ``value.reshape(3N, 3N)`` directly (D1).
+
+    Raises:
+        ValueError: The stored Hessian is not ``(3N, 3N)``.
+    """
     group = handle[key]
     frame = _mapped_topology_frame(group, key, source_id)
     hessian = np.asarray(group["hessian"], dtype=np.float64)
@@ -329,7 +340,114 @@ def _read_hessian(handle: Any, key: str, source_id: str) -> HessianRecord:
             f"THEMol Hessian for {key} has shape {hessian.shape}, expected "
             f"({expected}, {expected})."
         )
-    return HessianRecord(str(frame.meta["molecule_id"]), frame, hessian)
+    row, col = np.divmod(np.arange(expected * expected, dtype=np.int64), expected)
+    frame["hessian"] = Block(
+        {
+            "row": row.astype(np.int32),
+            "col": col.astype(np.int32),
+            "value": hessian.reshape(-1),
+        }
+    )
+    return frame
+
+
+def _per_atom(key: str, name: str, values: Any, n_atoms: int) -> np.ndarray:
+    """One MBIS array as float64, refusing a row count that is not the atom count.
+
+    Args:
+        key: The record's group key, for the message.
+        name: The source array's HDF5 name, so the message names the defect.
+        values: The HDF5 dataset or array to read.
+        n_atoms: Atoms the record's topology declares.
+
+    Returns:
+        The array as ``float64``, first axis unchanged.
+
+    Raises:
+        ValueError: The array's row count is not *n_atoms*. MBIS supervision is
+            per atom; broadcasting a shorter array would invent supervision for
+            the atoms it does not cover.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 0 or array.shape[0] != n_atoms:
+        raise ValueError(
+            f"THEMol {name} for {key} has shape {array.shape}, expected {n_atoms} rows — "
+            "one per atom. A per-atom target is never broadcast."
+        )
+    return array
+
+
+def _scalar_column(key: str, name: str, array: np.ndarray) -> np.ndarray:
+    """One ``(N,)`` atom column from a ``(N,)`` or ``(N, 1)`` source array."""
+    if array.ndim == 1:
+        return array
+    if array.ndim == 2 and array.shape[1] == 1:
+        return np.ascontiguousarray(array[:, 0])
+    raise ValueError(
+        f"THEMol {name} for {key} has shape {array.shape}; a per-atom scalar is (N,) or (N, 1)."
+    )
+
+
+def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
+    """Read one MBIS record as a Frame whose supervision is ``atoms`` columns.
+
+    Args:
+        handle: Open HDF5 file of the shard.
+        key: The record's group key.
+        source_id: Provenance string written to ``frame.meta``.
+
+    Returns:
+        The geometry :class:`~molpy.Frame` whose ``atoms`` block also carries
+        ``atomic_charge``, ``atomic_volume`` (from the source's plural
+        ``atomic_volumes``), :data:`_DIPOLE_COLUMNS`, :data:`_QUADRUPOLE_COLUMNS`
+        and one ``mbis_parameter_<slot>`` column per Slater parameter slot.
+
+    Raises:
+        ValueError: An array's row count is not the atom count, a dipole is not
+            ``(N, 3)``, a quadrupole is not ``(N, 3, 3)`` — the component names
+            are Cartesian index pairs, so any other shape has no names — or the
+            parameters are not a two-dimensional ``(N, arity)`` array.
+    """
+    group = handle[key]
+    frame = _mapped_topology_frame(group, key, source_id)
+    atoms = frame["atoms"]
+    n_atoms = int(np.asarray(atoms["number"]).shape[0])
+    info = group["mbis_info"]
+
+    charge = _per_atom(key, "atomic_charge", info["atomic_charge"], n_atoms)
+    volume = _per_atom(key, "atomic_volumes", info["atomic_volumes"], n_atoms)
+    dipole = _per_atom(key, "atomic_dipole", info["atomic_dipole"], n_atoms)
+    quadrupole = _per_atom(key, "atomic_quadrupole", info["atomic_quadrupole"], n_atoms)
+    parameters = _per_atom(key, "parameters", group["parameters"], n_atoms)
+
+    if dipole.shape != (n_atoms, 3):
+        raise ValueError(
+            f"THEMol atomic_dipole for {key} has shape {dipole.shape}, expected "
+            f"({n_atoms}, 3); its columns are named by Cartesian axis."
+        )
+    if quadrupole.shape != (n_atoms, 3, 3):
+        raise ValueError(
+            f"THEMol atomic_quadrupole for {key} has shape {quadrupole.shape}, expected "
+            f"({n_atoms}, 3, 3); its columns are named by Cartesian index pair."
+        )
+    if parameters.ndim != 2:
+        raise ValueError(
+            f"THEMol parameters for {key} have shape {parameters.shape}; the per-atom "
+            "Slater parameters are read as (N, arity) and their arity is the shard's."
+        )
+
+    columns: dict[str, np.ndarray] = {name: np.asarray(atoms[name]) for name in atoms.keys()}
+    columns["atomic_charge"] = _scalar_column(key, "atomic_charge", charge)
+    columns["atomic_volume"] = _scalar_column(key, "atomic_volumes", volume)
+    for index, name in enumerate(_DIPOLE_COLUMNS):
+        columns[name] = np.ascontiguousarray(dipole[:, index])
+    flat_quadrupole = quadrupole.reshape(n_atoms, len(_QUADRUPOLE_COLUMNS))
+    for index, name in enumerate(_QUADRUPOLE_COLUMNS):
+        columns[name] = np.ascontiguousarray(flat_quadrupole[:, index])
+    for slot in range(parameters.shape[1]):
+        columns[f"{_PARAMETER_PREFIX}{slot}"] = np.ascontiguousarray(parameters[:, slot])
+    frame["atoms"] = Block(columns)
+    return frame
 
 
 def _numbered_keys(group: Any, prefix: str) -> list[str]:
@@ -337,181 +455,8 @@ def _numbered_keys(group: Any, prefix: str) -> list[str]:
     return sorted(keys, key=lambda key: int(key.split(" ", 1)[1]))
 
 
-class _LazyFrameSequence(Sequence[Frame]):
-    """Process-safe lazy view over configurations in one HDF5 group."""
-
-    def __init__(
-        self,
-        path: str | Path,
-        *,
-        source_id: str,
-        record_id: str,
-        mode: str,
-        specs: tuple[tuple[str, int | None], ...],
-        torsion_atom_indices: tuple[int, int, int, int] | None = None,
-    ) -> None:
-        self.path = Path(path).expanduser().resolve()
-        self.source_id = source_id
-        self.record_id = record_id
-        self.mode = mode
-        self.specs = specs
-        self.torsion_atom_indices = torsion_atom_indices
-        self._pid: int | None = None
-        self._handle: Any | None = None
-        self._topology_frame: Frame | None = None
-
-    def __len__(self) -> int:
-        return len(self.specs)
-
-    @overload
-    def __getitem__(self, index: int) -> Frame: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> list[Frame]: ...
-
-    def __getitem__(self, index: int | slice) -> Frame | list[Frame]:
-        if isinstance(index, slice):
-            return [self[item] for item in range(*index.indices(len(self)))]
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
-
-        child_key, step_index = self.specs[index]
-        group = self._h5()[self.record_id]
-        child = group[child_key]
-        child_index = int(child_key.split(" ", 1)[1])
-        if self.mode == "hessian-relax":
-            coords = np.asarray(child["coords"], dtype=np.float64)
-            energy = float(np.asarray(child["energy"]).reshape(-1)[0])
-            forces = np.asarray(child["forces"], dtype=np.float64)
-            extra_meta: dict[str, int | float | str] = {"step_index": child_index}
-        elif self.mode == "torsion-scan":
-            coords = np.asarray(child["coords"], dtype=np.float64)
-            energy = float(np.asarray(child["energy"]).reshape(-1)[0])
-            forces = np.asarray(child["forces"], dtype=np.float64)
-            extra_meta = {
-                "scan_id": self.record_id,
-                "constraint_index": child_index,
-                "torsion_angle": self.angle(index),
-            }
-        elif self.mode == "torsion-relax" and step_index is not None:
-            coords = np.asarray(child["coords"][step_index], dtype=np.float64)
-            energy = float(np.asarray(child["energy"][step_index]).reshape(-1)[0])
-            forces = np.asarray(child["forces"][step_index], dtype=np.float64)
-            extra_meta = {
-                "scan_id": self.record_id,
-                "constraint_index": child_index,
-                "step_index": step_index,
-                "torsion_angle": self.angle(index),
-            }
-        else:  # pragma: no cover - construction validates modes/specs
-            raise RuntimeError(f"Invalid THEMol lazy-frame mode {self.mode!r}.")
-
-        return _frame_with_energy_forces(
-            group,
-            self.record_id,
-            self.source_id,
-            coords=coords,
-            energy=energy,
-            forces=forces,
-            extra_meta=extra_meta,
-            topology_frame=self._topology(group, coords),
-        )
-
-    def angle(self, index: int) -> float:
-        """Compute one torsion angle without materializing its Frame."""
-        if self.torsion_atom_indices is None:
-            raise TypeError("This trajectory has no torsion angle.")
-        child_key, step_index = self.specs[index]
-        child = self._h5()[self.record_id][child_key]
-        coords = np.asarray(
-            child["coords"] if step_index is None else child["coords"][step_index],
-            dtype=np.float64,
-        )
-        return _dihedral_angle(coords, self.torsion_atom_indices)
-
-    def close(self) -> None:
-        """Close this process's HDF5 handle and discard its topology cache."""
-        if self._handle is not None:
-            self._handle.close()
-        self._handle = None
-        self._pid = None
-        self._topology_frame = None
-
-    def __getstate__(self) -> dict[str, Any]:
-        state = dict(self.__dict__)
-        state["_handle"] = None
-        state["_pid"] = None
-        state["_topology_frame"] = None
-        return state
-
-    def _h5(self) -> Any:
-        pid = os.getpid()
-        if self._handle is None or self._pid != pid:
-            self.close()
-            self._handle = _open_h5(self.path)
-            self._pid = pid
-        return self._handle
-
-    def _topology(self, group: Any, coords: np.ndarray) -> Frame:
-        if self._topology_frame is None:
-            self._topology_frame = _mapped_topology_frame(
-                group,
-                self.record_id,
-                self.source_id,
-                coords_override=coords,
-            )
-        return self._topology_frame
-
-    def __del__(self) -> None:
-        try:
-            self.close()
-        except Exception:
-            pass
-
-
-class _LazyAngles(Sequence[float]):
-    """Angle view sharing the corresponding lazy frame sequence."""
-
-    def __init__(self, frames: _LazyFrameSequence) -> None:
-        self.frames = frames
-
-    def __len__(self) -> int:
-        return len(self.frames)
-
-    @overload
-    def __getitem__(self, index: int) -> float: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> list[float]: ...
-
-    def __getitem__(self, index: int | slice) -> float | list[float]:
-        if isinstance(index, slice):
-            return [self.frames.angle(item) for item in range(*index.indices(len(self)))]
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
-        return self.frames.angle(index)
-
-
-def _read_hessian_relax(handle: Any, key: str, source_id: str) -> EnergyForceTrajectory:
-    group = handle[key]
-    specs = tuple((step_key, None) for step_key in _numbered_keys(group, "step "))
-    if not specs:
-        raise ValueError(f"THEMol Hessian relaxation {key} contains no steps.")
-    frames = _LazyFrameSequence(
-        handle.filename,
-        source_id=source_id,
-        record_id=key,
-        mode="hessian-relax",
-        specs=specs,
-    )
-    return EnergyForceTrajectory(_molecule_id(group), frames)
-
-
 def _dihedral_angle(coords: np.ndarray, indices: tuple[int, int, int, int]) -> float:
+    """The dihedral about *indices*, in degrees, from one geometry."""
     p0, p1, p2, p3 = (coords[index] for index in indices)
     b0 = -(p1 - p0)
     b1 = p2 - p1
@@ -525,83 +470,172 @@ def _dihedral_angle(coords: np.ndarray, indices: tuple[int, int, int, int]) -> f
     return float(np.degrees(np.arctan2(np.dot(np.cross(b1, v), w), np.dot(v, w))))
 
 
-def _read_torsion(handle: Any, key: str, source_id: str) -> TorsionProfile:
-    group = handle[key]
-    indices = tuple(int(value) for value in np.asarray(group["torsion_atom_indices"]))
+def _torsion_atom_indices(group: Any, key: str) -> tuple[int, int, int, int]:
+    """The four scanned atom indices of a torsion record."""
+    indices = tuple(int(value) for value in np.asarray(group["torsion_atom_indices"]).reshape(-1))
     if len(indices) != 4:
         raise ValueError(f"THEMol torsion {key} does not contain four atom indices.")
-    typed_indices = (indices[0], indices[1], indices[2], indices[3])
-    specs = tuple((constraint_key, None) for constraint_key in _numbered_keys(group, "constraint "))
-    if not specs:
-        raise ValueError(f"THEMol torsion {key} contains no constraints.")
-    frames = _LazyFrameSequence(
-        handle.filename,
-        source_id=source_id,
-        record_id=key,
-        mode="torsion-scan",
-        specs=specs,
-        torsion_atom_indices=typed_indices,
-    )
-    return TorsionProfile(
-        molecule_id=_molecule_id(group),
-        scan_id=key,
-        torsion_atom_indices=typed_indices,
-        angles=_LazyAngles(frames),
-        frames=frames,
+    return (indices[0], indices[1], indices[2], indices[3])
+
+
+def _scan_block(indices: tuple[int, int, int, int]) -> Block:
+    """The scanned dihedral as the 1-row block ``frame.meta`` cannot hold."""
+    return Block(
+        {
+            name: np.asarray([index], dtype=np.int32)
+            for name, index in zip(_SCAN_COLUMNS, indices, strict=True)
+        }
     )
 
 
-def _read_torsion_relax(handle: Any, key: str, source_id: str) -> TorsionProfile:
+def _read_hessian_relax(handle: Any, key: str, source_id: str) -> Trajectory:
+    """Read one relaxation as a Trajectory ordered by its per-frame step index.
+
+    Args:
+        handle: Open HDF5 file of the shard.
+        key: The record's group key.
+        source_id: Provenance string written to every frame's ``meta``.
+
+    Returns:
+        A :class:`~molpy.Trajectory` of one frame per optimization step, each
+        carrying ``energy`` and ``step_index`` in its ``meta`` and its forces as
+        ``fx``/``fy``/``fz`` atom columns.
+
+    Raises:
+        ValueError: The record has no steps, or a step's geometry disagrees with
+            the topology (materializing eagerly means this fails at read, not at
+            use).
+    """
     group = handle[key]
-    indices = tuple(int(value) for value in np.asarray(group["torsion_atom_indices"]))
-    if len(indices) != 4:
-        raise ValueError(f"THEMol torsion relaxation {key} lacks four atom indices.")
-    typed_indices = (indices[0], indices[1], indices[2], indices[3])
-    specs: list[tuple[str, int | None]] = []
-    optimization_steps = []
+    step_keys = _numbered_keys(group, "step ")
+    if not step_keys:
+        raise ValueError(f"THEMol Hessian relaxation {key} contains no steps.")
+    topology: Frame | None = None
+    frames: list[Frame] = []
+    for step_key in step_keys:
+        child = group[step_key]
+        coords = np.asarray(child["coords"], dtype=np.float64)
+        if topology is None:
+            topology = _mapped_topology_frame(group, key, source_id, coords_override=coords)
+        frames.append(
+            _frame_with_energy_forces(
+                group,
+                key,
+                source_id,
+                coords=coords,
+                energy=float(np.asarray(child["energy"]).reshape(-1)[0]),
+                forces=np.asarray(child["forces"], dtype=np.float64),
+                extra_meta={"step_index": int(step_key.split(" ", 1)[1])},
+                topology_frame=topology,
+            )
+        )
+    return Trajectory(frames)
+
+
+def _read_torsion(handle: Any, key: str, source_id: str) -> Trajectory:
+    """Read one complete constrained torsion profile as a Trajectory.
+
+    Args:
+        handle: Open HDF5 file of the shard.
+        key: The scan's group key, which is also its ``scan_id``.
+        source_id: Provenance string written to every frame's ``meta``.
+
+    Returns:
+        A :class:`~molpy.Trajectory` of one frame per constraint, each carrying
+        ``energy``, ``torsion_angle``, ``scan_id`` and ``constraint_index`` in
+        its ``meta`` and the scanned dihedral in a 1-row ``scan`` block.
+
+    Raises:
+        ValueError: The record does not name four atom indices, contains no
+            constraints, or has a geometry whose central bond is zero-length —
+            an undefined dihedral is refused, never reported as some default.
+    """
+    group = handle[key]
+    indices = _torsion_atom_indices(group, key)
+    constraint_keys = _numbered_keys(group, "constraint ")
+    if not constraint_keys:
+        raise ValueError(f"THEMol torsion {key} contains no constraints.")
+    topology: Frame | None = None
+    frames: list[Frame] = []
+    for constraint_key in constraint_keys:
+        child = group[constraint_key]
+        coords = np.asarray(child["coords"], dtype=np.float64)
+        if topology is None:
+            topology = _mapped_topology_frame(group, key, source_id, coords_override=coords)
+        frame = _frame_with_energy_forces(
+            group,
+            key,
+            source_id,
+            coords=coords,
+            energy=float(np.asarray(child["energy"]).reshape(-1)[0]),
+            forces=np.asarray(child["forces"], dtype=np.float64),
+            extra_meta={
+                "scan_id": key,
+                "constraint_index": int(constraint_key.split(" ", 1)[1]),
+                "torsion_angle": _dihedral_angle(coords, indices),
+            },
+            topology_frame=topology,
+        )
+        frame["scan"] = _scan_block(indices)
+        frames.append(frame)
+    return Trajectory(frames)
+
+
+def _read_torsion_relax(handle: Any, key: str, source_id: str) -> Trajectory:
+    """Read one torsion-constrained optimization as a Trajectory.
+
+    Args:
+        handle: Open HDF5 file of the shard.
+        key: The scan's group key, which is also its ``scan_id``.
+        source_id: Provenance string written to every frame's ``meta``.
+
+    Returns:
+        A :class:`~molpy.Trajectory` of one frame per (constraint, step), in
+        that order, each carrying ``energy``, ``torsion_angle``, ``scan_id``,
+        ``constraint_index`` and ``step_index`` in its ``meta`` and the scanned
+        dihedral in a 1-row ``scan`` block.
+
+    Raises:
+        ValueError: The record does not name four atom indices, a constraint's
+            coordinate / energy / force arrays disagree on their step count, the
+            record contains no steps, or a geometry's central bond is zero.
+    """
+    group = handle[key]
+    indices = _torsion_atom_indices(group, key)
+    topology: Frame | None = None
+    frames: list[Frame] = []
     for constraint_key in _numbered_keys(group, "constraint "):
-        constraint = group[constraint_key]
-        n_coords = int(constraint["coords"].shape[0])
-        n_energies = int(constraint["energy"].shape[0])
-        n_forces = int(constraint["forces"].shape[0])
+        child = group[constraint_key]
+        n_coords = int(child["coords"].shape[0])
+        n_energies = int(child["energy"].shape[0])
+        n_forces = int(child["forces"].shape[0])
         if not (n_coords == n_energies == n_forces):
             raise ValueError(f"THEMol torsion relaxation arrays disagree for {key}.")
+        constraint_index = int(constraint_key.split(" ", 1)[1])
         for step_index in range(n_coords):
-            optimization_steps.append(step_index)
-            specs.append((constraint_key, step_index))
-    if not specs:
+            coords = np.asarray(child["coords"][step_index], dtype=np.float64)
+            if topology is None:
+                topology = _mapped_topology_frame(group, key, source_id, coords_override=coords)
+            frame = _frame_with_energy_forces(
+                group,
+                key,
+                source_id,
+                coords=coords,
+                energy=float(np.asarray(child["energy"][step_index]).reshape(-1)[0]),
+                forces=np.asarray(child["forces"][step_index], dtype=np.float64),
+                extra_meta={
+                    "scan_id": key,
+                    "constraint_index": constraint_index,
+                    "step_index": step_index,
+                    "torsion_angle": _dihedral_angle(coords, indices),
+                },
+                topology_frame=topology,
+            )
+            frame["scan"] = _scan_block(indices)
+            frames.append(frame)
+    if not frames:
         raise ValueError(f"THEMol torsion relaxation {key} contains no steps.")
-    frames = _LazyFrameSequence(
-        handle.filename,
-        source_id=source_id,
-        record_id=key,
-        mode="torsion-relax",
-        specs=tuple(specs),
-        torsion_atom_indices=typed_indices,
-    )
-    return TorsionProfile(
-        molecule_id=_molecule_id(group),
-        scan_id=key,
-        torsion_atom_indices=typed_indices,
-        angles=_LazyAngles(frames),
-        frames=frames,
-        optimization_steps=tuple(optimization_steps),
-    )
-
-
-def _read_mbis(handle: Any, key: str, source_id: str) -> MBISRecord:
-    group = handle[key]
-    frame = _mapped_topology_frame(group, key, source_id)
-    info = group["mbis_info"]
-    return MBISRecord(
-        molecule_id=str(frame.meta["molecule_id"]),
-        frame=frame,
-        atomic_volumes=np.asarray(info["atomic_volumes"], dtype=np.float64),
-        atomic_charge=np.asarray(info["atomic_charge"], dtype=np.float64),
-        atomic_dipole=np.asarray(info["atomic_dipole"], dtype=np.float64),
-        atomic_quadrupole=np.asarray(info["atomic_quadrupole"], dtype=np.float64),
-        parameters=np.asarray(group["parameters"], dtype=np.float64),
-    )
+    return Trajectory(frames)
 
 
 class _THEMolDefinition(Generic[RecordT]):
@@ -648,7 +682,17 @@ class _THEMolDefinition(Generic[RecordT]):
     citation="10.48550/arXiv.2605.14973",
     tags=("equilibrium", "hessian", "class-i"),
 )
-class THEMolHessian(_THEMolDefinition[HessianRecord]):
+class THEMolHessian(_THEMolDefinition[Frame]):
+    """THEMol equilibrium geometries; one record is one :class:`~molpy.Frame`.
+
+    The Cartesian Hessian is the frame's ``hessian`` block —
+    ``row``/``col``/``value``, all ``(3N)**2`` entries in row-major order — not
+    a ``frame.meta`` scalar. ``TARGET_SCHEMA`` still names it ``graph_level``
+    because :class:`~molhub.dataset.protocol.TargetSchema` has only the two
+    layout sets; the ``blocks`` declaration that would say "block, not meta" is
+    ``hf-facade-03-builder-info``'s.
+    """
+
     COORDINATE = "dataset:themol/hessian@1"
     TARGET_SCHEMA = TargetSchema(graph_level=frozenset({"hessian"}), atom_level=frozenset())
     _READER = staticmethod(_read_hessian)
@@ -664,7 +708,13 @@ class THEMolHessian(_THEMolDefinition[HessianRecord]):
     citation="10.48550/arXiv.2605.14973",
     tags=("off-equilibrium", "energy", "forces", "class-i"),
 )
-class THEMolHessianRelax(_THEMolDefinition[EnergyForceTrajectory]):
+class THEMolHessianRelax(_THEMolDefinition[Trajectory]):
+    """THEMol relaxations; one record is one :class:`~molpy.Trajectory`.
+
+    Per-frame ``meta`` carries ``energy`` and ``step_index`` — the latter is
+    where the deleted ``optimization_steps`` tuple went.
+    """
+
     COORDINATE = "dataset:themol/hessian-relax@1"
     TARGET_SCHEMA = TargetSchema(
         graph_level=frozenset({"energy"}), atom_level=frozenset({"forces"})
@@ -682,7 +732,14 @@ class THEMolHessianRelax(_THEMolDefinition[EnergyForceTrajectory]):
     citation="10.48550/arXiv.2605.14973",
     tags=("torsion", "profile", "class-i"),
 )
-class THEMolTorsionScan(_THEMolDefinition[TorsionProfile]):
+class THEMolTorsionScan(_THEMolDefinition[Trajectory]):
+    """THEMol torsion profiles; one whole scan is one :class:`~molpy.Trajectory`.
+
+    Per-frame ``meta`` carries ``energy``, ``torsion_angle``, ``scan_id`` and
+    ``constraint_index``; the scanned dihedral is the 1-row ``scan`` block
+    (``atomi``/``atomj``/``atomk``/``atoml``), identical on every frame.
+    """
+
     COORDINATE = "dataset:themol/torsion-scan@1"
     TARGET_SCHEMA = TargetSchema(
         graph_level=frozenset({"energy", "torsion_angle"}),
@@ -701,7 +758,13 @@ class THEMolTorsionScan(_THEMolDefinition[TorsionProfile]):
     citation="10.48550/arXiv.2605.14973",
     tags=("off-equilibrium", "torsion", "energy", "forces", "class-i"),
 )
-class THEMolTorsionRelax(_THEMolDefinition[TorsionProfile]):
+class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
+    """THEMol torsion-constrained optimizations, one scan per record.
+
+    Same shape as :class:`THEMolTorsionScan`, plus a per-frame
+    ``meta["step_index"]``; frames run constraint-major, step-minor.
+    """
+
     COORDINATE = "dataset:themol/torsion-relax@1"
     TARGET_SCHEMA = THEMolTorsionScan.TARGET_SCHEMA
     _READER = staticmethod(_read_torsion_relax)
@@ -717,18 +780,29 @@ class THEMolTorsionRelax(_THEMolDefinition[TorsionProfile]):
     citation="10.48550/arXiv.2605.14973",
     tags=("electrostatics", "mbis", "class-i"),
 )
-class THEMolMBIS(_THEMolDefinition[MBISRecord]):
+class THEMolMBIS(_THEMolDefinition[Frame]):
+    """THEMol MBIS supervision; one record is one :class:`~molpy.Frame`.
+
+    Every target is an ``atoms`` column, so ``TARGET_SCHEMA.atom_level`` names
+    the columns a reader will actually find on the frame:
+    :data:`_MBIS_ATOM_COLUMNS` — ``atomic_charge``, ``atomic_volume``, the three
+    ``dipole_<axis>`` components and the nine ``quadrupole_<axis><axis>``
+    components. The grouped names it declared before dissolution
+    (``atomic_dipole`` / ``atomic_quadrupole`` / ``mbis_parameters``) match no
+    column of any sample, so they are gone.
+
+    **The Slater-parameter columns are deliberately not declared.** They are
+    ``mbis_parameter_<slot>`` for ``slot < arity``, and the arity is read off
+    the shard's ``(N, arity)`` array at load time (D1: "the parameter arity is
+    read from the source array shapes"). A class attribute is built without IO,
+    so declaring them would mean inventing an arity the format does not fix —
+    which is the one thing this schema exists not to do. Their existence is
+    documented here and pinned by ``tests/test_dataset/test_themol.py``.
+    """
+
     COORDINATE = "dataset:themol/mbis@1"
     TARGET_SCHEMA = TargetSchema(
         graph_level=frozenset(),
-        atom_level=frozenset(
-            {
-                "atomic_charge",
-                "atomic_dipole",
-                "atomic_quadrupole",
-                "atomic_volume",
-                "mbis_parameters",
-            }
-        ),
+        atom_level=frozenset(_MBIS_ATOM_COLUMNS),
     )
     _READER = staticmethod(_read_mbis)

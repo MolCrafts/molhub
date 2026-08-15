@@ -184,8 +184,14 @@ For non-trivial work, prefer:
   编目必须先下载整个制品。
 - **`Source` 驱动接口** — 第三方据此扩展；MolCrafts 自建 source 亦不得特例化。
 - **`molhub.dataset` 的公开协议** — `Dataset`（`__len__` / `__getitem__`）与
-  `IterableDataset`（`__iter__`）。样本就是 `molpy.Frame`；图级字段读
-  `frame.meta[key]`。不另造 Targets / MolecularFrame / MoleculeSplit。
+  `IterableDataset`（`__iter__`）。样本就是 `molpy.Frame` 或 `molpy.Trajectory`：
+  单个构型是 `Frame`（逐原子监督量走 `atoms` 列，矩阵走具名 COO block，索引元组走
+  valence 式 block），不可拆分的多帧采样单元（弛豫轨迹、完整扭转扫描）是
+  `Trajectory`，标量一律读各帧自己的 `frame.meta[key]`。不另造 Targets /
+  MolecularFrame / MoleculeSplit，也不在 `Frame` 之上套记录包装类。
+  由 2026-08-15 operator note（`.claude/notes/notes.md`，
+  `mol:note:topic:hf-style-api`「Records ARE molpy objects」）从「样本就是
+  `molpy.Frame`」放宽而来，实现见 spec `hf-facade-02-frame-records`（D10）。
 
 <!-- mol:bootstrap:managed end -->
 

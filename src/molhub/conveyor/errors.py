@@ -40,12 +40,17 @@ class PrepareError(ConveyorError):
 
 
 class UnsupportedRecordError(PrepareError):
-    """A record type this encoder has no columns for.
+    """A record this encoder has no columns for.
 
-    Raised for ``MBISRecord`` — whose atom-level electrostatics targets need
-    column routes ``molix.block/1`` does not define — and for anything that is
-    not a THEMol record at all. Encoding it "as far as it goes" would produce a
-    unit that silently lost its targets.
+    Raised at *construction* for ``THEMolUnitEncoder(task="mbis")`` — whose
+    atom-level electrostatics targets need column routes ``molix.block/1`` does
+    not define — and at ``encode`` for anything that is neither a
+    :class:`molpy.Frame` nor a :class:`molpy.Trajectory`. Encoding either "as far
+    as it goes" would produce a unit that silently lost its targets.
+
+    The MBIS refusal is keyed on the task rather than on the record because a
+    record is a molpy object: after ``hf-facade-02-frame-records`` an MBIS frame
+    and a hessian frame are the same type, and one shard is one task.
     """
 
 

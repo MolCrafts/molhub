@@ -1,11 +1,20 @@
 """THEMol records to numpy sampling units — one record in, one whole unit out.
 
-This is the semantic half of the prepare stage: it maps the record types
-:mod:`molhub.dataset.themol` already parses out of HDF5 onto the column names
-``molix.block/1`` routes, and does nothing else. It opens no file, holds no
-writer, decides no split, and imports neither torch nor molix — so a shard can
-be encoded, inspected and unit-tested in an environment where molnex is not
-installed at all.
+This is the semantic half of the prepare stage: it maps the records
+:mod:`molhub.dataset.themol` already parses out of HDF5 — a :class:`molpy.Frame`
+for one geometry, a :class:`molpy.Trajectory` for one multi-frame sampling unit
+— onto the column names ``molix.block/1`` routes, and does nothing else. It
+opens no file, holds no writer, decides no split, and imports neither torch nor
+molix — so a shard can be encoded, inspected and unit-tested in an environment
+where molnex is not installed at all.
+
+**A record is recognised by shape, not by name.**
+``tests/test_conveyor/test_layering.py`` allows this module stdlib, ``molhub``
+and ``numpy`` and nothing else — ``molpy`` is on its forbidden list at *any*
+depth — so :meth:`THEMolUnitEncoder.encode` cannot name ``Frame`` or
+``Trajectory`` in an ``isinstance`` check. It branches on the two attributes
+those types differ by instead: a frame has ``meta``, a trajectory has
+``frames``. Anything with neither is refused by name.
 
 **Column names are molnex's route names, not molhub's.** They are rows of the
 closed ``_COLUMN_ROUTES`` registry in ``molnex:src/molix/store/block.py``, which
@@ -23,9 +32,10 @@ transformation is the dtype narrowing the store refuses to do silently
 ``<i2``); no conversion factor appears anywhere in this module, and the caller
 puts ``THEMOL_UNITS`` itself into ``provenance["units"]``.
 
-**Named gap — the Cartesian Hessian is not encoded.** A ``HessianRecord``
-yields a one-frame equilibrium-geometry unit and its ``(3N, 3N)`` Cartesian
-Hessian is deliberately dropped, for two independent reasons:
+**Named gap — the Cartesian Hessian is not encoded.** A hessian record yields a
+one-frame equilibrium-geometry unit, and the ``hessian`` block its frame carries
+— all ``(3N)**2`` COO entries — is deliberately dropped, for two independent
+reasons:
 
 1. ``molix.block/1`` has no routable column space for a per-molecule ragged 2-D
    payload. Its only Hessian column is ``hessian_diag``, a *projected internal*
@@ -41,9 +51,9 @@ a dedicated Hessian-target spec if the projection lands first. Until then
 ``TestTHEMolUnitEncoder`` pins the hessian unit's column set, so the omission
 cannot decay from a decision into an accident.
 
-Also not encoded: ``TorsionProfile.optimization_steps``. It labels which
-optimizer iteration a torsion-relax frame came from, which is provenance about
-the *generation* of a frame rather than a supervision target, and
+Also not encoded: a frame's ``meta["step_index"]``. It labels which optimizer
+iteration a torsion-relax or relaxation frame came from, which is provenance
+about the *generation* of a frame rather than a supervision target, and
 ``molix.block/1`` has no frame-space route for it.
 
 Reference:
@@ -62,12 +72,6 @@ from typing import Any
 import numpy as np
 
 from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
-from molhub.dataset.themol import (
-    EnergyForceTrajectory,
-    HessianRecord,
-    MBISRecord,
-    TorsionProfile,
-)
 
 __all__ = ["RawUnit", "THEMolUnitEncoder"]
 
@@ -88,6 +92,18 @@ _BOND_ORDER_COLUMNS = ("bond_number", "bond_type")
 
 # The three columns a bond family declares — together, always, even when empty.
 _BOND_COLUMNS = ("bond_atomi", "bond_atomj", "bond_type")
+
+# The 1-row block a scanned dihedral lives in, and its four columns, exactly as
+# `molhub.dataset.themol` writes them. A record carrying this block on its first
+# frame is a torsion scan; one without it is not, whatever its task is called.
+_SCAN_BLOCK = "scan"
+_SCAN_COLUMNS = ("atomi", "atomj", "atomk", "atoml")
+
+# The one subset whose targets have no column routes at all. It is refused where
+# the task is named — at construction — because after the record dataclasses were
+# dissolved an MBIS frame and a hessian frame are the same type, so a per-record
+# refusal would be both later (a writer is already open) and weaker.
+_UNROUTABLE_TASK = "mbis"
 
 
 @dataclass(frozen=True, eq=False)
@@ -161,6 +177,9 @@ class THEMolUnitEncoder:
     Raises:
         ValueError: *task* is empty; molnex stores it as a dictionary code and
             refuses an empty label.
+        UnsupportedRecordError: *task* is ``"mbis"``, whose atom-level
+            electrostatics targets need column routes ``molix.block/1`` does not
+            define.
     """
 
     def __init__(self, *, task: str) -> None:
@@ -168,6 +187,16 @@ class THEMolUnitEncoder:
             raise ValueError(
                 "THEMolUnitEncoder(task=...) needs a non-empty subset label; it is stored "
                 "in every unit's task dictionary code and one shard carries exactly one."
+            )
+        if task == _UNROUTABLE_TASK:
+            raise UnsupportedRecordError(
+                "THEMol 'mbis' has no encoder: its atom-level electrostatics targets "
+                "(atomic_charge, atomic_volume, the dipole and quadrupole components and "
+                "the per-atom Slater parameters) need column routes molix.block/1 does not "
+                "define. Encoding the geometry alone would produce a unit that silently lost "
+                "every target it exists for. The refusal is here, at construction, because an "
+                "MBIS frame and a hessian frame are the same type: one shard is one task, and "
+                "the task is named here."
             )
         self._task = task
 
@@ -203,58 +232,53 @@ class THEMolUnitEncoder:
         """Encode one whole THEMol record as one whole :class:`RawUnit`.
 
         Args:
-            record: A ``HessianRecord`` (one equilibrium geometry),
-                an ``EnergyForceTrajectory`` (one molecule's whole relaxation)
-                or a ``TorsionProfile`` (one whole scan, angles and frames
-                together) — that is, exactly what
-                ``THEMolShardDataset.__getitem__`` returns.
+            record: A :class:`molpy.Frame` (one equilibrium geometry) or a
+                :class:`molpy.Trajectory` (one molecule's whole relaxation, or
+                one whole torsion scan) — that is, exactly what
+                ``THEMolShardDataset.__getitem__`` returns. The two are told
+                apart by ``meta`` versus ``frames``; see the module docstring.
 
         Returns:
             The unit, with molecule-space and frame-space columns named as
             ``molix.block/1`` routes them.
 
         Raises:
-            UnsupportedRecordError: *record* is an ``MBISRecord`` or not a
-                THEMol record at all.
+            UnsupportedRecordError: *record* is neither a frame nor a sequence
+                of frames.
             IncompleteRecordError: *record* carries bonds without an integer
                 order, frames that disagree with its topology, a frame missing a
                 target its siblings declare, or no ``mapped_isomeric_smiles``.
         """
-        if isinstance(record, HessianRecord):
-            return self._unit(record.molecule_id, (record.frame,))
-        if isinstance(record, EnergyForceTrajectory):
-            return self._unit(record.molecule_id, record.frames)
-        if isinstance(record, TorsionProfile):
-            return self._unit(record.scan_id, record.frames, torsion=record.torsion_atom_indices)
-        if isinstance(record, MBISRecord):
-            raise UnsupportedRecordError(
-                f"MBIS record {record.molecule_id!r} has no encoder: its atom-level "
-                "electrostatics targets (charge, dipole, quadrupole, volumes, parameters) "
-                "need column routes molix.block/1 does not define. Encoding the geometry "
-                "alone would produce a unit that silently lost every target it exists for."
-            )
+        if hasattr(record, "meta"):
+            return self._unit((record,))
+        frames = getattr(record, "frames", None)
+        if isinstance(frames, Sequence):
+            return self._unit(tuple(frames))
         raise UnsupportedRecordError(
-            f"{type(record).__name__} is not a THEMol sampling unit; encode() takes a "
-            "HessianRecord, an EnergyForceTrajectory or a TorsionProfile, which is what "
-            "THEMolShardDataset.__getitem__ returns."
+            f"{type(record).__name__} is not a THEMol sampling unit; encode() takes a molpy "
+            "Frame (one geometry) or a molpy Trajectory (one relaxation or scan), which is "
+            "what THEMolShardDataset.__getitem__ returns."
         )
 
     # -- one record --------------------------------------------------------
 
-    def _unit(
-        self,
-        key: str,
-        frames: Sequence[Any],
-        *,
-        torsion: tuple[int, int, int, int] | None = None,
-    ) -> RawUnit:
-        """Encode *key*'s frames into one unit, reading each frame once.
+    def _unit(self, frames: Sequence[Any]) -> RawUnit:
+        """Encode one record's frames into one unit, reading each frame once.
 
-        The first frame decides the schema — topology, molecular identity, and
-        whether this unit carries forces and energies — and every later frame
-        must agree with it. Frames are consumed in order and never held
-        together, so a lazy HDF5-backed sequence materialises one at a time.
+        The first frame decides everything about the unit — its key, its
+        topology, its molecular identity, whether it carries forces and
+        energies, and whether it is a torsion scan (the ``scan`` block) — and
+        every later frame must agree with it. Frames are consumed in order and
+        never held together.
         """
+        if not frames:
+            raise IncompleteRecordError(
+                "a THEMol record carries no frames; a sampling unit is one topology plus at "
+                "least one frame of it, and molnex refuses a unit without one."
+            )
+        torsion = self._scanned_dihedral(frames[0])
+        key = self._key(frames[0], scanned=torsion is not None)
+
         topology: dict[str, np.ndarray] = {}
         identity = ""
         n_atoms = 0
@@ -291,12 +315,6 @@ class THEMolUnitEncoder:
             if torsion is not None:
                 angles.append(self._target(key, targets, "torsion_angle", index))
 
-        if not positions:
-            raise IncompleteRecordError(
-                f"THEMol record {key!r} carries no frames; a sampling unit is one topology "
-                "plus at least one frame of it, and molnex refuses a unit without one."
-            )
-
         frame_columns: dict[str, np.ndarray] = {_REQUIRED_FRAME: _stack(positions)}
         if with_forces:
             frame_columns["forces"] = _stack(forces)
@@ -315,6 +333,52 @@ class THEMolUnitEncoder:
         )
 
     # -- one frame ---------------------------------------------------------
+
+    @staticmethod
+    def _scanned_dihedral(frame: Any) -> tuple[int, int, int, int] | None:
+        """The four scanned atoms of *frame*, or ``None`` when it is not a scan.
+
+        The ``scan`` block, not the task label, is what makes a unit a scan, and
+        it is read off the record's **first** frame only: every frame of a THEMol
+        scan carries it identically (pinned by
+        ``tests/test_dataset/test_themol.py``), and the first frame is what
+        freezes the rest of the unit's schema anyway.
+        """
+        if _SCAN_BLOCK not in frame:
+            return None
+        block = frame[_SCAN_BLOCK]
+        missing = [name for name in _SCAN_COLUMNS if name not in block]
+        if missing:
+            raise IncompleteRecordError(
+                f"THEMol record carries a {_SCAN_BLOCK!r} block without {missing}; a scanned "
+                "dihedral is four atoms."
+            )
+        columns = [np.asarray(block[name]).reshape(-1) for name in _SCAN_COLUMNS]
+        if any(column.shape != (1,) for column in columns):
+            raise IncompleteRecordError(
+                f"THEMol record carries a {_SCAN_BLOCK!r} block of "
+                f"{[int(column.shape[0]) for column in columns]} rows; one scan is one "
+                "dihedral, so the block is one row."
+            )
+        return (int(columns[0][0]), int(columns[1][0]), int(columns[2][0]), int(columns[3][0]))
+
+    @staticmethod
+    def _key(frame: Any, *, scanned: bool) -> str:
+        """This unit's identity: a scan is keyed by its scan, a molecule by itself.
+
+        A sealed block records the key, and the two answer different questions —
+        which is why a scan's key is its ``scan_id`` while everything else keys
+        on ``molecule_id``. Neither is the *molecular* identity a split is routed
+        by; that is :meth:`identity`.
+        """
+        name = "scan_id" if scanned else "molecule_id"
+        value = frame.meta.get(name)
+        if not isinstance(value, str) or not value:
+            raise IncompleteRecordError(
+                f"THEMol record carries no {name!r}, so its unit has no key; a sealed block "
+                "records one key per unit and molnex refuses an empty one."
+            )
+        return value
 
     def _topology(self, key: str, frame: Any) -> dict[str, np.ndarray]:
         """Molecule-space columns of *frame*: atomic numbers and the bond block."""
