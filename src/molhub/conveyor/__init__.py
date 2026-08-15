@@ -38,8 +38,12 @@ rather than letting an unverified block advance::
     roster.total_bytes()                    # what this role's REMOTE tier costs
     ShardTransfer(hub, ledger).transfer(roster.blocks()[0])   # verified local path
 
-:class:`~molhub.conveyor.splits.SplitTable` is the split assignment of record,
-loaded only once the derivation's own ``metadata.json`` sha256 agrees.
+:class:`~molhub.conveyor.splits._SplitTable` is the split assignment of record,
+loaded only once the derivation's own ``metadata.json`` sha256 agrees. It is
+package-internal (``hf-facade-03-builder-info`` D9): its two callers are the
+prepare stage below and :class:`~molhub.loader.builder.DatasetBuilder`, both
+inside this distribution, so it is imported by its private name rather than
+exported for anyone to construct.
 
 The prepare stage is the CPU half that turns those verified bytes into training
 blocks: :class:`~molhub.conveyor.encoder.THEMolUnitEncoder` maps one THEMol
@@ -48,7 +52,7 @@ and :class:`~molhub.conveyor.prepare.PrepareJob` routes each unit to its
 molecule's split and feeds it — whole, never in pieces — to a block writer,
 returning the evidence a ``READY`` record needs::
 
-    table = SplitTable.from_identity(splits_root)      # provenance-verified
+    table = _SplitTable.from_identity(splits_root)     # provenance-verified
     prepared = PrepareJob(
         shard,
         encoder=THEMolUnitEncoder(task="torsion-scan"),
@@ -156,7 +160,6 @@ from molhub.conveyor.roster import (
 from molhub.conveyor.splits import (
     SplitProvenance,
     SplitProvenanceMismatch,
-    SplitTable,
 )
 from molhub.conveyor.tier import (
     BlockLedger,
@@ -200,7 +203,6 @@ __all__ = [
     "UnsizedBlock",
     "UnverifiableBlock",
     "RoleSourceMismatch",
-    "SplitTable",
     "SplitProvenance",
     "SplitProvenanceMismatch",
     "TransferLedger",

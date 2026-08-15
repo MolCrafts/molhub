@@ -56,6 +56,11 @@ THEMOL_UNITS = {
     "quadrupole": "e*angstrom^2",
     "volume": "angstrom^3",
     "inverse_sigma": "angstrom^-1",
+    # The scanned dihedral a torsion record reports per frame. Added by
+    # `hf-facade-03-builder-info` so the `@dataset` unit declarations below can
+    # reference this dict for every name they declare, rather than restating a
+    # unit literal beside it.
+    "torsion_angle": "degree",
 }
 
 # The scanned dihedral's four atoms. ``frame.meta`` rejects a len-4 sequence, so
@@ -91,6 +96,27 @@ _MBIS_ATOM_COLUMNS = (
     *_QUADRUPOLE_COLUMNS,
 )
 
+# What each of those columns is measured in, keyed by the column name a reader
+# actually finds on the frame and valued out of :data:`THEMOL_UNITS`. Derived
+# from the column tuples above rather than written out, so a component name and
+# its unit cannot drift apart, and quoting no literal here keeps THEMOL_UNITS
+# the single place a THEMol unit string is spelled.
+# The `mbis_parameter_<slot>` columns are deliberately absent: their arity is
+# the shard's, read at load time (see :class:`THEMolMBIS`), so a static
+# declaration would have to invent one.
+_MBIS_UNITS: dict[str, str] = {
+    "atomic_charge": THEMOL_UNITS["charge"],
+    "atomic_volume": THEMOL_UNITS["volume"],
+    **{name: THEMOL_UNITS["dipole"] for name in _DIPOLE_COLUMNS},
+    **{name: THEMOL_UNITS["quadrupole"] for name in _QUADRUPOLE_COLUMNS},
+}
+
+# The energy/force pair every off-equilibrium THEMol adapter declares.
+_ENERGY_FORCE_UNITS: dict[str, str] = {
+    "energy": THEMOL_UNITS["energy"],
+    "forces": THEMOL_UNITS["forces"],
+}
+
 RecordT = TypeVar("RecordT")
 
 
@@ -121,6 +147,19 @@ class THEMolShardDataset(Generic[RecordT]):
 
     def __len__(self) -> int:
         return len(self._keys)
+
+    def keys(self) -> tuple[str, ...]:
+        """The shard's HDF5 group keys, in the order the file lists them.
+
+        Indexed once at construction, so this costs no read. It is public
+        because a record's key is the only thing that joins a shard to a split
+        table keyed by record uuid, and a caller that had to reach for
+        ``_keys`` would be depending on the same fact less honestly.
+
+        Returns:
+            One key per record, positionally aligned with ``self[i]``.
+        """
+        return self._keys
 
     @overload
     def __getitem__(self, index: int) -> RecordT: ...
@@ -681,6 +720,8 @@ class _THEMolDefinition(Generic[RecordT]):
     homepage="https://huggingface.co/datasets/ByteDance-Seed/THEMol",
     citation="10.48550/arXiv.2605.14973",
     tags=("equilibrium", "hessian", "class-i"),
+    units={"hessian": THEMOL_UNITS["hessian"]},
+    blocks=("hessian",),
 )
 class THEMolHessian(_THEMolDefinition[Frame]):
     """THEMol equilibrium geometries; one record is one :class:`~molpy.Frame`.
@@ -707,6 +748,7 @@ class THEMolHessian(_THEMolDefinition[Frame]):
     homepage="https://huggingface.co/datasets/ByteDance-Seed/THEMol",
     citation="10.48550/arXiv.2605.14973",
     tags=("off-equilibrium", "energy", "forces", "class-i"),
+    units=_ENERGY_FORCE_UNITS,
 )
 class THEMolHessianRelax(_THEMolDefinition[Trajectory]):
     """THEMol relaxations; one record is one :class:`~molpy.Trajectory`.
@@ -731,6 +773,7 @@ class THEMolHessianRelax(_THEMolDefinition[Trajectory]):
     homepage="https://huggingface.co/datasets/ByteDance-Seed/THEMol",
     citation="10.48550/arXiv.2605.14973",
     tags=("torsion", "profile", "class-i"),
+    units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
 class THEMolTorsionScan(_THEMolDefinition[Trajectory]):
     """THEMol torsion profiles; one whole scan is one :class:`~molpy.Trajectory`.
@@ -757,6 +800,7 @@ class THEMolTorsionScan(_THEMolDefinition[Trajectory]):
     homepage="https://huggingface.co/datasets/ByteDance-Seed/THEMol",
     citation="10.48550/arXiv.2605.14973",
     tags=("off-equilibrium", "torsion", "energy", "forces", "class-i"),
+    units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
 class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
     """THEMol torsion-constrained optimizations, one scan per record.
@@ -779,6 +823,7 @@ class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
     homepage="https://huggingface.co/datasets/ByteDance-Seed/THEMol",
     citation="10.48550/arXiv.2605.14973",
     tags=("electrostatics", "mbis", "class-i"),
+    units=_MBIS_UNITS,
 )
 class THEMolMBIS(_THEMolDefinition[Frame]):
     """THEMol MBIS supervision; one record is one :class:`~molpy.Frame`.

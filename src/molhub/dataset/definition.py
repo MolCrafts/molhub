@@ -7,8 +7,9 @@ classes. It does not fetch bytes, parse frames, or talk to the registry.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from molhub.coordinate import Coordinate, InvalidCoordinate
 
@@ -39,6 +40,14 @@ class DatasetManifest:
     fixed to ``dataset``. Layout of scientific targets is *not* stored here;
     classes keep using :class:`~molhub.dataset.protocol.TargetSchema`.
 
+    ``units`` and ``blocks`` are the two content facts a
+    :class:`~molhub.dataset.protocol.TargetSchema` cannot carry and a reader
+    still needs — what a number means, and which named targets are COO blocks
+    rather than ``frame.meta`` scalars. Both are optional and default to empty:
+    a dataset that declares no units renders ``units=""`` for every feature, and
+    one that declares no blocks has none. Added by ``hf-facade-03-builder-info``
+    for :class:`~molhub.loader.info.Feature`; nothing here parses bytes by them.
+
     Args:
         coordinate: Canonical identity. Must have ``kind="dataset"``.
         description: Short prose description.
@@ -46,6 +55,11 @@ class DatasetManifest:
         homepage: Project homepage URL, if known.
         citation: Citation text or DOI URL, if known.
         tags: Subject tags; stored as a tuple.
+        units: Unit string per declared target name, keyed by the column or
+            ``meta`` key a reader will actually find on a record. Stored as a
+            read-only mapping.
+        blocks: Declared target names that live in a named COO block of the
+            record rather than in ``frame.meta``; stored as a tuple.
 
     Raises:
         InvalidCoordinate: If ``coordinate.kind`` is not ``dataset``.
@@ -57,6 +71,8 @@ class DatasetManifest:
     homepage: str | None = None
     citation: str | None = None
     tags: tuple[str, ...] = ()
+    units: Mapping[str, str] = MappingProxyType({})
+    blocks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.coordinate.kind != "dataset":
@@ -64,6 +80,12 @@ class DatasetManifest:
                 f"DatasetManifest requires kind 'dataset', got {self.coordinate.kind!r}."
             )
         object.__setattr__(self, "tags", tuple(self.tags))
+        # Copied, so a later edit of the caller's mapping cannot change a
+        # declaration already read — but a plain dict, not a MappingProxyType:
+        # `dataclasses.asdict` deep-copies every field, and a mapping proxy
+        # cannot be copied, which would make this record un-serializable.
+        object.__setattr__(self, "units", dict(self.units))
+        object.__setattr__(self, "blocks", tuple(self.blocks))
 
     @property
     def canonical(self) -> str:
@@ -81,6 +103,8 @@ def dataset(
     homepage: str | None = None,
     citation: str | None = None,
     tags: Iterable[str] = (),
+    units: Mapping[str, str] | None = None,
+    blocks: Iterable[str] = (),
 ):
     """Attach a :class:`DatasetManifest` to a class as ``Cls.manifest``.
 
@@ -97,6 +121,8 @@ def dataset(
         homepage: Project homepage URL.
         citation: Citation text or DOI URL.
         tags: Subject tags.
+        units: Unit string per declared target name; ``None`` declares none.
+        blocks: Declared target names that are COO blocks of the record.
 
     Returns:
         A class decorator that sets ``manifest`` and returns the class.
@@ -119,6 +145,8 @@ def dataset(
             homepage=homepage,
             citation=citation,
             tags=tuple(tags),
+            units=units or {},
+            blocks=tuple(blocks),
         )
         return cls
 

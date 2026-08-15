@@ -128,12 +128,37 @@ class Registry:
         except KeyError:
             raise UnknownArtifact(self._not_found_message(coord)) from None
 
-    def _not_found_message(self, coord: Coordinate) -> str:
-        siblings = sorted(
-            manifest.coordinate.version
-            for manifest in self._by_coordinate.values()
-            if manifest.coordinate.unversioned == coord.unversioned
+    def versions(self, unversioned: str) -> tuple[str, ...]:
+        """Every version this registry declares for one artifact.
+
+        The scan :meth:`get`'s not-found message already performs, said out
+        loud: defaulting a revision means asking which versions exist, and a
+        caller that asked before the miss should get the same answer the miss
+        would have suggested.
+
+        Args:
+            unversioned: An artifact without its version, in
+                :attr:`Coordinate.unversioned` form — ``dataset:themol/mbis``.
+                Not a :class:`~molhub.coordinate.Coordinate`, which cannot be
+                built without the version this asks about.
+
+        Returns:
+            The declared version labels, sorted lexically; empty when the
+            registry declares none. Ordering versions *meaningfully* is the
+            caller's problem — :class:`~molhub.loader.naming.DatasetName` does
+            it numerically and refuses when it cannot — so this reports rather
+            than ranks.
+        """
+        return tuple(
+            sorted(
+                manifest.coordinate.version
+                for manifest in self._by_coordinate.values()
+                if manifest.coordinate.unversioned == unversioned
+            )
         )
+
+    def _not_found_message(self, coord: Coordinate) -> str:
+        siblings = self.versions(coord.unversioned)
         if siblings:
             return (
                 f"{coord.canonical} is not in the registry, but these versions are: "

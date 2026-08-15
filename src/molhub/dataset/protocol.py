@@ -94,8 +94,16 @@ class Dataset(Protocol):
         """Total number of samples available."""
         ...
 
-    def __getitem__(self, index: int) -> Sample:
+    def __getitem__(self, index: int, /) -> Sample:
         """Return the sample at integer *index*.
+
+        The parameter is **positional-only**: ``ds[i]`` never passes it by
+        keyword, and requiring a spelling would make every implementation that
+        happens to call it ``idx`` — which is all of them, including
+        :class:`InMemoryDataset` and :class:`SubsetDataset` below — fail to
+        satisfy this protocol statically while passing ``isinstance``. That
+        divergence was invisible until ``hf-facade-03-builder-info`` made
+        ``load_dataset`` return a declared ``Dataset``.
 
         Returns:
             A :class:`molpy.Frame` or :class:`molpy.Trajectory`.

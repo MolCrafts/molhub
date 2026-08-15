@@ -95,6 +95,24 @@ class TestRegistryLookup:
         with pytest.raises(UnknownArtifact, match="1 artifacts"):
             registry.get("nothing-like-it@v1")
 
+    def test_versions_lists_declared_versions_for_an_unversioned_name(self, registry):
+        """The sibling scan ``_not_found_message`` already does, said out loud.
+
+        ``hf-facade-03-builder-info`` needs it on the way in, not only in an
+        error message on the way out: defaulting a ``revision`` means asking
+        which versions exist. Promoted rather than duplicated, so the suggestion
+        in an :class:`UnknownArtifact` and the loader's default always agree.
+        """
+        assert list(registry.versions("dataset:molcrafts/qm9")) == ["v2"]
+
+    def test_versions_lists_every_declared_version_of_one_artifact(self, tmp_path):
+        root = tmp_path / "registry"
+        for version in ("v2", "v3"):
+            path = root / "dataset" / "molcrafts" / "qm9" / f"{version}.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(manifest_yaml(version=version), encoding="utf-8")
+        assert list(Registry.load(root).versions("dataset:molcrafts/qm9")) == ["v2", "v3"]
+
 
 class TestRegistrySearch:
     @pytest.fixture

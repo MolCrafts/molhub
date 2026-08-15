@@ -30,15 +30,25 @@ by molecule identity rather than by scan uuid. An unknown source is a
 
 **One source per instance, two key spaces, one implementation.** The full set is
 millions of rows and a caller only ever needs one table, so
-:meth:`SplitTable.from_derived` loads exactly one uuid-keyed source and
-:meth:`SplitTable.from_identity` loads the identity-keyed table. They are two
+:meth:`_SplitTable.from_derived` loads exactly one uuid-keyed source and
+:meth:`_SplitTable.from_identity` loads the identity-keyed table. They are two
 alternate constructors over one loader and one provenance check — not two
 loaders — and each instance is honest about which key space it holds: asking an
 identity table for a uuid raises rather than answering ``None``.
 
+**The table is package-internal.** It was exported while ``-02-roster`` was its
+only caller and had no other way to hand one over. ``hf-facade-03-builder-info``
+(D9) added the second caller — :class:`~molhub.loader.builder.DatasetBuilder`
+counts a table-backed split with it — and both live inside this distribution, so
+the name lost its ``molhub.conveyor`` export rather than growing a public
+duplicate beside it. Provenance verification, the literal filename table and the
+two alternate constructors are exactly as they were; only the export went.
+
 Reference:
     ``.claude/specs/streaming-data-tiers-03-conveyor-02-roster.md``
-    § *``SplitTable`` — the split assignment of record, with its provenance*.
+    § *``SplitTable`` — the split assignment of record, with its provenance*;
+    ``.claude/specs/hf-facade-03-builder-info.md`` § D9, under the 2026-08-15
+    operator override in ``.claude/notes/notes.md``.
 """
 
 from __future__ import annotations
@@ -55,7 +65,7 @@ from molhub.conveyor.block import ConveyorError
 from molhub.sources.digest import Digest
 from molhub.sources.errors import InvalidDigest
 
-__all__ = ["SplitProvenance", "SplitProvenanceMismatch", "SplitTable"]
+__all__ = ["SplitProvenance", "SplitProvenanceMismatch"]
 
 _METADATA_FILENAME = "metadata.json"
 
@@ -223,7 +233,7 @@ class SplitProvenance:
             )
 
 
-class SplitTable:
+class _SplitTable:
     """One split table: key to split label, with the provenance it verified under.
 
     Built through :meth:`from_derived` (uuid-keyed, one source) or
@@ -251,7 +261,7 @@ class SplitTable:
         self._filename = filename
 
     @classmethod
-    def from_derived(cls, root: Path, *, source: str) -> SplitTable:
+    def from_derived(cls, root: Path, *, source: str) -> _SplitTable:
         """Load the uuid-keyed table *source* publishes under *root*.
 
         Args:
@@ -278,7 +288,7 @@ class SplitTable:
         return cls._load(Path(root), filename, key_column=_UUID_COLUMN)
 
     @classmethod
-    def from_identity(cls, root: Path) -> SplitTable:
+    def from_identity(cls, root: Path) -> _SplitTable:
         """Load the identity-keyed table under *root*.
 
         This is the molecule-level assignment every per-source table was folded
@@ -342,7 +352,7 @@ class SplitTable:
         return MappingProxyType(tally)
 
     @classmethod
-    def _load(cls, root: Path, filename: str, *, key_column: str) -> SplitTable:
+    def _load(cls, root: Path, filename: str, *, key_column: str) -> _SplitTable:
         """Verify one table against ``metadata.json``, then parse it.
 
         Verification strictly precedes parsing: bytes that are not the recorded

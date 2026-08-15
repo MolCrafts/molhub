@@ -27,7 +27,7 @@ from molhub.conveyor.roster import (
     UnsizedBlock,
     UnverifiableBlock,
 )
-from molhub.conveyor.splits import SplitTable
+from molhub.conveyor.splits import _SplitTable
 from molhub.manifest import Manifest
 
 from .conftest import (
@@ -141,7 +141,7 @@ class TestBlockRoster:
         assert BlockRoster(manifest, role).split_provenance is None
 
     def test_split_provenance_is_the_tables_own(self, manifest, role, splits_root):
-        table = SplitTable.from_derived(splits_root, source="mbis")
+        table = _SplitTable.from_derived(splits_root, source="mbis")
         roster = BlockRoster(manifest, role, splits=table)
         assert roster.split_provenance is table.provenance
 

@@ -210,7 +210,7 @@ class PrepareJob:
         split_of: Molecular identity -> ``"train"`` / ``"val"`` / ``"test"``.
             A plain mapping, so this class needs no file to be tested; the
             caller builds it from
-            :meth:`~molhub.conveyor.splits.SplitTable.from_identity`, the
+            :meth:`~molhub.conveyor.splits._SplitTable.from_identity`, the
             provenance-verified loader of the hot-tier identity table. Routing
             is a lookup and never a derivation: streaming re-splits nothing.
         writer_factory: How a block is opened — see :class:`BlockWriterFactory`.

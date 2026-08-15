@@ -18,6 +18,7 @@ from molhub.dataset import (
     THEMolTorsionRelax,
     THEMolTorsionScan,
 )
+from molhub.dataset.themol import THEMOL_UNITS
 
 WATER = "[O:2]([H:1])[H:3]"
 BUTANE = "[H:1][C:2]([H:5])([H:6])[C:3]([H:7])([H:8])[C:4]([H:9])([H:10])[H:11]"
@@ -74,6 +75,21 @@ def _write_hessian(
             "hessian",
             data=np.eye(3 * len(numbers), dtype=np.float64) if hessian is None else hessian,
         )
+
+
+def _write_two_record_hessian(path: Path, keys: Sequence[str]) -> None:
+    """Write one equilibrium shard holding one water record per key in *keys*.
+
+    ``_write_hessian`` opens the file with mode ``"w"``, so it cannot be called
+    twice for two records; this reuses its two building blocks (``_identity``
+    and ``_water_coords``) over a caller-named key list instead.
+    """
+    with h5py.File(path, "w") as handle:
+        for key in keys:
+            group = handle.create_group(key)
+            _identity(group, WATER, [1, 8, 1])
+            group.create_dataset("coords", data=_water_coords())
+            group.create_dataset("hessian", data=np.eye(9, dtype=np.float64))
 
 
 def _write_hessian_relax(path: Path) -> None:
@@ -443,6 +459,50 @@ class TestTrajectoryRoundTrip:
         ]
 
 
+class TestTHEMolShardDataset:
+    """The lazy view over one shard: what its keys are, and what they line up with.
+
+    ``keys()`` is public because a record's HDF5 group key is the only thing
+    that joins a shard to a split table keyed by record uuid — that is what
+    ``molhub.loader``'s shard index reads. This pins the three properties that
+    join relies on: the keys are the file's group keys, they come back as a
+    ``tuple[str, ...]``, and index *i* of that tuple is the record ``self[i]``
+    returns.
+
+    Two records rather than one: a single-key shard cannot tell "the shard's
+    keys, in order" apart from "the one key it has", and it cannot fail the
+    alignment test at all.
+    """
+
+    #: The fixture's two group keys, ascending — which is both the order they
+    #: are created in and the order HDF5 lists them in, so the pin below says
+    #: nothing about which of the two ``keys()`` follows.
+    KEYS: tuple[str, ...] = ("eq-record-0", "eq-record-1")
+
+    @staticmethod
+    def _shard(tmp_path: Path) -> Path:
+        """A two-record equilibrium shard built from this file's own builders."""
+        path = tmp_path / "shard-000.h5"
+        _write_two_record_hessian(path, TestTHEMolShardDataset.KEYS)
+        return path
+
+    def test_keys_are_the_shards_group_keys(self, tmp_path: Path) -> None:
+        assert THEMolHessian(self._shard(tmp_path)).load().keys() == ("eq-record-0", "eq-record-1")
+
+    def test_keys_are_a_tuple_of_strings(self, tmp_path: Path) -> None:
+        """A tuple, not a ``KeysView``: an index into it has to mean something."""
+        keys = THEMolHessian(self._shard(tmp_path)).load().keys()
+        assert isinstance(keys, tuple)
+        assert [type(key) for key in keys] == [str, str]
+
+    def test_keys_are_positionally_aligned_with_indexing(self, tmp_path: Path) -> None:
+        """``keys()[i]`` names the record ``self[i]`` reads — the join's whole basis."""
+        shard = THEMolHessian(self._shard(tmp_path)).load()
+        read = [shard[index].meta["source_record_id"] for index in range(len(shard))]
+        assert read == ["eq-record-0", "eq-record-1"]
+        assert read == list(shard.keys())
+
+
 class TestTHEMolHessian:
     """One equilibrium record is a `Frame` carrying its Hessian as a COO block."""
 
@@ -747,3 +807,35 @@ def test_local_shard_role_is_preserved_in_provenance(tmp_path: Path) -> None:
     _write_hessian(path)
     record = THEMolHessian(tmp_path).load(role="shard-123")[0]
     assert record.meta["source_id"].endswith("#role=shard-123")
+
+
+def test_the_scanned_dihedral_is_declared_in_degrees() -> None:
+    """`torsion_angle` is the one unit `hf-facade-03` added to the public dict.
+
+    Written as a literal rather than read back out of `THEMOL_UNITS`: the point
+    of the pin is that editing that dict is a decision somebody has to make
+    twice.
+    """
+    assert THEMOL_UNITS["torsion_angle"] == "degree"
+
+
+def test_themol_units_declares_exactly_these_quantities() -> None:
+    """The public constant's key set — the nine that predate `hf-facade-03`, plus one.
+
+    `THEMOL_UNITS` is exported in `molhub.dataset.themol.__all__` and every
+    `@dataset` unit declaration in that module reads from it, so a dropped or
+    renamed key silently empties a rendered `Feature.units`. Pinning the whole
+    set makes that arrive here first.
+    """
+    assert set(THEMOL_UNITS) == {
+        "coordinates",
+        "energy",
+        "forces",
+        "hessian",
+        "charge",
+        "dipole",
+        "quadrupole",
+        "volume",
+        "inverse_sigma",
+        "torsion_angle",
+    }

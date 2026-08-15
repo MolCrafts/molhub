@@ -26,7 +26,7 @@ uuid to shard means opening the HDF5 bytes this layer deliberately never opens.
 Every projected block therefore has ``id.split is None`` — the honest signal
 that the block is not split-pure. Split-purity is a property of *derived* blocks,
 filled by the stage that cuts and publishes them, on manifests it writes itself.
-An injected :class:`~molhub.conveyor.splits.SplitTable` is here for the one job
+An injected :class:`~molhub.conveyor.splits._SplitTable` is here for the one job
 it can do without bytes: binding the projection to a provenance-verified split
 version, readable as :attr:`BlockRoster.split_provenance`.
 
@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from molhub.conveyor.block import BlockId, ConveyorError
-from molhub.conveyor.splits import SplitProvenance, SplitTable
+from molhub.conveyor.splits import SplitProvenance, _SplitTable
 from molhub.manifest import Manifest
 from molhub.sources.digest import Digest
 from molhub.sources.locator import Locator
@@ -164,7 +164,7 @@ class BlockRoster:
         manifest: Manifest,
         role: CollectionRole,
         *,
-        splits: SplitTable | None = None,
+        splits: _SplitTable | None = None,
     ) -> None:
         source = manifest.coordinate.canonical
         if source not in role.source_coordinates:
