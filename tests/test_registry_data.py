@@ -90,22 +90,36 @@ class TestTHEMolMbisEntry:
 
     ``targets.atom_level`` is not decoration: when a dataset class carries no
     ``TARGET_SCHEMA``, ``DatasetBuilder._target_schema``
-    (``src/molhub/loader/builder.py:741-742``) builds the schema straight out of
-    this yaml block, so whatever is written here is what a user sees in
+    (``src/molhub/loader/builder.py``) builds the schema straight out of this
+    yaml block, so whatever is written here is what a user sees in
     ``DatasetInfo``. The grouped spellings this manifest was generated with
     (``atomic_dipole`` / ``atomic_quadrupole`` / ``mbis_parameters``) match no
-    column of any MBIS sample — the frame carries ``dipole_<axis>``,
-    ``quadrupole_<axis><axis>`` and numbered ``mbis_parameter_<slot>`` columns
-    instead.
+    column of any MBIS sample — the frame carries ``dipole_<axis>`` and
+    ``quadrupole_<axis><axis>`` columns instead, and the Slater parameters are
+    not an ``atoms`` column at all.
+
+    **Where the Slater parameters are, and why this list names none of them.**
+    The source ``parameters`` array is ``(S, 3)`` — one row per MBIS Slater
+    *shell*, and a shell is not an atom: hydrogen carries one, most heavy atoms
+    two, a third-period atom can carry three, so ``S > N`` and the rows line up
+    with atoms in no arity whatsoever. The reader carries them as the
+    shell-major ``mbis_shells`` block on the frame, three columns wide (``atom``
+    / ``population`` / ``inverse_width``, ``src/molhub/dataset/themol.py``),
+    which is a place an ``atom_level`` list has no way to name — so it names
+    none of them, on purpose. ``mbis_parameter_<slot>`` columns are not "not
+    declared yet": they are a shape no published record has, which the reader
+    emitted until the probe recorded in ``tests/test_dataset/test_themol.py``
+    showed 0 of 43 sampled indices were readable.
 
     The fourteen names are written out as literals rather than imported from
     ``_MBIS_ATOM_COLUMNS``, so drift on *either* side trips this pin.
     """
 
-    #: The atom-level target names the MBIS format fixes. The Slater-parameter
-    #: columns are deliberately absent: their arity is the shard's, read off an
-    #: ``(N, arity)`` array at load time, so a static manifest cannot name them
-    #: without inventing an arity (see the ``THEMolMBIS`` docstring).
+    #: The atom-level target names the MBIS format fixes. The Slater parameters
+    #: are deliberately absent, and not for want of a spelling: they are
+    #: shell-level ``(S, 3)`` rows carried as the ``mbis_shells`` block, so this
+    #: list — which can only name ``atoms`` columns — has nothing per-atom to
+    #: name (see the ``THEMolMBIS`` docstring).
     ATOM_LEVEL = frozenset(
         {
             "atomic_charge",
@@ -148,8 +162,9 @@ class TestTHEMolMbisEntry:
         """A grouped name promises one column and delivers three, nine, or none."""
         declared = frozenset(manifest.targets.atom_level)
         assert not [name for name in declared if "mbis_parameter" in name], (
-            "the parameter arity is read off the shard at load time, so no manifest "
-            f"can name those columns: {sorted(n for n in declared if 'mbis_parameter' in n)}"
+            "the Slater parameters are shell-level rows carried as the mbis_shells "
+            "block, so no atom-level column names them: "
+            f"{sorted(n for n in declared if 'mbis_parameter' in n)}"
         )
         assert declared & self.GROUPED == frozenset(), (
             f"pre-dissolution grouped target names are back: {sorted(declared & self.GROUPED)}"

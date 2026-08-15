@@ -296,6 +296,21 @@ class SplitDataset:
         """The split this view exposes."""
         return self._split
 
+    def __repr__(self) -> str:
+        """Which dataset, which split, how much of it — and no shard role.
+
+        This is what ``load_dataset(name, split=...)`` hands back, so its repr is
+        the first thing a notebook prints and the first thing a traceback
+        carries; ``<SplitDataset object at 0x…>`` names none of the three. All
+        three are already in hand — the coordinate from the index, the split and
+        its count from the table — so echoing this view costs no fetch, which is
+        the same promise ``len`` makes.
+        """
+        return (
+            f"SplitDataset({self._index.coordinate.canonical!r}, split={self._split!r}, "
+            f"records={self._length})"
+        )
+
     def __len__(self) -> int:
         return self._length
 

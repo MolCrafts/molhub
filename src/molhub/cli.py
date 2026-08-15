@@ -25,6 +25,18 @@ is unchanged by the warning. ``--home`` joins it for parity with
 ``cache status`` / ``cache verify``: the split derivation ``info`` reads lives
 under the cache root, and with only ``$MOLHUB_HOME`` to go on there is no way to
 point this verb at a second molhub home without exporting a variable around it.
+
+**Byte counts are rendered by the library's own type.**
+``download 31041658614 B`` is a number a reader counts digits on; the same line
+now leads with :class:`~molhub.loader.info.ByteSize`'s ``28.9 GiB`` and keeps the
+raw count in parentheses, because a script greps the number and a human reads the
+unit. It is the type :meth:`~molhub.loader.info.DatasetInfo.__str__` prints, not
+a second formatter that agrees with it today — the same promotion
+``default_ledger_path`` and ``DEFAULT_BUDGET_BYTES`` already had. **Both** places
+this module states a byte count use it: the report's download line and the stderr
+notice that says what describing is about to pull. Two spellings of one number in
+one module is the drift the shared type exists to end, and the notice is the one
+that matters most — it is read before the bytes are spent, not after.
 """
 
 from __future__ import annotations
@@ -38,6 +50,7 @@ from molhub.conveyor import DEFAULT_BUDGET_BYTES, ConveyorError, default_ledger_
 from molhub.coordinate import InvalidCoordinate
 from molhub.loader import (
     AmbiguousRevision,
+    ByteSize,
     DatasetBuilder,
     DatasetInfo,
     SplitTableUnavailable,
@@ -155,6 +168,12 @@ def _announce_download(builder: DatasetBuilder) -> None:
     published derivation states — a warning printed every time is one nobody
     reads by the third dataset.
 
+    Rendered like the report's own download line, through the same
+    :class:`~molhub.loader.info.ByteSize`: this is the number a reader weighs
+    *before* deciding whether to let the command spend it, and ``4116013056`` is
+    not a size anybody judges at a glance. The raw count stays in parentheses for
+    whoever reconciles it against the manifest.
+
     Args:
         builder: The builder about to be asked for its description.
     """
@@ -163,7 +182,8 @@ def _announce_download(builder: DatasetBuilder) -> None:
         return
     typer.secho(
         f"Describing this dataset counts its splits by reading them, so it will download "
-        f"{size} B first. Only its own files are pulled, and they stay in the cache.",
+        f"{ByteSize(size)} ({size} B) first. Only its own files are pulled, and they stay "
+        "in the cache.",
         fg=typer.colors.YELLOW,
         err=True,
     )
@@ -224,7 +244,7 @@ def info(
     if described.citation:
         typer.echo(f"  doi        {described.citation}")
     typer.echo(f"  record     {described.record_type}")
-    typer.echo(f"  download   {described.download_size} B")
+    typer.echo(f"  download   {ByteSize(described.download_size)} ({described.download_size} B)")
     for feature in described.features:
         units = f"  {feature.units}" if feature.units else ""
         typer.echo(f"  feature    {feature.name}  [{feature.level}]{units}")

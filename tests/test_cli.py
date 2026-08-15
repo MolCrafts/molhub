@@ -26,6 +26,12 @@ THREEBPA_SIZES: dict[str, int] = {
 }
 THREEBPA_DOWNLOAD_SIZE = 1234000
 
+#: The same total as ``molhub.loader.info.ByteSize`` renders it: 1024-based,
+#: one decimal (1234000 / 1048576 = 1.1768…). A literal, not a call into the
+#: type under test, for the reason ``tests/test_loader/test_info.py`` states —
+#: a golden that computed itself would agree with any rendering at all.
+THREEBPA_DOWNLOAD_HUMANIZED = "1.2 MiB"
+
 #: A manifest declaring one role per published 3BPA file, as ``v1.yaml`` does.
 #: Written here rather than imported from ``tests/test_loader``: what a CLI test
 #: needs from it is the declared *sizes*, and those are this file's fixture.
@@ -205,6 +211,50 @@ class TestInfo:
         out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
         assert "mbis_0.h5" not in out
 
+    # -- the download line, in a form a reader can weigh --------------------
+    #
+    # `download   31041658614 B` is a number to count digits on; the same fact
+    # reads `28.9 GiB` and tells a reader whether to run this on a laptop. The
+    # raw count stays, in parentheses: it is what a script greps and what the
+    # manifest actually declares, and dropping it would trade one audience for
+    # another. The rendering is `molhub.loader.info.ByteSize`, the same type
+    # `DatasetInfo.__str__` prints — two renderings of one number is exactly the
+    # drift a shared type prevents.
+
+    def _download_line(self, output: str) -> str:
+        """The one line of ``info``'s report that states the download size."""
+        matches = [line for line in output.splitlines() if "download" in line]
+        assert len(matches) == 1, output
+        return matches[0]
+
+    def test_the_download_line_is_humanized(self, themol):
+        """11 101 bytes of fixture manifest, 1024-based: ``10.8 KiB``."""
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).stdout
+        assert "10.8 KiB" in self._download_line(out), out
+
+    def test_the_download_line_keeps_the_raw_byte_count(self, themol):
+        """In parentheses, because a script greps the number and a human reads
+        the unit; the manifest declares the number, so it stays verbatim."""
+        from .test_loader.conftest import DOWNLOAD_SIZE
+
+        line = self._download_line(runner.invoke(app, ["info", "themol/mbis", *themol]).stdout)
+        assert re.search(rf"\(\D*{DOWNLOAD_SIZE}\b", line), line
+
+    def test_the_download_line_reports_one_size_twice_and_not_two_sizes(self, themol):
+        """The humanized form and the raw count are the same fact, on one line."""
+        line = self._download_line(runner.invoke(app, ["info", "themol/mbis", *themol]).stdout)
+        assert "10.8 KiB" in line and "11101" in line, line
+
+    def test_the_cli_renders_bytes_through_the_librarys_own_type(self):
+        """One rendering, not two that agree today: the same promotion
+        ``default_ledger_path`` and ``DEFAULT_BUDGET_BYTES`` already had."""
+        from pathlib import Path
+
+        import molhub
+
+        source = (Path(molhub.__file__).parent / "cli.py").read_text(encoding="utf-8")
+        assert "ByteSize" in source
+
     def test_files_prints_the_roles(self, themol):
         out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
         assert "shard-000" in out and "shard-001" in out
@@ -267,6 +317,26 @@ class TestInfo:
         is what the report itself prints once it gets that far."""
         result = runner.invoke(app, ["info", "molcrafts/3bpa", *threebpa])
         assert str(THREEBPA_DOWNLOAD_SIZE) in result.stderr
+
+    def test_the_notice_humanizes_the_bytes_it_is_about_to_pull(self, threebpa):
+        """The notice is the *other* place this file renders a byte count, and it
+        keeps a hand-written ``{size} B`` while the report line above renders the
+        same fact through ``ByteSize``. Two spellings of one number in one module
+        is exactly the drift the shared type was introduced to end — and this is
+        the spelling that matters most, because it is the one a reader weighs
+        *before* deciding whether to let the command spend the bytes. Four GB of
+        real benchmark reads as ``4116013056``, which nobody sizes at a glance."""
+        result = runner.invoke(app, ["info", "molcrafts/3bpa", *threebpa])
+        assert THREEBPA_DOWNLOAD_HUMANIZED in result.stderr, result.stderr
+
+    def test_the_notice_keeps_the_raw_byte_count_in_parentheses(self, threebpa):
+        """Strengthening, not replacing: the pin two tests up stays exactly as it
+        was, and this says *where* the raw count now sits. Same shape as the
+        report's own download line — humanized for the human, the manifest's own
+        number in parentheses for the script and for anyone reconciling it
+        against the manifest."""
+        result = runner.invoke(app, ["info", "molcrafts/3bpa", *threebpa])
+        assert re.search(rf"\(\D*{THREEBPA_DOWNLOAD_SIZE}\b", result.stderr), result.stderr
 
     def test_the_help_warns_that_describing_can_download(self):
         """``--help`` is where a reader looks *before* typing the command."""

@@ -400,11 +400,11 @@ def prepare(
     split: str,
     output_dir: str | Path,
     revision: str | None = None,
-    registry: Registry | None = None,
-    hub: ArtifactHub | None = None,
+    disk_budget: int = DEFAULT_BUDGET_BYTES,
     writer_factory: BlockWriterFactory | None = None,
     provenance: Mapping[str, object] | None = None,
-    disk_budget: int = DEFAULT_BUDGET_BYTES,
+    registry: Registry | None = None,
+    hub: ArtifactHub | None = None,
 ) -> PreparedBlocks:
     """Materialize one split of one dataset as sealed blocks under *output_dir*.
 
@@ -413,6 +413,11 @@ def prepare(
     type that does the work, and composing describe → export → consume stays the
     caller's job.
 
+    The arguments read in the order a call site varies them — what names the
+    data, what selects it, what shapes the output — and the two injection seams
+    a test or an embedder supplies come last. Everything but *name* is
+    keyword-only, so that order is documentation rather than an ABI.
+
     Args:
         name: The dataset in HuggingFace spelling, e.g. ``"themol/torsion-scan"``.
         split: Which split to materialize. Blocks are split-pure, so this is
@@ -420,15 +425,15 @@ def prepare(
             from without re-deriving which is which.
         output_dir: Directory the sealed block roots are created under.
         revision: Which version to pin; ``None`` takes the newest declared.
-        registry: Where manifests come from.
-        hub: Where bytes come from.
+        disk_budget: How many bytes of fetched files the walk behind the export
+            may keep on local disk at once.
         writer_factory: How one block is opened. ``None`` resolves molnex's own
             writer and refuses with a message naming the ``prepare`` extra and
             the ``MOLNEX_SRC`` escape hatch when molnex is not importable.
         provenance: Opaque provenance recorded in every block; ``None`` states
             molhub's own, carrying the keys the block format requires.
-        disk_budget: How many bytes of fetched files the walk behind the export
-            may keep on local disk at once.
+        registry: Where manifests come from.
+        hub: Where bytes come from.
 
     Returns:
         The :class:`~molhub.conveyor.prepare.PreparedBlocks` evidence for every

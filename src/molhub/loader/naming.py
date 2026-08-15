@@ -13,6 +13,15 @@ collaborator (the registry) and a different failure mode (refusing to guess);
 smuggling it into ``Coordinate`` would quietly weaken the rule the coordinate
 layer exists to keep.
 
+**A name nobody declares is a name problem, not a revision problem.** The
+default-revision lookup is where a misspelled name is first noticed — the
+registry declares no version of it — but the reader typed
+``load_dataset("themol/mbsi", split="train")`` and has a spelling problem, so the
+refusal leads with the name that missed and names the verb that lists the ones
+that did not (``molhub search``). It says nothing about revisions: there is no
+revision of a dataset nobody publishes. The *ordering* refusal below is a
+different sentence about a real revision problem and still says so.
+
 **Why an unorderable version set is refused rather than picked.** The default is
 a numeric-aware natural order: ``2`` before ``10``, ``v2`` before ``v3``. When
 two labels first differ at a *text* segment — ``v2`` against ``beta`` — no
@@ -146,7 +155,8 @@ class DatasetName:
         if not declared:
             raise UnknownArtifact(
                 f"{self.unversioned} is not in the registry ({len(registry)} artifacts "
-                f"loaded), so there is no revision to default to.{self._namespace_hint(registry)}"
+                f"loaded). Check the spelling, or list what is published with "
+                f"'molhub search'.{self._namespace_hint(registry)}"
             )
         if len(declared) == 1:
             return declared[0]

@@ -32,21 +32,46 @@ Layers, each usable on its own:
 All three dataset functions are defined in :mod:`molhub.loader` — the two
 reading ones in its ``__init__``, :func:`~molhub.loader.materialize.prepare`
 beside the :class:`~molhub.loader.materialize.BlockExport` it delegates to — and
-re-exported here. So are the two refusals a caller acts on:
-:class:`~molhub.loader.errors.SplitTableUnavailable` (build the split derivation
-with ``python -m molhub.scripts.build_class1_splits``) and
-:class:`~molhub.loader.errors.UnknownSplit` (ask
-``load_dataset_builder(name).info.splits`` what the names are). This module is
-the front door, not a place work is written.
+re-exported here. So is everything those three promise a caller will be able to
+**name**:
+
+* the refusals a script writes ``except`` against —
+  :class:`~molhub.loader.errors.SplitTableUnavailable` (build the split
+  derivation with ``python -m molhub.scripts.build_class1_splits``),
+  :class:`~molhub.loader.errors.UnknownSplit` (ask
+  ``load_dataset_builder(name).info.splits`` what the names are),
+  :class:`~molhub.loader.naming.AmbiguousRevision`,
+  :class:`~molhub.loader.mapstyle.UnknownRecordKey`,
+  :class:`~molhub.conveyor.errors.UnsupportedRecordError`,
+  :class:`~molhub.conveyor.errors.UnroutableUnitError` and
+  :class:`~molhub.conveyor.splits.SplitProvenanceMismatch`;
+* the records they hand back and a caller annotates or ``isinstance``-checks —
+  :class:`~molhub.conveyor.prepare.PreparedBlocks`,
+  :class:`~molhub.loader.info.Feature` and
+  :class:`~molhub.loader.info.SplitInfo`.
+
+Each is the same object the defining module holds: catching
+``molhub.UnroutableUnitError`` catches what the layer underneath actually
+raised. Reaching them any other way means importing a private layering detail
+this front door exists to hide. This module is the front door, not a place work
+is written.
 """
 
 from molhub._version import __version__
 from molhub.coordinate import Coordinate, InvalidCoordinate
 from molhub.loader import (
+    AmbiguousRevision,
     DatasetBuilder,
     DatasetInfo,
+    Feature,
+    PreparedBlocks,
+    SplitInfo,
+    SplitProvenanceMismatch,
     SplitTableUnavailable,
+    UnknownRecordKey,
     UnknownSplit,
+    UnroutableUnitError,
+    UnsupportedRecordError,
     load_dataset,
     load_dataset_builder,
     prepare,
@@ -62,8 +87,16 @@ __all__ = [
     "prepare",
     "DatasetBuilder",
     "DatasetInfo",
+    "Feature",
+    "SplitInfo",
+    "PreparedBlocks",
+    "AmbiguousRevision",
+    "SplitProvenanceMismatch",
     "SplitTableUnavailable",
+    "UnknownRecordKey",
     "UnknownSplit",
+    "UnroutableUnitError",
+    "UnsupportedRecordError",
     "Molhub",
     "Coordinate",
     "InvalidCoordinate",

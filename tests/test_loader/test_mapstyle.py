@@ -25,6 +25,7 @@ Constructor shapes picked here, because a test cannot call them otherwise:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,38 @@ class TestSplitDataset:
     def test_an_index_past_the_end_raises_index_error(self, train):
         with pytest.raises(IndexError):
             train[len(train)]
+
+    # -- what the view says when it is echoed ------------------------------
+    #
+    # This is what `load_dataset(name, split=...)` hands back, so its `repr` is
+    # the first thing a notebook prints and the first thing a traceback carries.
+    # The default `<…SplitDataset object at 0x7f…>` names neither the dataset nor
+    # the split nor how much of it there is — and all three are already in hand:
+    # the coordinate from the index, the split and its count from the table, at
+    # no fetch (ac-004).
+
+    def test_repr_names_the_coordinate(self, train):
+        assert COORDINATE in repr(train)
+
+    def test_repr_names_the_split(self, train):
+        assert "train" in repr(train)
+
+    def test_repr_names_the_record_count(self, train):
+        """As a number of its own: ``<… object at 0x7f1e3d…>`` contains a ``3``
+        two runs out of five, so a bare substring test passes by address."""
+        assert re.search(rf"\b{SPLIT_COUNTS['train']}\b", repr(train)), repr(train)
+
+    def test_repr_is_not_the_default_object_repr(self, train):
+        assert "object at 0x" not in repr(train)
+
+    def test_repr_fetches_nothing(self, train, hub):
+        """``len`` is free (ac-004) and so is everything ``repr`` reports."""
+        repr(train)
+        assert hub.fetch_count == 0
+
+    def test_repr_names_no_shard_role(self, train):
+        """A role is transport; the value a user is handed does not name one."""
+        assert "shard-" not in repr(train)
 
     def test_a_key_outside_the_tables_key_space_is_refused(self, tmp_path, table, layout):
         """ac-005: no runtime fallback, no guessing — name both key spaces and stop."""

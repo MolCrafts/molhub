@@ -759,6 +759,34 @@ class DatasetBuilder:
         self._info: DatasetInfo | None = None
         self._resolved: tuple[Coordinate, Manifest] | None = None
 
+    def __repr__(self) -> str:
+        """Which dataset this is, at the version it resolved to.
+
+        ``<molhub.loader.builder.DatasetBuilder object at 0x…>`` answers neither
+        "which dataset" nor "which version" — and the version is the one fact a
+        run has to be able to record. Resolving it reads the registry and no
+        shard bytes, which is what makes it printable at all.
+        """
+        return f"DatasetBuilder({self._addressed()!r})"
+
+    def _addressed(self) -> str:
+        """The resolved coordinate, or the name that was asked for.
+
+        Every failure is swallowed on purpose, and only here: a ``__repr__``
+        that raises is one a debugger cannot print, which is exactly the moment
+        it is needed. The resolution failure itself belongs to :attr:`info` —
+        where it is raised with its own message — not to looking at the object.
+
+        Returns:
+            The canonical coordinate, or the unversioned name when nothing
+            resolves it.
+        """
+        try:
+            coordinate, _ = self._resolve()
+        except Exception:
+            return self._name.unversioned
+        return coordinate.canonical
+
     @property
     def info(self) -> DatasetInfo:
         """What this dataset contains, computed once per builder.

@@ -246,6 +246,34 @@ class TestDatasetBuilder:
     def test_split_view_reads_the_records_of_that_split(self, builder):
         assert builder.split_view("train")[0].meta["source_record_id"] == "mbis-a"
 
+    # -- what a builder says when it is echoed -----------------------------
+    #
+    # `load_dataset_builder("themol/mbis")` at a prompt prints the default
+    # `<molhub.loader.builder.DatasetBuilder object at 0x7f…>`, which answers
+    # neither "which dataset is this" nor "which version did it resolve to" —
+    # and the version is the one fact a run has to be able to record. Resolving
+    # it reads the registry and no shard bytes, which is what makes it printable.
+
+    def test_repr_names_the_resolved_coordinate(self, builder):
+        assert COORDINATE in repr(builder)
+
+    def test_repr_is_not_the_default_object_repr(self, builder):
+        assert "object at 0x" not in repr(builder)
+
+    def test_repr_fetches_nothing(self, builder, hub):
+        """Echoing a builder must not cost what opening one costs."""
+        repr(builder)
+        assert hub.fetch_count == 0
+
+    def test_repr_of_a_name_the_registry_does_not_declare_still_renders(
+        self, registry, hub, molhub_home
+    ):
+        """A repr that raises is one a debugger cannot print, which is exactly
+        when it is needed: the resolution failure belongs to ``.info``, not to
+        looking at the object. It falls back to the name that was asked for."""
+        unresolvable = DatasetBuilder("themol/not-a-dataset", registry=registry, hub=hub)
+        assert "themol/not-a-dataset" in repr(unresolvable)
+
     def test_an_unknown_split_names_the_declared_ones(self, builder):
         """Discovery is ``info.splits``, so a miss says what discovery would have."""
         with pytest.raises(KeyError) as raised:

@@ -49,6 +49,7 @@ Shapes picked here, because a test cannot call them otherwise:
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import shutil
 import sys
@@ -234,6 +235,57 @@ def prepared(verified_torsion_registry, torsion_hub, factory, output_dir: Path) 
         writer_factory=factory,
         provenance=PROVENANCE,
     )
+
+
+class TestPrepareReadsUserFirst:
+    """The signature, in the order a reader meets it (ergonomics wave, ruling 9).
+
+    ``registry=`` and ``hub=`` are seams — a test's, an embedder's — and they sat
+    in front of ``writer_factory``, ``provenance`` and ``disk_budget``, which are
+    the three a real ``prepare`` call actually reaches for. Every one of them is
+    keyword-only, so the order is documentation rather than an ABI: it changes
+    what ``help(prepare)`` and every rendered signature put first, and breaks no
+    call anywhere.
+
+    The same ordering rule the two reading functions are pinned to in
+    ``tests/test_loader/test_init.py``: what names the data, then what selects
+    it, then what shapes the output, then the injection points.
+    """
+
+    #: What ``prepare`` takes, in the order it should read. Hard-coded, because
+    #: "user-first" is a decision about order and an expectation derived from the
+    #: signature would agree with any order at all.
+    PARAMETERS: tuple[str, ...] = (
+        "name",
+        "split",
+        "output_dir",
+        "revision",
+        "disk_budget",
+        "writer_factory",
+        "provenance",
+        "registry",
+        "hub",
+    )
+
+    def test_it_declares_exactly_these_parameters(self) -> None:
+        assert set(inspect.signature(molhub.prepare).parameters) == set(self.PARAMETERS)
+
+    def test_it_reads_user_first(self) -> None:
+        assert tuple(inspect.signature(molhub.prepare).parameters) == self.PARAMETERS
+
+    def test_it_puts_the_seams_last(self) -> None:
+        """Stated on its own, so a reordering that only moves ``disk_budget``
+        still reports the half it did not fix."""
+        assert tuple(inspect.signature(molhub.prepare).parameters)[-2:] == ("registry", "hub")
+
+    def test_only_the_name_is_positional(self) -> None:
+        """Which is what makes the order free to change: nobody passes these by
+        position, so nobody's call breaks when they move."""
+        parameters = inspect.signature(molhub.prepare).parameters
+        assert parameters["name"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        assert all(
+            parameters[name].kind is inspect.Parameter.KEYWORD_ONLY for name in self.PARAMETERS[1:]
+        )
 
 
 class TestBlockExport:

@@ -36,7 +36,28 @@ itself rather than only from the module that raises them.
 **``split`` is required.** Omitting it would have to return a dict of splits —
 a new container type — or make ``ds[0]`` mean different things depending on an
 argument nobody passed. Discovery is ``load_dataset_builder(name).info.splits``,
-and there is deliberately no ``DatasetDict`` here to come back under.
+and there is deliberately no ``DatasetDict`` here to come back under. The refusal
+is still a :class:`TypeError`, but it is molhub's sentence rather than Python's:
+"missing 1 required keyword-only argument" says what is absent and nothing about
+what to type next, and the names are one call away.
+
+**Every type these docstrings promise is reachable from ``import molhub``.** A
+``Raises:`` line is a promise a reader writes ``except`` against, and a type they
+can only name by importing ``molhub.conveyor.prepare`` turns that promise into
+``except Exception``. So the refusals and the records those functions hand back
+are re-exported here and from the package root beside the functions themselves.
+
+**``load_dataset`` is overloaded on ``streaming``.** One function returns two
+genuinely different things — a map-style dataset and a walk — and a single
+``Dataset | IterableDataset`` annotation would make ``ds[0]`` an editor error on
+the path where indexing is the whole point. The :func:`typing.overload` stubs
+below are a type-level statement only; the runtime is the one implementation
+under them.
+
+**The signatures read user-first.** ``registry=`` and ``hub=`` are seams a test
+or an embedder injects and essentially no user call passes, so they sit last.
+Everything is keyword-only, which makes that order documentation rather than an
+ABI: moving them breaks nobody's call.
 
 The loader sits **above** ``molhub.dataset`` and ``molhub.conveyor`` and reads
 both; neither may read it back (``tests/test_loader/test_layering.py``).
@@ -47,12 +68,17 @@ Reference:
 
 from __future__ import annotations
 
+from typing import Literal, overload
+
 from molhub.conveyor import DEFAULT_BUDGET_BYTES
+from molhub.conveyor.errors import UnroutableUnitError, UnsupportedRecordError
+from molhub.conveyor.prepare import PreparedBlocks
+from molhub.conveyor.splits import SplitProvenanceMismatch
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import Dataset, IterableDataset
+from molhub.dataset.protocol import Dataset
 from molhub.loader.builder import DatasetBuilder
 from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
-from molhub.loader.info import DatasetInfo, Feature, SplitInfo
+from molhub.loader.info import ByteSize, DatasetInfo, Feature, SplitInfo
 from molhub.loader.mapstyle import ShardIndex, SplitDataset, UnknownRecordKey
 from molhub.loader.materialize import BlockExport, SplitRouting, prepare
 from molhub.loader.naming import AmbiguousRevision, DatasetName
@@ -67,6 +93,7 @@ __all__ = [
     "DatasetInfo",
     "SplitInfo",
     "Feature",
+    "ByteSize",
     "DatasetName",
     "AmbiguousRevision",
     "SplitTableUnavailable",
@@ -79,19 +106,62 @@ __all__ = [
     "PublishedParts",
     "BlockExport",
     "SplitRouting",
+    "PreparedBlocks",
+    "SplitProvenanceMismatch",
+    "UnroutableUnitError",
+    "UnsupportedRecordError",
 ]
+
+
+class _MissingSplit:
+    """The default of ``split=``, so its absence is molhub's to refuse.
+
+    A sentinel rather than a required keyword-only argument: Python's own
+    "missing 1 required keyword-only argument: 'split'" names what is absent and
+    nothing about what to type next, and the call that lists the split names is
+    the next thing the reader wants. The refusal stays a :class:`TypeError`.
+    """
+
+
+_MISSING_SPLIT = _MissingSplit()
+
+
+@overload
+def load_dataset(
+    name: str,
+    *,
+    split: str,
+    revision: str | None = ...,
+    streaming: Literal[True],
+    disk_budget: int = ...,
+    registry: Registry | None = ...,
+    hub: ArtifactHub | None = ...,
+) -> StreamingSplitDataset: ...
+
+
+@overload
+def load_dataset(
+    name: str,
+    *,
+    split: str,
+    revision: str | None = ...,
+    streaming: Literal[False] = ...,
+    disk_budget: int = ...,
+    registry: Registry | None = ...,
+    hub: ArtifactHub | None = ...,
+) -> Dataset: ...
 
 
 def load_dataset(
     name: str,
     *,
-    split: str,
+    split: str | _MissingSplit = _MISSING_SPLIT,
     revision: str | None = None,
-    registry: Registry | None = None,
-    hub: ArtifactHub | None = None,
     streaming: bool = False,
     disk_budget: int = DEFAULT_BUDGET_BYTES,
-) -> Dataset | IterableDataset:
+    registry: Registry | None = None,
+    hub: ArtifactHub | None = None,
+) -> Dataset | StreamingSplitDataset:
     """Open one split of one dataset.
 
     Args:
@@ -100,15 +170,15 @@ def load_dataset(
             one dataset, never a container of them.
         revision: Which version to pin — molhub's ``@version``, not a git sha.
             ``None`` takes the newest the registry declares.
-        registry: Where manifests come from; ``None`` uses the configured or
-            bundled registry.
-        hub: Where bytes come from; ``None`` constructs a
-            :class:`~molhub.molhub.Molhub`.
         streaming: Walk the split one published file at a time instead of
             addressing it map-style.
         disk_budget: How many bytes of fetched files a streaming walk may keep
             on local disk at once. Ignored when *streaming* is false, where
             residency is the cache's own business.
+        registry: Where manifests come from; ``None`` uses the configured or
+            bundled registry.
+        hub: Where bytes come from; ``None`` constructs a
+            :class:`~molhub.molhub.Molhub`.
 
     Returns:
         A map-style dataset satisfying
@@ -119,6 +189,8 @@ def load_dataset(
         dataset's own reader builds.
 
     Raises:
+        TypeError: If *split* is omitted. There is no container of splits to
+            return in its place; the message names the call that lists them.
         UnknownSplit: If *split* is not one of the dataset's declared splits.
             It is a ``KeyError``; the name is checked against the declaration
             before any byte is fetched.
@@ -129,10 +201,17 @@ def load_dataset(
         AmbiguousRevision: If no revision was given and the declared versions
             do not order.
         ValueError: If *streaming* is asked of a dataset published as whole
-            files, which there is no way to walk a piece at a time, or if the
-            dataset's payload needs an offline conversion this machine has not
-            run.
+            files, which there is no way to walk a piece at a time, if the
+            dataset's manifest publishes no checksum to verify a walked file
+            against, or if the dataset's payload needs an offline conversion
+            this machine has not run.
     """
+    if isinstance(split, _MissingSplit):
+        raise TypeError(
+            "load_dataset() opens one split and needs to be told which: pass split=. "
+            "Omitting it has no answer — there is no container of splits to hand back. "
+            "The names are one call away: load_dataset_builder(name).info.splits."
+        )
     builder = DatasetBuilder(name, revision=revision, registry=registry, hub=hub)
     if streaming:
         return builder.streaming_view(split, disk_budget=disk_budget)

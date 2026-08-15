@@ -23,6 +23,28 @@ the frame. When the new ``blocks`` declaration names it too, ``blocks`` wins:
 the block declaration is the one that describes the record as it now is, and
 resolving the other way would render ``level="meta"`` for a thing that is not in
 ``frame.meta``.
+
+**Two shapes the ergonomics wave adds, and why they are types here.**
+
+* :class:`~molhub.loader.info.ByteSize` — one byte count that knows how to say
+  itself. ``download_size=31041658614`` is a number a reader has to count digits
+  on; ``28.9 GiB`` is the same fact and is the one they can act on. It is a
+  *type* rather than a ``humanize_bytes`` free function because
+  ``tests/test_loader/test_layering.py`` bounds this package to three free
+  functions and because the house rules put a verb on its owning noun — and
+  because two renderings of one number (one in the CLI, one in ``__str__``) is
+  exactly the drift a shared type prevents.
+* :meth:`~molhub.loader.info.DatasetInfo.__str__` — the dataclass ``repr`` puts
+  every field of a 15-feature dataset on one line, which is where ``.info``
+  stopped being readable at a notebook prompt. ``__str__`` is the human view and
+  ``repr`` stays the dataclass's own: ``print(info)`` and ``info`` at a REPL are
+  different questions, and Python already has two hooks for them.
+
+The rendering literals below are computed 1024-based and written out, never
+recomputed from the implementation: a golden that called the code under test
+would agree with whatever it were edited to say. Two of them are real bundled
+manifest totals (``dataset:themol/mbis@1`` and ``dataset:themol/hessian-relax@1``),
+so the two sizes a THEMol reader actually meets are the two that are pinned.
 """
 
 from __future__ import annotations
@@ -38,6 +60,55 @@ from molhub.dataset.themol import THEMolHessian, THEMolMBIS, THEMolTorsionScan
 from molhub.loader.info import DatasetInfo, Feature, SplitInfo
 
 from .conftest import CITATION, COORDINATE, DESCRIPTION, DOWNLOAD_SIZE, LICENSE
+
+
+def info_type(name: str) -> type:
+    """The :mod:`molhub.loader.info` type *name*, resolved when it is asked for.
+
+    The same deferred lookup ``test_builder.py``'s ``loader_error`` makes, for
+    the same reason: importing a type this wave adds at module scope would turn
+    every other test in this file into one collection error instead of failures
+    with names on them.
+
+    Args:
+        name: The exported type name.
+
+    Returns:
+        The class.
+    """
+    from molhub.loader import info
+
+    return getattr(info, name)
+
+
+#: How the fixture dataset's 11 101 declared bytes read once humanized. Stated
+#: as a literal beside :data:`~tests.test_loader.conftest.DOWNLOAD_SIZE`, which
+#: is what ``DatasetInfo.__str__`` is asked to render.
+DOWNLOAD_SIZE_HUMANIZED = "10.8 KiB"
+
+#: The rendering contract, as (bytes, text) pairs computed with 1024-based math:
+#: binary units, one decimal place, and a bare ``B`` below 1 KiB because
+#: ``0.9 KiB`` is a worse answer than ``999 B``.
+#:
+#: The boundaries are here on purpose — 1023 is the last plain byte count, 1024
+#: the first KiB — and so are the two real ones: ``31041658614`` is every
+#: declared byte of ``dataset:themol/mbis@1`` and ``1048543472353`` of
+#: ``dataset:themol/hessian-relax@1``, which is the number the ladder has to keep
+#: in GiB (0.95 TiB is not yet a TiB).
+HUMANIZED: tuple[tuple[int, str], ...] = (
+    (0, "0 B"),
+    (1, "1 B"),
+    (999, "999 B"),
+    (1023, "1023 B"),
+    (1024, "1.0 KiB"),
+    (1536, "1.5 KiB"),
+    (11101, "10.8 KiB"),
+    (1048576, "1.0 MiB"),
+    (1234000, "1.2 MiB"),
+    (31041658614, "28.9 GiB"),
+    (1048543472353, "976.5 GiB"),
+    (1099511627776, "1.0 TiB"),
+)
 
 
 class TestFeature:
@@ -237,3 +308,93 @@ class TestDatasetInfo:
     def test_the_whole_record_renders_without_a_shard_role(self, info):
         """Not only the fields one at a time: ``repr`` is what a notebook prints."""
         assert "shard-" not in repr(info)
+
+    # -- the human rendering ------------------------------------------------
+    #
+    # `print(info)` is the first thing a reader does with a description, and the
+    # dataclass repr answers it with one line carrying every field of every
+    # feature and every split — for THEMol MBIS, fifteen features and three
+    # splits on a single line. `__str__` is the view for that question; `repr`
+    # stays the dataclass's own, because a REPL echo and a print are different
+    # questions and Python already gives them different hooks.
+
+    def test_printing_it_spans_several_lines(self, info):
+        assert len(str(info).splitlines()) > 1
+
+    def test_printing_it_leads_with_the_resolved_coordinate(self, info):
+        """Which artifact, at which version — the one fact a run has to record."""
+        assert str(info).splitlines()[0].strip() == COORDINATE
+
+    @pytest.mark.parametrize(("name", "other"), [("atomic_charge", "atomic_volume")])
+    def test_printing_it_gives_every_feature_a_line_of_its_own(self, info, name, other):
+        """Fifteen features on one line is the state this rendering replaces, so
+        the pin is not "the name appears" — it is that its line is its own."""
+        lines = [line for line in str(info).splitlines() if name in line]
+        assert len(lines) == 1, str(info)
+        assert other not in lines[0], str(info)
+
+    @pytest.mark.parametrize(("name", "count", "other"), [("train", 3, "val"), ("val", 2, "train")])
+    def test_printing_it_gives_every_split_a_line_with_its_count(self, info, name, count, other):
+        """Name and count on one line, and only one split's: two lines that each
+        carry half of it can be read in the wrong pairing."""
+        lines = [line for line in str(info).splitlines() if name in line]
+        assert len(lines) == 1, str(info)
+        assert str(count) in lines[0], str(info)
+        assert other not in lines[0], str(info)
+
+    def test_printing_it_humanizes_the_download_size(self, info):
+        """``download_size=11101`` is a number to count digits on; this is the
+        same fact in the form a reader can weigh."""
+        assert DOWNLOAD_SIZE_HUMANIZED in str(info)
+
+    def test_the_humanized_size_is_the_one_type_that_renders_bytes(self, info):
+        """One rendering, not two that agree today: the CLI prints the same type."""
+        assert DOWNLOAD_SIZE_HUMANIZED == str(info_type("ByteSize")(DOWNLOAD_SIZE))
+
+    def test_printing_it_names_no_shard_role(self, info):
+        """ac-002 holds for the human view too, not only for ``repr``."""
+        assert "shard-" not in str(info)
+
+    def test_the_dataclass_repr_is_left_alone(self, info):
+        """``repr`` is the exhaustive one — it is what a debugger and a failing
+        assertion print, and losing a field there costs more than it buys."""
+        assert repr(info).startswith("DatasetInfo(")
+
+    def test_the_two_renderings_are_not_the_same_string(self, info):
+        """A ``__str__`` that fell back to ``__repr__`` would pass every content
+        assertion above and answer neither question."""
+        assert str(info) != repr(info)
+
+
+class TestByteSize:
+    """One byte count, in the form a reader can weigh — and one place it is done.
+
+    Binary units (a 40 GB budget is a 2^30 GB budget everywhere else in this
+    repo), one decimal, and a bare ``B`` below 1 KiB. Every literal in
+    :data:`HUMANIZED` is written out rather than computed here: a golden that
+    called the implementation would agree with whatever the implementation were
+    edited to say, and the whole value of a rendering pin is that it does not.
+    """
+
+    @pytest.mark.parametrize(("size", "text"), HUMANIZED, ids=lambda value: str(value))
+    def test_it_renders_the_declared_text(self, size, text):
+        assert str(info_type("ByteSize")(size)) == text
+
+    def test_a_kibibyte_is_1024_bytes_not_1000(self):
+        """The one decision the whole table turns on, stated on its own."""
+        byte_size = info_type("ByteSize")
+        assert str(byte_size(1024)) == "1.0 KiB"
+        assert str(byte_size(1000)) == "1000 B"
+
+    def test_it_stops_at_the_largest_unit_below_the_value(self):
+        """0.95 TiB is still reported in GiB: a leading ``0.`` is a unit too far."""
+        assert str(info_type("ByteSize")(1048543472353)) == "976.5 GiB"
+
+    def test_it_carries_the_exact_count_it_was_given(self):
+        """The rendering is lossy on purpose; the value must not be."""
+        assert info_type("ByteSize")(31041658614).value == 31041658614
+
+    def test_it_is_frozen(self):
+        size = info_type("ByteSize")(1024)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            size.value = 2048
