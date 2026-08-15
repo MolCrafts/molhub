@@ -21,6 +21,24 @@ def idx(registry_dir):
     return ["--registry", str(registry_dir)]
 
 
+def _words(output: str) -> set[str]:
+    """Every whitespace/punctuation-delimited token of *output*.
+
+    Tokens rather than substrings: ``"val"`` must be a word of its own, so a
+    rendering that only ever said ``"value"`` cannot pass for one that lists the
+    validation split.
+    """
+    return set(re.findall(r"\w+", output))
+
+
+def _reports(output: str, *, name: str, count: int) -> bool:
+    """Whether one line of *output* names *name* and *count* as words of their own."""
+    return any(
+        re.search(rf"\b{name}\b", line) and re.search(rf"\b{count}\b", line)
+        for line in output.splitlines()
+    )
+
+
 class TestSearch:
     def test_lists_matching_artifacts(self, idx):
         result = runner.invoke(app, ["search", "qm9", *idx])
@@ -42,6 +60,47 @@ class TestSearch:
 
 
 class TestInfo:
+    """What is in this dataset — content first, transport behind ``--files``.
+
+    ``hf-facade-04-streaming-prepare`` ac-006 moved the artifact table behind a
+    flag and made the body of ``info`` come from ``DatasetBuilder.info``, the
+    content authority, rather than from a second Manifest-only rendering. The
+    three assertions that pinned roles, digests and locators in the bare output
+    therefore moved to ``--files`` instead of being dropped: they are still the
+    right claims, about the other view. ``molhub info qm9`` used to exit 1 as a
+    malformed coordinate and now resolves as a HuggingFace-spelled name, so the
+    refusal is pinned on a name the registry genuinely does not declare.
+
+    The THEMol fixture below is where the *content* half is checked, because it
+    is the one with a description, features and a table-backed split count.
+    """
+
+    @pytest.fixture
+    def themol(self, tmp_path, monkeypatch):
+        """``dataset:themol/mbis@1`` declared, its split derivation filed, hub sealed.
+
+        ``info`` staying fetch-free is a feature, not an accident, so the hub's
+        one verb is made an error for the duration: a rendering that reached for
+        shard bytes to print an example record fails here rather than merely
+        being slow on a 150 GB artifact.
+        """
+        from molhub.molhub import Molhub
+
+        from .test_loader.conftest import SPLIT_SUBPATH, build_registry, write_split_derivation
+
+        root = tmp_path / "registry"
+        build_registry(root)
+        write_split_derivation(tmp_path.joinpath("home", *SPLIT_SUBPATH))
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+
+        def refuse(self, coordinate, *, roles=None):
+            raise AssertionError(
+                f"`molhub info` fetched {coordinate} roles={roles!r}; info is fetch-free."
+            )
+
+        monkeypatch.setattr(Molhub, "fetch", refuse)
+        return ["--registry", str(root)]
+
     def test_prints_the_coordinate(self, idx):
         result = runner.invoke(app, ["info", "qm9@v2", *idx])
         assert result.exit_code == 0
@@ -52,12 +111,12 @@ class TestInfo:
         assert "CC0-1.0" in out
         assert "10.1038/sdata.2014.22" in out
 
-    def test_prints_every_artifact_role(self, idx):
-        out = runner.invoke(app, ["info", "qm9@v2", *idx]).stdout
+    def test_files_prints_every_artifact_role(self, idx):
+        out = runner.invoke(app, ["info", "qm9@v2", "--files", *idx]).stdout
         assert "[main]" in out and "[exclude]" in out
 
-    def test_prints_the_digest_and_locators(self, idx):
-        out = runner.invoke(app, ["info", "qm9@v2", *idx]).stdout
+    def test_files_prints_the_digest_and_locators(self, idx):
+        out = runner.invoke(app, ["info", "qm9@v2", "--files", *idx]).stdout
         assert "md5:" in out
         assert "fake://main-backup" in out
 
@@ -67,8 +126,62 @@ class TestInfo:
     def test_unknown_coordinate_exits_nonzero(self, idx):
         assert runner.invoke(app, ["info", "qm9@v9", *idx]).exit_code == 1
 
-    def test_malformed_coordinate_exits_nonzero(self, idx):
-        assert runner.invoke(app, ["info", "qm9", *idx]).exit_code == 1
+    def test_an_undeclared_name_exits_nonzero(self, idx):
+        assert runner.invoke(app, ["info", "molcrafts/not-a-dataset", *idx]).exit_code == 1
+
+    # -- ac-006: content first, roles behind a flag -------------------------
+
+    def test_a_name_without_a_version_resolves(self, themol):
+        """The HuggingFace spelling ac-006 is written in: no ``@version``."""
+        assert runner.invoke(app, ["info", "themol/mbis", *themol]).exit_code == 0
+
+    def test_it_prints_the_description(self, themol):
+        from .test_loader.conftest import DESCRIPTION
+
+        assert DESCRIPTION in runner.invoke(app, ["info", "themol/mbis", *themol]).output
+
+    def test_it_prints_the_features(self, themol):
+        """What a record carries — the answer to 「shard-000 是什么东西」."""
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
+        assert "atomic_charge" in out
+
+    def test_it_prints_every_split(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
+        assert {"train", "val", "test"} <= _words(out)
+
+    def test_it_prints_the_count_of_a_split(self, themol):
+        """Three train rows, from one gzipped table and no shard bytes at all."""
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
+        assert _reports(out, name="train", count=3), out
+
+    def test_it_prints_no_artifact_role(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
+        assert "shard-000" not in out
+        assert "shard-001" not in out
+
+    def test_it_prints_no_filename(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", *themol]).output
+        assert "mbis_0.h5" not in out
+
+    def test_files_prints_the_roles(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
+        assert "shard-000" in out and "shard-001" in out
+
+    def test_files_prints_filenames_and_sizes(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
+        assert "mbis_0.h5" in out
+        assert "1000" in out
+
+    def test_files_prints_locators(self, themol):
+        out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
+        assert "fake://mbis-0" in out
+
+    def test_files_still_prints_the_content_first(self, themol):
+        """``--files`` adds the transport view; it does not become the report."""
+        from .test_loader.conftest import DESCRIPTION
+
+        out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
+        assert out.index(DESCRIPTION) < out.index("shard-000")
 
 
 class TestFetch:

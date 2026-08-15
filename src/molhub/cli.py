@@ -3,6 +3,19 @@
 The verbs deliberately match the Python API and the planned TypeScript client:
 ``search`` / ``info`` / ``fetch`` mean the same thing everywhere, so moving
 between the three does not mean relearning the vocabulary.
+
+``info`` is **content first** (``hf-facade-04-streaming-prepare`` ac-006): what a
+record carries and which splits exist, sourced from
+:attr:`~molhub.loader.builder.DatasetBuilder.info` — the same answer the Python
+API gives, rather than a second rendering of the manifest. Roles, filenames,
+sizes, digests and locators are transport, and transport moved behind
+``--files``. Neither view prints an example record: producing one would cost the
+bytes of a 150 GB artifact to show one molecule, and ``info`` staying free is
+worth more. It *is* free for every dataset whose splits a published derivation
+states; for the few whose class owns its splits the count is the dataset's own
+``len``, which costs what reading it costs — that price is
+:class:`~molhub.loader.builder.DatasetBuilder`'s, stated in its docstring, and
+this verb inherits it rather than inventing a second, cheaper answer.
 """
 
 from __future__ import annotations
@@ -12,8 +25,10 @@ from typing import Annotated, Optional
 
 import typer
 
+from molhub.conveyor import DEFAULT_BUDGET_BYTES, ConveyorError, default_ledger_path
 from molhub.coordinate import InvalidCoordinate
-from molhub.manifest import InvalidManifest
+from molhub.loader import AmbiguousRevision, DatasetBuilder, DatasetInfo
+from molhub.manifest import InvalidManifest, Manifest
 from molhub.molhub import Molhub
 from molhub.registry import UnknownArtifact
 from molhub.sources import BlobStore, Digest, SourceError
@@ -36,16 +51,14 @@ _HomeOption = Annotated[
     typer.Option("--home", help="Cache root. Defaults to $MOLHUB_HOME."),
 ]
 
-# The conveyor's two tiers and its ledger, spelled here because the CLI is where
-# a user's `--home` becomes a path. Neither tier is under `files/`, which stays
-# the cross-client layout the TypeScript client reads.
+# The conveyor's two tiers, spelled here because the CLI is where a user's
+# `--home` becomes a path. Neither tier is under `files/`, which stays the
+# cross-client layout the TypeScript client reads. The bookkeeping file and the
+# rolling budget are *not* spelled here any more: `molhub.conveyor` states both,
+# because a streaming walk writes the same file and two defaults would
+# desynchronize the claims `cache coverage` replays.
 _RAW_SUBDIR = "conveyor/raw"
 _BLOCKS_SUBDIR = "conveyor/blocks"
-_LEDGER_SEGMENTS = ("conveyor", "ledger.jsonl")
-
-# The strategy's per-tier rolling working set, restated in exactly one place;
-# see `.claude/notes/streaming-data-tiers.md`.
-_DEFAULT_BUDGET_BYTES = 40_000_000_000
 
 
 def _hub(registry: Path | None) -> Molhub:
@@ -56,11 +69,53 @@ def _hub(registry: Path | None) -> Molhub:
         raise typer.BadParameter(str(error)) from error
 
 
-def _resolve(hub: Molhub, coordinate: str):
+def _resolve(hub: Molhub, coordinate: str) -> Manifest:
     """Resolve, mapping the two user-facing failures onto exit code 1."""
     try:
         return hub.resolve(coordinate)
     except (InvalidCoordinate, UnknownArtifact) as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+def _describe(hub: Molhub, name: str) -> DatasetInfo:
+    """What *name* contains, from the same authority the Python API reports.
+
+    The argument is accepted in either spelling a user is likely to type — the
+    HuggingFace one (``themol/mbis``) and the coordinate one
+    (``dataset:themol/mbis@1``) — because the two verbs beside this one have
+    always taken the second and the Python API takes the first. The ``@version``
+    is split off here rather than inside
+    :class:`~molhub.loader.naming.DatasetName`, which refuses it on purpose so
+    that one name has one spelling on that path.
+
+    Args:
+        hub: The resolved registry.
+        name: The dataset name or coordinate, as typed.
+
+    Returns:
+        The description — content only, and never a file role.
+
+    Raises:
+        typer.Exit: With code 1 when the name is malformed, is not declared,
+            declares versions that do not order, has a split derivation that
+            does not verify, or — for a dataset whose class owns its splits, and
+            whose counts are therefore its own — cannot be read. Each of those is
+            something the reader can act on, and a traceback would bury it.
+    """
+    text, separator, revision = name.partition("@")
+    try:
+        builder = DatasetBuilder(
+            text, revision=revision if separator else None, registry=hub.registry, hub=hub
+        )
+        return builder.info
+    except (
+        InvalidCoordinate,
+        UnknownArtifact,
+        AmbiguousRevision,
+        ConveyorError,
+        SourceError,
+    ) as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 
@@ -88,23 +143,45 @@ def search(
 
 @app.command()
 def info(
-    coordinate: Annotated[str, typer.Argument(help="Full or shorthand coordinate.")],
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="Dataset name (themol/mbis), optionally with @version, or a full coordinate."
+        ),
+    ],
+    files: Annotated[
+        bool,
+        typer.Option("--files", help="Also list the artifact's roles, digests and locators."),
+    ] = False,
     registry: _RegistryOption = None,
 ) -> None:
-    """Show everything the registry knows about COORDINATE."""
-    manifest = _resolve(_hub(registry), coordinate)
-    typer.echo(manifest.coordinate.canonical)
+    """Show what NAME contains — and, with --files, which files carry it."""
+    hub = _hub(registry)
+    described = _describe(hub, name)
+    manifest = _resolve(hub, described.coordinate.canonical)
+
+    typer.echo(described.coordinate.canonical)
     typer.echo(f"  title      {manifest.title}")
-    if manifest.description:
-        typer.echo(f"  about      {manifest.description}")
-    if manifest.license:
-        typer.echo(f"  license    {manifest.license}")
-    if manifest.doi:
-        typer.echo(f"  doi        {manifest.doi}")
-    if manifest.targets.graph_level:
-        typer.echo(f"  graph      {', '.join(manifest.targets.graph_level)}")
-    if manifest.targets.atom_level:
-        typer.echo(f"  atom       {', '.join(manifest.targets.atom_level)}")
+    if described.description:
+        typer.echo(f"  about      {described.description}")
+    if described.license:
+        typer.echo(f"  license    {described.license}")
+    if described.citation:
+        typer.echo(f"  doi        {described.citation}")
+    typer.echo(f"  record     {described.record_type}")
+    typer.echo(f"  download   {described.download_size} B")
+    for feature in described.features:
+        units = f"  {feature.units}" if feature.units else ""
+        typer.echo(f"  feature    {feature.name}  [{feature.level}]{units}")
+    for split in described.splits:
+        typer.echo(
+            f"  split      {split.name}  {split.num_examples} "
+            f"{_plural(split.num_examples, 'record', 'records')}"
+        )
+    if described.splits:
+        typer.echo(f"  splits from {described.splits[0].provenance}")
+    if not files:
+        return
     for role, artifact in manifest.artifacts.items():
         size = f"  {artifact.size} B" if artifact.size else ""
         typer.echo(f"  [{role}] {artifact.filename}{size}")
@@ -185,10 +262,10 @@ def cache_status(
     home: _HomeOption = None,
     budget_raw: Annotated[
         int, typer.Option("--budget-raw", help="Byte budget for the raw shard tier.")
-    ] = _DEFAULT_BUDGET_BYTES,
+    ] = DEFAULT_BUDGET_BYTES,
     budget_blocks: Annotated[
         int, typer.Option("--budget-blocks", help="Byte budget for the sealed block tier.")
-    ] = _DEFAULT_BUDGET_BYTES,
+    ] = DEFAULT_BUDGET_BYTES,
 ) -> None:
     """Report each conveyor tier's residency against its own byte budget.
 
@@ -202,7 +279,7 @@ def cache_status(
     from molhub.conveyor import Ledger, TierStore
 
     root = BlobStore(home).root
-    ledger = Ledger(root.joinpath(*_LEDGER_SEGMENTS))
+    ledger = Ledger(default_ledger_path(root))
     tiers = [
         ("raw", TierStore(root, subdir=_RAW_SUBDIR, budget_bytes=budget_raw, ledger=ledger)),
         (
@@ -263,10 +340,10 @@ def cache_coverage(
                 err=True,
             )
             raise typer.Exit(code=1)
-        ledger = Ledger(root.joinpath(*_LEDGER_SEGMENTS))
+        ledger = Ledger(default_ledger_path(root))
         records = ledger.records()
         blocks = TierStore(
-            root, subdir=_BLOCKS_SUBDIR, budget_bytes=_DEFAULT_BUDGET_BYTES, ledger=ledger
+            root, subdir=_BLOCKS_SUBDIR, budget_bytes=DEFAULT_BUDGET_BYTES, ledger=ledger
         )
         units_by_block = {item.block_id: item.units for item in ReadyBlocks(blocks).metadata()}
     except ConveyorError as error:

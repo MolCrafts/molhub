@@ -12,14 +12,46 @@ package — including ``test_layering.py``, which is answerable today — into o
 collection error instead of failures with names on them.
 
 The fixture dataset is ``dataset:themol/mbis@1`` in miniature: two shards of
-three water records each, and the miniature ``class1-universal-splits@1``
-derivation that assigns them. The rows are chosen so that
+three records each, and the miniature ``class1-universal-splits@1`` derivation
+that assigns them. The rows are chosen so that
 
 * the three splits have three *different* counts (train 3, val 2, test 1), so a
   test cannot pass by reading the wrong split's number, and
 * one shard holds two train rows while the other holds one, which is the only
   arrangement that can tell "walked on to the next shard" apart from "re-read
   the shard it already had".
+
+**Three species, and why the two split tables agree** (added for
+``hf-facade-04-streaming-prepare``). A split is assigned per *record uuid* in
+``mbis_uuid_splits.csv.gz`` and per *molecular identity* in
+``identity_splits.csv.gz``, and the prepare stage routes by the second while a
+split view filters by the first. Six water records would carry **one** identity
+between them, so no per-uuid assignment could agree with any per-identity one
+and every prepare test would die in ``UnroutableUnitError`` for a reason that
+says nothing about the code under test. So each record is one of three species
+— water, hydrogen peroxide, hydrogen fluoride — assigned so that a species is
+never split across two splits (:data:`SPECIES_BY_KEY`), which is what a real
+molecule-level derivation guarantees. The split counts, the train keys and the
+shard membership are unchanged by that; ``mbis-a``, ``mbis-c`` and ``mbis-d``
+— the whole train split — are still water.
+
+**A second fixture dataset: ``dataset:themol/torsion-scan@1``.** ``prepare``
+refuses a dataset whose targets ``molix.block/1`` routes none of — which is
+exactly what MBIS is — so the fixture above can only demonstrate that refusal,
+never a successful export. The torsion-scan fixture is the routable counterpart:
+every target of a scan (``pos``, ``energy``, ``forces``, ``torsion_angle`` and
+the scanned dihedral) has a column route, so a successful materialization is
+observable without asking the export to drop anything. It is built the same way
+— two shards, six records, three species, train 3 / val 2 / test 1 — with two
+deliberate differences:
+
+* one record is one *whole scan*, so units and frames no longer coincide: the
+  train split is 3 units and 7 frames (:data:`TORSION_CONSTRAINTS`), and a test
+  reading the wrong one of those two numbers fails.
+* a dihedral needs four atoms, so its species are four-atom chains — HSSH,
+  HOOH, HSOH. HOOH is shared with the MBIS fixture (same molecule, same
+  identity, same ``val``), which is what a molecule-level derivation spanning
+  two subsets looks like.
 """
 
 from __future__ import annotations
@@ -29,6 +61,7 @@ import gzip
 import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import h5py
@@ -36,7 +69,9 @@ import numpy as np
 import pytest
 
 from molhub.conveyor.tier import DerivedLayout
+from molhub.coordinate import Coordinate
 from molhub.registry import Registry
+from molhub.sources.blobs import BlobStore
 
 # ---------------------------------------------------------------------------
 # The fixture dataset: two shards of dataset:themol/mbis@1.
@@ -50,21 +85,82 @@ WATER = "[O:2]([H:1])[H:3]"
 WATER_NUMBERS: tuple[int, ...] = (1, 8, 1)
 WATER_COORDS = np.asarray([[-0.7, 0.0, 0.0], [0.0, 0.0, 0.0], [0.7, 0.0, 0.0]], dtype=np.float64)
 
+
+@dataclass(frozen=True)
+class Species:
+    """One molecule a fixture record can be: its mapped SMILES and its geometry.
+
+    Attributes:
+        smiles: Atom-mapped isomeric SMILES, with the map ids exactly ``1..N``
+            — what ``THEMolShardDataset`` parses the topology out of.
+        numbers: Atomic numbers in atom-map order, which the reader cross-checks
+            against the parsed SMILES.
+        coords: ``(N, 3)`` positions, on a line and 0.7 Å apart.
+        identity: blake2b-128 of :attr:`smiles` — the molecular identity the
+            prepare stage routes by. A pinned literal, mirrored from
+            ``tests/test_conveyor/test_prepare.py``, never computed here: split
+            *production* and split *routing* drifting apart is exactly what a
+            recomputed identity would hide.
+    """
+
+    smiles: str
+    numbers: tuple[int, ...]
+    coords: np.ndarray
+    identity: str
+
+
+#: blake2b-128 of each mapped SMILES; see :class:`Species`.
+WATER_IDENTITY = "810eef0a316c3ae716b15724bd6a8779"
+HOOH_IDENTITY = "159fcddf7a882e2d79a52e4f129e2459"
+HF_IDENTITY = "b0881071b1d54c8fb0d6817885e2a9ab"
+
+#: The three species a fixture record can be, by short name.
+SPECIES: Mapping[str, Species] = {
+    "water": Species(WATER, WATER_NUMBERS, WATER_COORDS, WATER_IDENTITY),
+    "hooh": Species(
+        "[H:1][O:2][O:3][H:4]",
+        (1, 8, 8, 1),
+        np.asarray(
+            [[-1.4, 0.0, 0.0], [-0.7, 0.0, 0.0], [0.0, 0.0, 0.0], [0.7, 0.0, 0.0]],
+            dtype=np.float64,
+        ),
+        HOOH_IDENTITY,
+    ),
+    "hf": Species(
+        "[H:1][F:2]",
+        (1, 9),
+        np.asarray([[-0.7, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.float64),
+        HF_IDENTITY,
+    ),
+}
+
 #: Which HDF5 group keys each shard holds, in the order h5py lists them.
 SHARD_KEYS: Mapping[str, tuple[str, ...]] = {
     "shard-000": ("mbis-a", "mbis-b", "mbis-c"),
     "shard-001": ("mbis-d", "mbis-e", "mbis-f"),
 }
 
+#: Which species each record is. One species never straddles two splits, so the
+#: uuid-keyed and identity-keyed tables below assign the same thing — see the
+#: module docstring. A key absent from here is water.
+SPECIES_BY_KEY: Mapping[str, str] = {
+    "mbis-a": "water",
+    "mbis-b": "hooh",
+    "mbis-c": "water",
+    "mbis-d": "water",
+    "mbis-e": "hf",
+    "mbis-f": "hooh",
+}
+
 #: ``uuid, identity, split`` rows of the miniature split derivation. Train rows
 #: land in both shards, two of them in the first.
 SPLIT_ROWS: tuple[tuple[str, str, str], ...] = (
-    ("mbis-a", "identity-1", "train"),
-    ("mbis-b", "identity-2", "val"),
-    ("mbis-c", "identity-3", "train"),
-    ("mbis-d", "identity-4", "train"),
-    ("mbis-e", "identity-5", "test"),
-    ("mbis-f", "identity-6", "val"),
+    ("mbis-a", WATER_IDENTITY, "train"),
+    ("mbis-b", HOOH_IDENTITY, "val"),
+    ("mbis-c", WATER_IDENTITY, "train"),
+    ("mbis-d", WATER_IDENTITY, "train"),
+    ("mbis-e", HF_IDENTITY, "test"),
+    ("mbis-f", HOOH_IDENTITY, "val"),
 )
 
 #: What ``_SplitTable.counts()`` folds out of :data:`SPLIT_ROWS`.
@@ -73,6 +169,103 @@ SPLIT_COUNTS: Mapping[str, int] = {"train": 3, "val": 2, "test": 1}
 #: The train rows in the order a sequential walk of the shards visits them.
 TRAIN_KEYS: tuple[str, ...] = ("mbis-a", "mbis-c", "mbis-d")
 
+# ---------------------------------------------------------------------------
+# The second fixture dataset: two shards of dataset:themol/torsion-scan@1, the
+# routable counterpart of the one above. See the module docstring.
+# ---------------------------------------------------------------------------
+
+TORSION_COORDINATE = "dataset:themol/torsion-scan@1"
+
+#: blake2b-128 of each mapped SMILES, computed once with
+#: ``THEMolUnitEncoder.identity`` and pinned here as literals — never recomputed
+#: at fixture time, for the reason :class:`Species` states.
+HSSH_IDENTITY = "f534f4ca9233fbebaf8d589d560bb2e2"
+HSOH_IDENTITY = "5f48010f759da2c0cf71a9a0abb616ce"
+
+
+def torsion_coords(shift: float) -> np.ndarray:
+    """One geometry of the scanned four-atom chain, twisted by *shift*.
+
+    The same shape ``tests/test_dataset/test_themol.py`` scans over: a central
+    bond along x with the two end atoms off it, so the dihedral about
+    ``(0, 1, 2, 3)`` is defined (a zero-length central bond is refused by the
+    reader) and moves with *shift*.
+
+    Args:
+        shift: How far the two end atoms are displaced along z; one constraint
+            index, one shift.
+
+    Returns:
+        ``(4, 3)`` positions in atom-map order.
+    """
+    return np.asarray(
+        [
+            [-1.0, 1.0, shift],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 1.0, 1.0 + shift],
+        ],
+        dtype=np.float64,
+    )
+
+
+#: The three four-atom species a scan record can be. ``coords`` is the
+#: constraint-0 geometry; a scan's real geometries are per-constraint and come
+#: from :func:`torsion_coords`.
+TORSION_SPECIES: Mapping[str, Species] = {
+    "hssh": Species("[H:1][S:2][S:3][H:4]", (1, 16, 16, 1), torsion_coords(0.0), HSSH_IDENTITY),
+    "hooh": Species("[H:1][O:2][O:3][H:4]", (1, 8, 8, 1), torsion_coords(0.0), HOOH_IDENTITY),
+    "hsoh": Species("[H:1][S:2][O:3][H:4]", (1, 16, 8, 1), torsion_coords(0.0), HSOH_IDENTITY),
+}
+
+#: Which HDF5 group keys each torsion shard holds, in the order h5py lists them.
+TORSION_SHARD_KEYS: Mapping[str, tuple[str, ...]] = {
+    "shard-000": ("scan-a", "scan-b", "scan-c"),
+    "shard-001": ("scan-d", "scan-e", "scan-f"),
+}
+
+#: Which species each scan is, in the same per-shard arrangement as
+#: :data:`SPECIES_BY_KEY`: two train rows in the first shard, one in the second.
+TORSION_SPECIES_BY_KEY: Mapping[str, str] = {
+    "scan-a": "hssh",
+    "scan-b": "hooh",
+    "scan-c": "hssh",
+    "scan-d": "hssh",
+    "scan-e": "hsoh",
+    "scan-f": "hooh",
+}
+
+#: How many constrained geometries each scan holds — its frame count. They are
+#: deliberately unequal so that a split's frame count is not its unit count
+#: times a constant, which is the one arrangement that cannot tell the two
+#: numbers apart. Train is ``2 + 3 + 2 = 7`` frames over 3 units.
+TORSION_CONSTRAINTS: Mapping[str, int] = {
+    "scan-a": 2,
+    "scan-b": 2,
+    "scan-c": 3,
+    "scan-d": 2,
+    "scan-e": 1,
+    "scan-f": 2,
+}
+
+#: ``uuid, identity, split`` rows of the torsion half of the derivation. A scan
+#: uuid is a *scan* identity and shares no key space with the MBIS uuids, which
+#: is why it is a separate table.
+TORSION_SPLIT_ROWS: tuple[tuple[str, str, str], ...] = (
+    ("scan-a", HSSH_IDENTITY, "train"),
+    ("scan-b", HOOH_IDENTITY, "val"),
+    ("scan-c", HSSH_IDENTITY, "train"),
+    ("scan-d", HSSH_IDENTITY, "train"),
+    ("scan-e", HSOH_IDENTITY, "test"),
+    ("scan-f", HOOH_IDENTITY, "val"),
+)
+
+#: What ``_SplitTable.counts()`` folds out of :data:`TORSION_SPLIT_ROWS`.
+TORSION_SPLIT_COUNTS: Mapping[str, int] = {"train": 3, "val": 2, "test": 1}
+
+#: The train scans in the order a sequential walk of the shards visits them.
+TORSION_TRAIN_KEYS: tuple[str, ...] = ("scan-a", "scan-c", "scan-d")
+
 SPLIT_COORDINATE = "dataset:molcrafts/class1-universal-splits@1"
 SPLIT_SEED = 20260814
 SPLIT_RATIOS = "8:1:1 train:val:test, molecule level"
@@ -80,7 +273,10 @@ SPLIT_GENERATOR = "scripts/build_class1_splits.py"
 
 #: The literal filenames from ``scripts/build_class1_splits.py``'s ``out_name``
 #: block, mirrored (not imported) exactly as ``molhub.conveyor.splits`` does.
+#: The torsion one carries no ``_uuid_`` — that irregularity is the producer's,
+#: and restating it here is what keeps a wrong guess visible.
 UUID_FILENAME = "mbis_uuid_splits.csv.gz"
+TORSION_UUID_FILENAME = "torsion_scan_splits.csv.gz"
 IDENTITY_FILENAME = "identity_splits.csv.gz"
 
 #: Where the derivation lives under a molhub home, per the spec's D6.
@@ -189,12 +385,19 @@ def build_registry(
 # ---------------------------------------------------------------------------
 
 
+def species_of(key: str) -> Species:
+    """The species record *key* holds; water for a key nobody assigned one to."""
+    return SPECIES[SPECIES_BY_KEY.get(key, "water")]
+
+
 def write_shard(path: Path, keys: Sequence[str]) -> Path:
-    """Write a THEMol MBIS shard holding one water record per key in *keys*.
+    """Write a THEMol MBIS shard holding one record per key in *keys*.
 
     The group layout mirrors ``tests/test_dataset/test_themol.py``'s builder —
     inline rather than imported, so the loader fixtures cannot be broken by an
-    edit made for a THEMol reader test.
+    edit made for a THEMol reader test. Which molecule each key is comes from
+    :func:`species_of`; the per-atom MBIS arrays are sized from it, so a shard
+    of mixed species is as readable as a shard of one.
 
     Args:
         path: File to write.
@@ -207,27 +410,91 @@ def write_shard(path: Path, keys: Sequence[str]) -> Path:
     string = h5py.string_dtype("utf-8")
     with h5py.File(path, "w") as handle:
         for key in keys:
+            species = species_of(key)
+            n_atoms = len(species.numbers)
             group = handle.create_group(key)
-            group.create_dataset("mapped_nonisomeric_smiles", data=WATER, dtype=string)
-            group.create_dataset("mapped_isomeric_smiles", data=WATER, dtype=string)
+            group.create_dataset("mapped_nonisomeric_smiles", data=species.smiles, dtype=string)
+            group.create_dataset("mapped_isomeric_smiles", data=species.smiles, dtype=string)
             group.create_dataset(
-                "atomic_numbers", data=np.asarray(WATER_NUMBERS, dtype=np.int32)[:, None]
+                "atomic_numbers", data=np.asarray(species.numbers, dtype=np.int32)[:, None]
             )
-            group.create_dataset("coords", data=WATER_COORDS)
+            group.create_dataset("coords", data=species.coords)
             info = group.create_group("mbis_info")
-            info.create_dataset("atomic_volumes", data=np.ones((3, 1)))
-            info.create_dataset("atomic_charge", data=np.asarray([[0.4], [-0.8], [0.4]]))
-            info.create_dataset("atomic_dipole", data=np.ones((3, 3)))
-            info.create_dataset("atomic_quadrupole", data=np.ones((3, 3, 3)))
-            group.create_dataset(
-                "parameters", data=np.asarray([[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+            info.create_dataset("atomic_volumes", data=np.ones((n_atoms, 1)))
+            info.create_dataset(
+                "atomic_charge",
+                data=np.asarray([[0.4 if number == 1 else -0.8] for number in species.numbers]),
             )
+            info.create_dataset("atomic_dipole", data=np.ones((n_atoms, 3)))
+            info.create_dataset("atomic_quadrupole", data=np.ones((n_atoms, 3, 3)))
+            group.create_dataset(
+                "parameters",
+                data=np.arange(2 * n_atoms, dtype=np.float64).reshape(n_atoms, 2),
+            )
+    return path
+
+
+def torsion_species_of(key: str) -> Species:
+    """The species scan *key* is; HSSH for a key nobody assigned one to."""
+    return TORSION_SPECIES[TORSION_SPECIES_BY_KEY.get(key, "hssh")]
+
+
+def write_torsion_shard(path: Path, keys: Sequence[str]) -> Path:
+    """Write a THEMol torsion-scan shard holding one scan per key in *keys*.
+
+    The group layout mirrors ``tests/test_dataset/test_themol.py``'s torsion
+    builder — ``torsion_atom_indices`` beside the mapped SMILES, one
+    ``constraint N`` subgroup per scanned geometry — inline rather than
+    imported, for the reason :func:`write_shard` states. How many constraints
+    each scan holds comes from :data:`TORSION_CONSTRAINTS`, so the fixture's
+    frame counts are stated in one place.
+
+    Args:
+        path: File to write.
+        keys: Group keys, in the order they should be created.
+
+    Returns:
+        *path*, for chaining into a fake hub's role table.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    string = h5py.string_dtype("utf-8")
+    with h5py.File(path, "w") as handle:
+        for key in keys:
+            species = torsion_species_of(key)
+            group = handle.create_group(key)
+            group.create_dataset("mapped_nonisomeric_smiles", data=species.smiles, dtype=string)
+            group.create_dataset("mapped_isomeric_smiles", data=species.smiles, dtype=string)
+            group.create_dataset(
+                "atomic_numbers", data=np.asarray(species.numbers, dtype=np.int32)[:, None]
+            )
+            group.create_dataset("torsion_atom_indices", data=np.arange(4, dtype=np.int32))
+            for index in range(TORSION_CONSTRAINTS[key]):
+                coords = torsion_coords(float(index))
+                constraint = group.create_group(f"constraint {index}")
+                constraint.create_dataset("coords", data=coords)
+                constraint.create_dataset("energy", data=np.asarray(-1.0 - index))
+                constraint.create_dataset("forces", data=np.full_like(coords, 0.5 * index))
     return path
 
 
 # ---------------------------------------------------------------------------
 # The split derivation.
 # ---------------------------------------------------------------------------
+
+
+def consistent_identity_rows() -> list[tuple[str, str]]:
+    """The molecule-level assignment both uuid tables were folded from.
+
+    One row per identity, in first-appearance order. HOOH appears in both
+    fixture datasets and is ``val`` in each, so folding cannot produce two rows
+    for one molecule — which is the property a molecule-level derivation has and
+    a per-record one does not.
+
+    Returns:
+        ``(identity, split)`` rows, five of them.
+    """
+    folded = {identity: split for _, identity, split in (*SPLIT_ROWS, *TORSION_SPLIT_ROWS)}
+    return list(folded.items())
 
 
 def _write_rows(path: Path, header: Sequence[str], rows: Iterable[Sequence[str]]) -> None:
@@ -239,8 +506,17 @@ def _write_rows(path: Path, header: Sequence[str], rows: Iterable[Sequence[str]]
             writer.writerow(list(row))
 
 
-def write_split_derivation(root: Path) -> Path:
+def write_split_derivation(
+    root: Path,
+    *,
+    identity_rows: Sequence[tuple[str, str]] | None = None,
+) -> Path:
     """Write a miniature ``class1-universal-splits/1/`` directory at *root*.
+
+    Both uuid-keyed tables are written — one per fixture dataset — beside the
+    single molecule-level table they were folded from, which is the shape the
+    real derivation has: one directory, one seed, one answer per molecule,
+    however many subsets that molecule appears in.
 
     The ``output_sha256`` block is computed here, exactly as the producing
     script computes it, which is what makes the loaded table verifiable rather
@@ -248,16 +524,23 @@ def write_split_derivation(root: Path) -> Path:
 
     Args:
         root: Directory to write the tables and ``metadata.json`` into.
+        identity_rows: ``identity, split`` rows for the molecule-level table.
+            ``None`` folds them out of :data:`SPLIT_ROWS` and
+            :data:`TORSION_SPLIT_ROWS`, which is the consistent derivation. Pass
+            a shorter list to build a derivation that assigns a *record* a split
+            but not its *molecule* — the one state that makes a routing refusal
+            reachable.
 
     Returns:
         *root*.
     """
     root.mkdir(parents=True, exist_ok=True)
     _write_rows(root / UUID_FILENAME, ("uuid", "identity", "split"), SPLIT_ROWS)
+    _write_rows(root / TORSION_UUID_FILENAME, ("uuid", "identity", "split"), TORSION_SPLIT_ROWS)
     _write_rows(
         root / IDENTITY_FILENAME,
         ("identity", "split"),
-        ((identity, split) for _, identity, split in SPLIT_ROWS),
+        identity_rows if identity_rows is not None else consistent_identity_rows(),
     )
     metadata = {
         "coordinate": SPLIT_COORDINATE,
@@ -266,11 +549,128 @@ def write_split_derivation(root: Path) -> Path:
         "generator": SPLIT_GENERATOR,
         "output_sha256": {
             name: hashlib.sha256((root / name).read_bytes()).hexdigest()
-            for name in (UUID_FILENAME, IDENTITY_FILENAME)
+            for name in (UUID_FILENAME, TORSION_UUID_FILENAME, IDENTITY_FILENAME)
         },
     }
     (root / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return root
+
+
+# ---------------------------------------------------------------------------
+# The verified manifest: the same artifact, with the bytes it really has.
+#
+# `manifest_yaml` above declares three distinctive fake sizes and no digest,
+# because the map-style path verifies nothing. A streaming walk goes through
+# `ShardTransfer`, which re-checks size *and* digest against the manifest and
+# deletes anything that disagrees, so its fixture manifest has to state the
+# truth about the files on disk. Two manifests rather than one switchable one:
+# a test reading `DOWNLOAD_SIZE` and a test watching a byte budget want
+# different, incompatible things from the same field.
+# ---------------------------------------------------------------------------
+
+
+def verified_manifest_yaml(
+    files: Mapping[str, Path],
+    *,
+    namespace: str = "themol",
+    name: str = "mbis",
+    version: str = "1",
+    title: str = "THEMol MBIS atomic electrostatics",
+    description: str = DESCRIPTION,
+) -> str:
+    """A manifest declaring the real size and sha256 of every file in *files*.
+
+    Filenames and locators are derived from *name*, so a manifest for the
+    torsion fixture does not declare files called ``mbis_0.h5``: a refusal
+    message quotes the filename it could not fit, and a fixture that lied about
+    it would make that message unreadable.
+
+    Args:
+        files: Shard role to the file whose bytes that role serves, in the
+            order the manifest should declare them — which is the order a
+            streaming walk visits them in.
+        namespace: Coordinate namespace segment.
+        name: Coordinate name segment.
+        version: Coordinate version label.
+        title: Human title the manifest declares.
+        description: Prose the manifest declares.
+
+    Returns:
+        YAML in the shape :func:`manifest_yaml` emits, with one hot ``index``
+        role and one ``shard-*`` role per entry of *files*.
+    """
+    stem = name.replace("-", "_")
+    artifacts = "".join(
+        f"  - role: {role}\n"
+        f"    filename: {stem}_{index}.h5\n"
+        f"    format: hdf5\n"
+        f'    digest: "sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"\n'
+        f"    size: {path.stat().st_size}\n"
+        f"    locators:\n"
+        f"      - fake://{stem}-{index}\n"
+        for index, (role, path) in enumerate(files.items())
+    )
+    return (
+        "schema_version: 1\n"
+        "kind: dataset\n"
+        f"namespace: {namespace}\n"
+        f"name: {name}\n"
+        f'version: "{version}"\n'
+        "\n"
+        f"title: {title}\n"
+        f'description: "{description}"\n'
+        f"license: {LICENSE}\n"
+        f"doi: {CITATION}\n"
+        "\n"
+        "artifacts:\n"
+        "  - role: index\n"
+        f"    filename: {stem}_dataset.csv\n"
+        "    format: csv\n"
+        f"    size: {INDEX_SIZE}\n"
+        "    locators:\n"
+        f"      - fake://{stem}-index\n"
+        f"{artifacts}"
+    )
+
+
+def build_verified_registry(
+    root: Path,
+    files: Mapping[str, Path],
+    *,
+    namespace: str = "themol",
+    name: str = "mbis",
+    version: str = "1",
+    title: str = "THEMol MBIS atomic electrostatics",
+    description: str = DESCRIPTION,
+) -> Registry:
+    """Write and load a registry whose declared bytes are *files*' real bytes.
+
+    Args:
+        root: Registry directory to create.
+        files: Shard role to the file it serves.
+        namespace: Coordinate namespace segment.
+        name: Coordinate name segment.
+        version: Coordinate version label.
+        title: Human title the manifest declares.
+        description: Prose the manifest declares.
+
+    Returns:
+        The loaded registry.
+    """
+    path = root / "dataset" / namespace / name / f"{version}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        verified_manifest_yaml(
+            files,
+            namespace=namespace,
+            name=name,
+            version=version,
+            title=title,
+            description=description,
+        ),
+        encoding="utf-8",
+    )
+    return Registry.load(root)
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +725,127 @@ class FakeHub:
         return {role: self._files[role] for role in requested}
 
 
+#: The conveyor's vocabulary, which ``hf-facade-04``'s ac-003 keeps off every
+#: value the loader returns and every message it raises. ``"ledger"`` and
+#: ``"conveyor"`` are in it because the canonical ledger path is
+#: ``<home>/conveyor/ledger.jsonl``: a message quoting it would leak both the
+#: file and the concept, which is complaint (4) verbatim.
+CONVEYOR_VOCABULARY: tuple[str, ...] = (
+    "BlockId",
+    "BlockState",
+    "LedgerRecord",
+    "LeaseRecord",
+    "shard-",
+    "ledger",
+    "lease",
+    "conveyor",
+)
+
+
+def leaks(text: str) -> list[str]:
+    """Every piece of :data:`CONVEYOR_VOCABULARY` *text* carries.
+
+    Returns a list rather than a bool so a failing assertion names the word that
+    leaked instead of saying ``False != True``.
+    """
+    return [word for word in CONVEYOR_VOCABULARY if word in text]
+
+
+#: Where the conveyor keeps its bookkeeping under a molhub home. Spelled out
+#: here by hand, exactly as ``tests/test_cli.py::TestCacheStatus`` spells the
+#: tier directories out: this is the layout contract, and a fixture that asked
+#: production where to write could not tell a wrong path from a right one. It is
+#: also what ``molhub.conveyor.default_ledger_path`` must agree with.
+LEDGER_SEGMENTS: tuple[str, ...] = ("conveyor", "ledger.jsonl")
+
+
+@dataclass(frozen=True)
+class Fetch:
+    """What the world looked like at the instant one fetch was asked for.
+
+    A streaming walk's whole claim is about *order* — the previous shard's bytes
+    are gone, and its release is recorded, before the next shard is asked for —
+    and order is only observable from something that watched. This is that
+    something, captured by :class:`LandingHub` before it lands a single byte.
+
+    Attributes:
+        roles: The roles this fetch asked for, in call order.
+        resident: Shard roles whose cache file existed when the fetch arrived.
+        ledger: The conveyor ledger file's text at that instant, or ``""`` when
+            no ledger had been written yet.
+    """
+
+    roles: tuple[str, ...]
+    resident: tuple[str, ...]
+    ledger: str
+
+
+class LandingHub(FakeHub):
+    """A :class:`FakeHub` that **lands** its bytes at the real cache path.
+
+    :class:`FakeHub` hands back the path it was constructed with, which is all a
+    map-style reader needs. A streaming walk deletes what it fetched, so a hub
+    that handed back the pristine fixture file would have the walk delete the
+    fixture — and the second visit would find nothing to serve. This one copies
+    the pristine bytes to ``$MOLHUB_HOME/files/<coordinate>/<role>``, which is
+    where :class:`~molhub.sources.fetcher.Fetcher` would have put them, and
+    returns that path. Deleting it is then exactly the rolling-tier delete, and
+    a re-fetch genuinely re-lands the bytes.
+
+    Args:
+        files: Role to the pristine file whose bytes that role serves. These are
+            never handed out and never deleted.
+        home: The molhub home the cache sits under.
+        coordinate: The artifact whose roles these are.
+    """
+
+    def __init__(
+        self,
+        files: Mapping[str, Path],
+        *,
+        home: Path,
+        coordinate: str = COORDINATE,
+    ) -> None:
+        super().__init__(files)
+        self._store = BlobStore(home)
+        self._coordinate = Coordinate.parse(coordinate)
+        self._ledger = Path(home).joinpath(*LEDGER_SEGMENTS)
+        self.fetches: list[Fetch] = []
+
+    def cache_path(self, role: str) -> Path:
+        """Where role *role*'s bytes live once fetched — the Fetcher's own key."""
+        return self._store.path_for(f"{self._coordinate.cache_path()}/{role}")
+
+    def resident(self) -> tuple[str, ...]:
+        """The shard roles whose cache file exists right now, in manifest order."""
+        return tuple(role for role in self._files if self.cache_path(role).is_file())
+
+    def resident_bytes(self) -> int:
+        """How many bytes of fetched-and-not-yet-deleted shard files are on disk."""
+        return sum(self.cache_path(role).stat().st_size for role in self.resident())
+
+    def ledger_text(self) -> str:
+        """The conveyor ledger file's text, or ``""`` when nothing wrote one."""
+        try:
+            return self._ledger.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
+        """Land every requested role at its cache path and return the cache paths."""
+        served = super().fetch(coordinate, roles=roles)
+        self.fetches.append(
+            Fetch(roles=tuple(served), resident=self.resident(), ledger=self.ledger_text())
+        )
+        landed: dict[str, Path] = {}
+        for role, source in served.items():
+            target = self.cache_path(role)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            landed[role] = target
+        return landed
+
+
 # ---------------------------------------------------------------------------
 # Fixtures.
 # ---------------------------------------------------------------------------
@@ -368,3 +889,60 @@ def molhub_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def registry(tmp_path: Path) -> Registry:
     """A registry declaring exactly ``dataset:themol/mbis@1``."""
     return build_registry(tmp_path / "registry")
+
+
+@pytest.fixture
+def pristine_shards(tmp_path: Path) -> dict[str, Path]:
+    """The two fixture shards, kept outside the cache and never handed out.
+
+    Distinct from :func:`shard_paths`: these are the bytes a streaming hub
+    *serves*, so they survive the walk deleting what it fetched.
+    """
+    root = tmp_path / "pristine"
+    return {role: write_shard(root / f"{role}.h5", keys) for role, keys in SHARD_KEYS.items()}
+
+
+@pytest.fixture
+def verified_registry(tmp_path: Path, pristine_shards: dict[str, Path]) -> Registry:
+    """A registry whose declared shard sizes and digests are the real ones."""
+    return build_verified_registry(tmp_path / "verified-registry", pristine_shards)
+
+
+@pytest.fixture
+def landing_hub(pristine_shards: dict[str, Path], molhub_home: Path) -> LandingHub:
+    """A hub that lands the fixture shards at their cache paths, and watches."""
+    return LandingHub(pristine_shards, home=molhub_home)
+
+
+@pytest.fixture
+def ledger_path(molhub_home: Path) -> Path:
+    """The one conveyor ledger under this home — the path, not the file."""
+    return molhub_home.joinpath(*LEDGER_SEGMENTS)
+
+
+@pytest.fixture
+def pristine_torsion_shards(tmp_path: Path) -> dict[str, Path]:
+    """The two torsion-scan shards, kept outside the cache and never handed out."""
+    root = tmp_path / "pristine-torsion"
+    return {
+        role: write_torsion_shard(root / f"{role}.h5", keys)
+        for role, keys in TORSION_SHARD_KEYS.items()
+    }
+
+
+@pytest.fixture
+def verified_torsion_registry(tmp_path: Path, pristine_torsion_shards: dict[str, Path]) -> Registry:
+    """A registry declaring ``dataset:themol/torsion-scan@1`` with real bytes."""
+    return build_verified_registry(
+        tmp_path / "verified-torsion-registry",
+        pristine_torsion_shards,
+        name="torsion-scan",
+        title="THEMol constrained torsion profiles",
+        description="THEMol complete constrained torsion profiles.",
+    )
+
+
+@pytest.fixture
+def torsion_hub(pristine_torsion_shards: dict[str, Path], molhub_home: Path) -> LandingHub:
+    """A hub that lands the torsion-scan shards at their cache paths, and watches."""
+    return LandingHub(pristine_torsion_shards, home=molhub_home, coordinate=TORSION_COORDINATE)

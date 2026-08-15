@@ -90,7 +90,19 @@ No network, no environment variable of its own and no disk-layout decision: the
 caller supplies the ledger's path, the tier root comes from
 :class:`~molhub.sources.blobs.BlobStore`, the bookkeeping half is stdlib plus
 ``molhub``, and the prepare half adds numpy.
+
+Two of those caller decisions are the *same* decision everywhere, and are stated
+here so that two callers cannot make it differently: :func:`default_ledger_path`
+is where the bookkeeping file sits under a molhub home, and
+:data:`DEFAULT_BUDGET_BYTES` is the rolling working set one tier is allowed. Both
+were private to ``src/molhub/cli.py`` while the command line was their only
+caller; ``hf-facade-04-streaming-prepare`` (D7) added the second — a streaming
+walk that leases and releases the very blocks ``molhub cache coverage`` replays —
+and two default paths would have silently desynchronised those leases, which is
+the ledger's own R1 hazard.
 """
+
+from pathlib import Path
 
 from molhub.conveyor.backpressure import (
     ByteBoundedQueue,
@@ -182,7 +194,40 @@ from molhub.conveyor.transfer import (
     TransferLedger,
 )
 
+#: Where the conveyor keeps its bookkeeping under a molhub home, as path
+#: segments. Not under ``files/``, which stays the cross-client cache layout the
+#: TypeScript client reads.
+_LEDGER_SEGMENTS = ("conveyor", "ledger.jsonl")
+
+#: The strategy's per-tier rolling working set, in bytes, stated once
+#: (``.claude/notes/streaming-data-tiers.md``). It is what ``molhub cache
+#: status`` measures a tier against and what a streaming walk keeps resident.
+DEFAULT_BUDGET_BYTES = 40_000_000_000
+
+
+def default_ledger_path(home: str | Path) -> Path:
+    """The one conveyor ledger under *home*.
+
+    A free function rather than a method because it belongs to no object a
+    caller already holds: :class:`~molhub.sources.blobs.BlobStore` owns
+    ``files/`` and :class:`~molhub.conveyor.tier.TierStore` owns a tier
+    directory, while this is the file both the command line and the streaming
+    walk must agree on before either has constructed anything.
+
+    Args:
+        home: The molhub home — ``$MOLHUB_HOME``, or whatever ``--home`` names.
+
+    Returns:
+        ``<home>/conveyor/ledger.jsonl``. The path, not the file: a
+        :class:`~molhub.conveyor.ledger.Ledger` creates its parent on the first
+        write, so asking for it costs nothing and creates nothing.
+    """
+    return Path(home).joinpath(*_LEDGER_SEGMENTS)
+
+
 __all__ = [
+    "DEFAULT_BUDGET_BYTES",
+    "default_ledger_path",
     "BlockId",
     "BlockState",
     "ConveyorError",
