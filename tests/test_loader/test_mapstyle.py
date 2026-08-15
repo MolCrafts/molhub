@@ -125,6 +125,70 @@ class TestSplitDataset:
         with pytest.raises(IndexError):
             train[len(train)]
 
+    # -- what an out-of-range access says (re-evaluation, ruling 5) ---------
+    #
+    # `3 is outside the 3 records of split 'train'.` is true and answers none of
+    # the questions a reader has in a traceback three frames deep in a training
+    # loop: *which* dataset, at which version. All three facts are already in
+    # hand — the coordinate from the index, the split and the count from the
+    # table — and this is the one message a user meets by accident.
+
+    def test_the_index_error_names_the_dataset(self, train):
+        with pytest.raises(IndexError) as raised:
+            train[len(train)]
+        assert COORDINATE in str(raised.value), str(raised.value)
+
+    def test_the_index_error_names_the_split(self, train):
+        with pytest.raises(IndexError) as raised:
+            train[len(train)]
+        assert "train" in str(raised.value)
+
+    def test_the_index_error_names_how_many_records_there_are(self, train):
+        """The bound is the actionable half: the reader's loop is one too long."""
+        with pytest.raises(IndexError) as raised:
+            train[len(train)]
+        assert re.search(rf"\b{SPLIT_COUNTS['train']}\b", str(raised.value)), str(raised.value)
+
+    def test_a_wildly_out_of_range_index_is_still_an_index_error(self, train):
+        """``ds[10**9]`` is the shape of an off-by-a-shard bug, not a new failure
+        mode: the type stays what every sequence in Python raises."""
+        with pytest.raises(IndexError):
+            train[10**9]
+
+    def test_that_error_names_the_index_that_was_asked_for(self, train):
+        with pytest.raises(IndexError) as raised:
+            train[10**9]
+        assert "1000000000" in str(raised.value), str(raised.value)
+
+    def test_that_error_still_names_the_dataset_and_the_split(self, train):
+        with pytest.raises(IndexError) as raised:
+            train[10**9]
+        message = str(raised.value)
+        assert COORDINATE in message and "train" in message, message
+
+    def test_a_non_integer_index_is_a_type_error(self, train):
+        """``ds["train"]`` is the mistake a reader coming from a dict makes, and
+        the answer to it is a type error rather than whatever comparing a string
+        to zero happens to raise."""
+        with pytest.raises(TypeError):
+            train["train"]  # type: ignore[index]
+
+    def test_the_type_error_names_what_was_given(self, train):
+        with pytest.raises(TypeError) as raised:
+            train["train"]  # type: ignore[index]
+        assert "'train'" in str(raised.value), str(raised.value)
+
+    def test_the_type_error_does_not_leak_the_container_underneath(self, train):
+        """``list indices must be integers`` names a list the caller never held,
+        and ``'<' not supported between instances of 'str' and 'int'`` names an
+        implementation detail of the bounds check. Neither says *this is a
+        dataset, index it with an integer*."""
+        with pytest.raises(TypeError) as raised:
+            train["train"]  # type: ignore[index]
+        message = str(raised.value)
+        assert "list indices" not in message, message
+        assert "'<' not supported" not in message, message
+
     # -- what the view says when it is echoed ------------------------------
     #
     # This is what `load_dataset(name, split=...)` hands back, so its `repr` is

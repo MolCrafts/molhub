@@ -23,7 +23,7 @@ molhub fetch polymer-tg@1 --into ./data
 In Python, call `hub.fetch(coordinate, roles=["main"])`. In Node, pass an explicit registry snapshot
 to `Molhub` and call its asynchronous `fetch` method.
 
-## What is in there, before anything moves
+## What is in there, before you read it
 
 `molhub info` answers the content question first — description, what one record
 carries, and which splits exist with their counts. The files that carry the
@@ -45,21 +45,29 @@ For a dataset whose splits a published derivation states — the three THEMol
 subsets — the counts come from one gzipped table already on disk, and `info`
 fetches no dataset bytes at all. (It does need that derivation to have been
 built; if it has not, the command says so and names
-`python -m molhub.scripts.build_class1_splits`, which writes it.) For a dataset
-whose own class owns its splits, the count is the dataset's `len`, and having it
-means reading the files: `molhub info molcrafts/3bpa` downloads all four
-benchmark files — about 18.5 MiB — before it can print one count per split. That
-is announced first, on stderr, as a byte total:
+`python -m molhub.scripts.build_class1_splits`, which writes it.) Everywhere
+else the count is the dataset's own `len`, and having it means reading the
+files. That is true of `molhub info molcrafts/3bpa`, which downloads all four
+benchmark files — about 18.5 MiB — before it can print one count per split, and
+it is equally true of `molhub info qm9`: qm9 publishes no split, so its whole
+content is served as `train`, and counting that one split means loading the
+dataset. Neither command is free.
+
+What says so is a notice printed to stderr before the first byte moves:
 
 ```text
-Describing this dataset counts its splits by reading them, so it will download
-18.5 MiB (19400078 B) first. Only its own files are pulled, and they stay in the
-cache.
+Counting the splits of dataset:molcrafts/3bpa@v1 will download 18.5 MiB (19400078 B) first. The files stay in the molhub cache, so reading them again costs nothing.
 ```
 
-stderr, so redirecting the report to a file leaves the report unchanged; and
-silent when the answer is zero, which is every table-backed dataset and every
-dataset that declares no splits at all.
+The notice belongs to the **library**, not to the CLI, so the same sentence
+appears when a notebook or a training script calls
+`load_dataset_builder(name).info` — the path that surprised people never went
+through `molhub info` at all. It also fires on the map-style record path, where
+it opens with `Reading a record of` instead: `train[0]` on a THEMol split pulls
+the multi-GiB published file holding row 0, and that cost is now said out loud.
+It stays silent for a file already in this home's cache — a warning printed on
+every cache hit is one nobody reads by the third call — and stderr keeps a piped
+report unchanged.
 
 The same answer in Python is `load_dataset_builder(name).info`, which is where
 the command line reads it from — one authority, two renderings:

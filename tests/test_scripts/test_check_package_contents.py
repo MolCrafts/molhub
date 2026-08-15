@@ -44,6 +44,14 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "check_package_contents.py"
 #: not the platform's.
 GENERATOR_WHEEL_PATH = "molhub/scripts/build_class1_splits.py"
 
+#: The second executable molhub's own refusals promise: without it,
+#: ``dataset:espaloma/phalkethoh-mm-small@1`` cannot be opened at all, and the
+#: message that says so names ``python -m
+#: molhub.scripts.convert_espaloma_phalkethoh_mm``. Same argument as the split
+#: generator's, same consequence if it falls out of the wheel — the refusal
+#: sends a pip-installed reader to a module that is not there.
+CONVERTER_WHEEL_PATH = "molhub/scripts/convert_espaloma_phalkethoh_mm.py"
+
 #: What the audit already required before the generator moved into the wheel.
 #: Kept here so that adding a requirement cannot quietly replace one.
 ALREADY_REQUIRED: frozenset[str] = frozenset(
@@ -92,6 +100,14 @@ class TestRequiredWheelContents:
     def test_it_requires_the_split_generator(self):
         """The one derivation molhub's own error messages tell a reader to run."""
         assert GENERATOR_WHEEL_PATH in required_wheel_files()
+
+    def test_it_requires_the_espaloma_converter(self):
+        """The other command a refusal names, and the same failure if it is gone."""
+        assert CONVERTER_WHEEL_PATH in required_wheel_files()
+
+    def test_the_converter_is_in_the_source_tree_at_that_path(self):
+        """A required member nothing builds is a gate that fails every release."""
+        assert (REPO_ROOT / "src" / CONVERTER_WHEEL_PATH).is_file()
 
     @pytest.mark.parametrize("member", sorted(ALREADY_REQUIRED))
     def test_it_still_requires_what_it_already_required(self, member):

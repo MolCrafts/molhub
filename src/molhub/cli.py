@@ -20,12 +20,18 @@ answer.
 
 **That asymmetry is said out loud, before it is spent** (reachability wave,
 ruling 7). A docstring is not where a reader finds out that describing a dataset
-downloaded a benchmark: ``--help`` says a description can download, and the verb
-prints the byte total to **stderr** before it fetches — stderr, so a piped report
-is unchanged by the warning. ``--home`` joins it for parity with
-``cache status`` / ``cache verify``: the split derivation ``info`` reads lives
-under the cache root, and with only ``$MOLHUB_HOME`` to go on there is no way to
-point this verb at a second molhub home without exporting a variable around it.
+downloaded a benchmark: ``--help`` says a description can download, and the byte
+total reaches **stderr** before anything is fetched — stderr, so a piped report
+is unchanged by the warning. The notice itself is now the *library's*
+(:class:`~molhub.loader.mapstyle.DownloadNotice`, printed by
+:attr:`~molhub.loader.builder.DatasetBuilder.info`), not this module's: a
+notebook and a training script call the same describing path and never see a CLI
+warning, and two layers stating one sentence is one notice printed twice at the
+terminal — which is how a warning becomes noise, and noise is how the real one
+gets skipped. ``--home`` joins it for parity with ``cache status`` /
+``cache verify``: the split derivation ``info`` reads lives under the cache root,
+and with only ``$MOLHUB_HOME`` to go on there is no way to point this verb at a
+second molhub home without exporting a variable around it.
 
 **Byte counts are rendered by the library's own type.**
 ``download 31041658614 B`` is a number a reader counts digits on; the same line
@@ -33,11 +39,10 @@ now leads with :class:`~molhub.loader.info.ByteSize`'s ``28.9 GiB`` and keeps th
 raw count in parentheses, because a script greps the number and a human reads the
 unit. It is the type :meth:`~molhub.loader.info.DatasetInfo.__str__` prints, not
 a second formatter that agrees with it today — the same promotion
-``default_ledger_path`` and ``DEFAULT_BUDGET_BYTES`` already had. **Both** places
-this module states a byte count use it: the report's download line and the stderr
-notice that says what describing is about to pull. Two spellings of one number in
-one module is the drift the shared type exists to end, and the notice is the one
-that matters most — it is read before the bytes are spent, not after.
+``default_ledger_path`` and ``DEFAULT_BUDGET_BYTES`` already had. The stderr
+notice renders through the very same type, one layer down, so the number a
+reader weighs before the download and the number the report prints after it are
+one spelling of one fact.
 """
 
 from __future__ import annotations
@@ -117,9 +122,11 @@ def _describe(hub: Molhub, name: str, home: Path | None) -> DatasetInfo:
     :class:`~molhub.loader.naming.DatasetName`, which refuses it on purpose so
     that one name has one spelling on that path.
 
-    What describing costs is asked before it is spent, and announced on stderr
-    when it is not zero: for a dataset whose class owns its splits the counts are
-    the dataset's own ``len``, so the description *is* the download.
+    What describing costs is announced on stderr before it is spent — by the
+    builder itself, so a notebook calling the same path is warned too, and so
+    that one command prints one notice. For a dataset whose splits nobody
+    published a table for, the counts are the dataset's own ``len``, and the
+    description *is* the download.
 
     Args:
         hub: The resolved registry.
@@ -147,7 +154,6 @@ def _describe(hub: Molhub, name: str, home: Path | None) -> DatasetInfo:
             hub=hub,
             home=home,
         )
-        _announce_download(builder)
         return builder.info
     except (
         InvalidCoordinate,
@@ -159,35 +165,6 @@ def _describe(hub: Molhub, name: str, home: Path | None) -> DatasetInfo:
     ) as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
-
-
-def _announce_download(builder: DatasetBuilder) -> None:
-    """Say what describing this dataset will pull, before it pulls it.
-
-    On stderr, so redirecting the report to a file leaves the report exactly as
-    it was. Silent when the answer is zero, which is every dataset whose splits a
-    published derivation states — a warning printed every time is one nobody
-    reads by the third dataset.
-
-    Rendered like the report's own download line, through the same
-    :class:`~molhub.loader.info.ByteSize`: this is the number a reader weighs
-    *before* deciding whether to let the command spend it, and ``4116013056`` is
-    not a size anybody judges at a glance. The raw count stays in parentheses for
-    whoever reconciles it against the manifest.
-
-    Args:
-        builder: The builder about to be asked for its description.
-    """
-    size = builder.describe_download_size
-    if not size:
-        return
-    typer.secho(
-        f"Describing this dataset counts its splits by reading them, so it will download "
-        f"{ByteSize(size)} ({size} B) first. Only its own files are pulled, and they stay "
-        "in the cache.",
-        fg=typer.colors.YELLOW,
-        err=True,
-    )
 
 
 @app.command()
@@ -343,12 +320,12 @@ def cache_status(
         int, typer.Option("--budget-blocks", help="Byte budget for the sealed block tier.")
     ] = DEFAULT_BUDGET_BYTES,
 ) -> None:
-    """Report each conveyor tier's residency against its own byte budget.
+    """Report how much disk the cache holds, against its byte budget.
 
-    One line per tier — entries, bytes resident, bytes budgeted — then a
-    summary. Exits 1 when a tier holds more than its budget allows: that is the
-    bounded-residency invariant failing on disk, and a status verb that reported
-    it with exit 0 would be one nothing could gate on.
+    One line per pile of cached files — entries, bytes on disk, bytes budgeted —
+    then a summary. Exits 1 when a pile holds more than its byte budget allows:
+    that is the bounded-residency invariant failing on disk, and a status verb
+    that reported it with exit 0 would be one nothing could gate on.
     """
     # Imported here, not at module scope: `molhub search` should not pay for the
     # conveyor's numpy import, and `molhub.dataset.neighbor` set this precedent.

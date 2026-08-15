@@ -6,7 +6,8 @@ questions: :attr:`~DatasetBuilder.info` (what is in here?) and
 :meth:`~DatasetBuilder.split_view` (give me one split of it). Nothing else. The
 composition — *describe, then decide, then read* — stays the caller's.
 
-**Two split flavours, one ``DatasetInfo.splits``.** D6 of the spec:
+**Three split flavours, one ``DatasetInfo.splits``.** D6 of the spec, plus the
+fallback the HuggingFace idiom already has:
 
 * *table-backed* (THEMol): the split assignment is a published derivation,
   ``class1-universal-splits@1``. Counts come from one gzipped CSV under
@@ -19,15 +20,28 @@ composition — *describe, then decide, then read* — stays the caller's.
   required positional path — so each gets its own small adapter below rather
   than a uniform ``Ctor(split=split)`` dispatch that would be wrong for one of
   them.
+* *whole content* (qm9, polymer-tg): nobody publishes a split of them, so their
+  entire content is served as the single split ``train`` —
+  :class:`WholeContentSplits`. ``load_dataset("qm9", split="train")`` is what a
+  reader types first, and answering "declares no splits in this molhub" for a
+  dataset whose whole content *is* one view is molhub reporting its own table
+  rather than the dataset. The precondition is exact: the dataset class must be
+  constructible from a coordinate and a hub alone. ``revmd17`` is not — it
+  publishes one file per molecule — so it stays refused, and the refusal now
+  hands over the class API that opens it instead of dead-ending.
 
-**What the declared flavour costs, said out loud.** Its counts are exact
+**What the last two flavours cost, said out loud.** Their counts are exact
 because they come from the dataset itself — which means constructing it, which
 means its bytes. ``load_dataset_builder(...).info`` is therefore free only for
-the table-backed datasets; for a declared-split one it costs what
-``load_dataset`` costs. That is the price of a dataset whose splits nobody
-published a table for, and it is charged here rather than hidden — and stated
-in advance by :attr:`DatasetBuilder.describe_download_size`, which is what
-``molhub info`` warns with before it spends the bytes.
+the table-backed datasets; for the other two it costs what ``load_dataset``
+costs. That is the price of a dataset whose splits nobody published a table for,
+and it is charged here rather than hidden: the
+:attr:`~DatasetBuilder.describe_download_size` property states it in advance, and
+a :class:`~molhub.loader.mapstyle.DownloadNotice` says it on stderr before the
+first byte moves. The notice is the library's, not the CLI's — a notebook and a
+training script are what surprised people, and they never see ``molhub info``'s
+warning — and it is silent when the files are already cached, because a warning
+printed on every cache hit is one nobody reads by the third call.
 
 **A name is checked before anything is read** (reachability wave, ruling 4).
 Which names exist is a *declaration*: a class attribute for the declared
@@ -69,10 +83,12 @@ from molhub.conveyor.splits import _SplitTable
 from molhub.conveyor.tier import DerivedLayout
 from molhub.conveyor.transfer import ShardTransfer
 from molhub.coordinate import Coordinate
+from molhub.dataset.csv_dataset import CSVDataset
 from molhub.dataset.definition import DatasetManifest
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.qm9 import QM9Dataset
 from molhub.dataset.themol import (
     THEMolHessian,
     THEMolMBIS,
@@ -82,7 +98,7 @@ from molhub.dataset.threebpa import ThreeBPADataset
 from molhub.dataset.zinc_typing import ZincTypingDataset
 from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
 from molhub.loader.info import DatasetInfo, Feature, SplitInfo
-from molhub.loader.mapstyle import ShardIndex, SplitDataset
+from molhub.loader.mapstyle import DownloadNotice, ShardIndex, SplitDataset
 from molhub.loader.materialize import BlockExport, SplitRouting
 from molhub.loader.naming import DatasetName
 from molhub.loader.streaming import PublishedParts, StreamingSplitDataset
@@ -99,6 +115,9 @@ __all__ = [
     "ZincTypingSplits",
     "PhalkethohSplits",
     "ThreeBPASplits",
+    "WholeContentSplits",
+    "QM9WholeView",
+    "PolymerTgWholeView",
     "DatasetBuilder",
 ]
 
@@ -123,6 +142,12 @@ _DERIVATION_RECORD = "metadata.json"
 _SPLIT_GENERATOR = "molhub.scripts.build_class1_splits"
 _SPLIT_TABLE_COMMAND = f"python -m {_SPLIT_GENERATOR}"
 
+# The espaloma conversion molhub ships, mirrored for the same reason: the
+# phalkethoh refusal names it, and importing it would drag zipfile and numpy
+# into every reader of a split for the sake of one sentence.
+_ESPALOMA_CONVERTER = "molhub.scripts.convert_espaloma_phalkethoh_mm"
+_ESPALOMA_CONVERT_COMMAND = f"python -m {_ESPALOMA_CONVERTER}"
+
 # What that command reads: one index file per THEMol subset. The table cannot be
 # rebuilt without all three, which is what makes the rebuild expensive and what
 # a "run the generator" message has to say out loud.
@@ -131,6 +156,41 @@ _SPLIT_TABLE_INPUTS: tuple[str, ...] = ("hessian", "mbis", "torsion-scan")
 # What a record is when the dataset class does not parameterize it: molhub's
 # ``Sample``, spelled as `molhub.dataset.protocol` spells it.
 _SAMPLE_RECORD_TYPE = "Frame | Trajectory"
+
+# The name a dataset with no published split serves all of itself under.
+# HuggingFace's own name for "all of it", and the name every other molhub
+# dataset already uses for its largest split: inventing "all" here would make
+# one idiom into two.
+_WHOLE_VIEW_SPLIT = "train"
+
+# The role a dataset published as a single file carries it under.
+_MAIN_ROLE = "main"
+
+# Datasets molhub can address and describe but cannot serve as one view, and
+# the class API that opens each. Every one of them needs a selector the
+# coordinate does not carry — which molecule, which published part — so serving
+# "the whole thing" would mean either silently serving a tenth of it under the
+# name `train` or chaining every published file into one download. They are
+# deliberately **not** `DECLARATIONS` entries: there is no split to declare. What
+# they get instead is a refusal that hands over the door that was always open.
+_CLASS_API_ESCAPES: Mapping[str, str] = MappingProxyType(
+    {
+        "dataset:molcrafts/revmd17": (
+            "It publishes one file per molecule, and the molecule is a selector no "
+            "coordinate carries: open one with RevMD17Dataset(root, molecule='aspirin')."
+        ),
+        "dataset:themol/hessian-relax": (
+            "It is published in parts with no table saying which record is in which "
+            "split, and it runs to several TiB, so its reader is per-part by design: "
+            "open one with THEMolHessianRelax(hub=hub).load(role='shard-000')."
+        ),
+        "dataset:themol/torsion-relax": (
+            "It is published in parts with no table saying which record is in which "
+            "split, and it runs to several TiB, so its reader is per-part by design: "
+            "open one with THEMolTorsionRelax(hub=hub).load(role='shard-000')."
+        ),
+    }
+)
 
 # The THEMol definitions whose splits the derivation states. `hessian-relax` and
 # `torsion-relax` are deliberately absent: the derivation publishes no table for
@@ -219,8 +279,19 @@ class SplitDeclaration(ABC):
 
         The declared flavour's rule: the count is the dataset's own ``len``,
         which is exact and which materializes the split. See this module's
-        docstring for why that cost is accepted rather than approximated.
+        docstring for why that cost is accepted rather than approximated — and
+        why the notice below is printed here rather than by whoever called
+        ``.info``. This is the method that knows the counting *is* the download;
+        the two flavours whose counts are free (a published table, a payload
+        nobody has converted) override it and say nothing.
+
+        Args:
+            manifest: The registry manifest of the resolved coordinate.
+            hub: Where bytes come from.
+            home: The molhub home, for anything filed under it — and the cache
+                the notice probes before it announces anything.
         """
+        self.notice(manifest, home, because="Counting the splits of").announce(*manifest.artifacts)
         return tuple(
             SplitInfo(
                 name=name,
@@ -228,6 +299,32 @@ class SplitDeclaration(ABC):
                 provenance=self.PROVENANCE,
             )
             for name in self.NAMES
+        )
+
+    @staticmethod
+    def notice(manifest: Manifest, home: Path, *, because: str) -> DownloadNotice:
+        """What says, on stderr, that this dataset's files are about to be pulled.
+
+        Built here rather than by each flavour: the declared byte sizes and the
+        cache to probe are the same two facts however the bytes are eventually
+        asked for, and a second place that assembled them would be a second
+        place to get the cache path wrong.
+
+        Args:
+            manifest: The registry manifest of the resolved coordinate, whose
+                artifacts declare the byte sizes.
+            home: The molhub home whose cache is probed.
+            because: How the notice opens — see
+                :class:`~molhub.loader.mapstyle.DownloadNotice`.
+
+        Returns:
+            The notice, which stays silent for anything already cached.
+        """
+        return DownloadNotice(
+            coordinate=manifest.coordinate,
+            sizes={role: artifact.size or 0 for role, artifact in manifest.artifacts.items()},
+            because=because,
+            home=home,
         )
 
     def streaming_view(
@@ -455,13 +552,20 @@ class TableBackedSplits(SplitDeclaration):
         )
 
     def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """One split of a shard-published dataset, read through a lazy index."""
+        """One split of a shard-published dataset, read through a lazy index.
+
+        The index is given the download notice: ``ds[0]`` pulls the published
+        file that holds row 0 — 3.9 GiB of real THEMol — and that cost was
+        documented and never said. It is announced once per file and never for
+        one already in this home's cache.
+        """
         shards = self._definition(hub=hub)
         index = ShardIndex(
             shards,
             coordinate=manifest.coordinate,
             roles=self._shard_roles(manifest),
             layout=DerivedLayout(home, subdir=_DERIVED_SUBDIR),
+            notice=self.notice(manifest, home, because="Reading a record of"),
         )
         return SplitDataset(
             shards,
@@ -637,14 +741,23 @@ class ZincTypingSplits(UnconvertedPayload):
         return ZincTypingDataset
 
     def conversion_refusal(self, manifest: Manifest) -> str:
-        """The published tarball is SDF structures; the reader wants the tree."""
+        """The published tarball is SDF structures; the reader wants the tree.
+
+        Unlike its sibling, this one has no command to hand over: the converter
+        molhub ships reads the *other* espaloma payload, and pointing a zinc
+        reader at it would send them to run a tool on bytes it cannot read.
+        Saying so costs one clause and is the difference between a reader who
+        writes a conversion and a reader who files a bug against a tool that was
+        never theirs.
+        """
         return (
             f"{manifest.coordinate.canonical} is published as a tarball of SDF structures, "
             "and ZincTypingDataset reads a converted tree — a splits.json beside a mols/ "
             "directory — which those bytes do not contain. Downloading them would not "
-            "produce one, so nothing was fetched. Point ZincTypingDataset at a converted "
-            "root yourself, or open the published archive with "
-            "molhub fetch dataset:espaloma/zinc-typing@1 and convert it once."
+            "produce one, so nothing was fetched. molhub ships no converter for this "
+            "payload: fetch the published archive with "
+            "molhub fetch dataset:espaloma/zinc-typing@1, write the splits.json and mols/ "
+            "tree once, and point ZincTypingDataset at it."
         )
 
 
@@ -662,14 +775,20 @@ class PhalkethohSplits(UnconvertedPayload):
         return PhalkethohMMDataset
 
     def conversion_refusal(self, manifest: Manifest) -> str:
-        """The published zip is DGL heterographs; converting them needs dgl."""
+        """The published zip is DGL heterographs; converting them needs dgl.
+
+        The command names the module molhub ships, not the repository file it
+        used to live in: a pip-installed reader has no ``scripts/`` directory,
+        so naming that path would tell them to clone the repository to get past
+        a refusal the product is supposed to resolve on its own.
+        """
         return (
             f"{manifest.coordinate.canonical} is published as a zip of DGL heterographs, "
             "and PhalkethohMMDataset reads a converted tree — a splits.json beside a mols/ "
             "directory. The conversion is offline and once, because it needs dgl, which "
-            "molhub does not depend on: run scripts/convert_espaloma_phalkethoh_mm.py in an "
-            "environment that has dgl, then point PhalkethohMMDataset at what it wrote. "
-            "Nothing was fetched."
+            f"molhub does not depend on: run {_ESPALOMA_CONVERT_COMMAND} --src <zip> "
+            "--out <dir> in an environment that has dgl, then point PhalkethohMMDataset at "
+            "what it wrote. Nothing was fetched."
         )
 
 
@@ -702,6 +821,88 @@ class ThreeBPASplits(DeclaredSplits):
         return ThreeBPADataset(path, tag=split, hub=hub)
 
 
+class WholeContentSplits(DeclaredSplits):
+    """A dataset nobody publishes a split of: all of it is ``train``.
+
+    The HuggingFace idiom. ``load_dataset("qm9", split="train")`` is what a
+    reader types first, and a dataset whose entire content is one view has one
+    honest answer to it — not a refusal quoting molhub's own delegation table.
+
+    Inherits :class:`DeclaredSplits` because the *cost* is the same and for no
+    other reason: the count is the dataset's own ``len``, so describing this
+    downloads it, and :meth:`SplitDeclaration.splits` — which is what states
+    that on stderr before it spends the bytes — is the implementation both want.
+    What differs is where the split name comes from: there, the dataset class
+    declares its own; here, molhub declares the one name HuggingFace uses for
+    "all of it".
+
+    The precondition for an entry of this kind is exact, and it is the whole of
+    why ``revmd17`` has none: the dataset class must be constructible from a
+    coordinate and a hub alone (see :data:`_CLASS_API_ESCAPES`).
+    """
+
+    NAMES: ClassVar[tuple[str, ...]] = (_WHOLE_VIEW_SPLIT,)
+
+
+class QM9WholeView(WholeContentSplits):
+    """qm9: 130 831 molecules in one published tarball, served as ``train``.
+
+    ``QM9Dataset(root, download=True, hub=hub)`` needs a root positionally and
+    ignores it once ``download`` is set — the two published roles come from the
+    hub and land in the shared cache — so the molhub home is passed as the root
+    it will not use, rather than a temporary directory nothing would write to.
+    """
+
+    PROVENANCE: ClassVar[str] = (
+        "QM9Dataset: this dataset publishes no split, so its whole content is served "
+        "as one view; the count is the reader's own, after the uncharacterized list "
+        "is applied."
+    )
+
+    @property
+    def definition(self) -> type:
+        return QM9Dataset
+
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """The whole of QM9, read through its own reader.
+
+        *split* is not consulted: :meth:`SplitDeclaration.require_split` has
+        already refused anything but ``train``, and there is one view to hand
+        back whichever way it was asked for.
+        """
+        return QM9Dataset(home, download=True, hub=hub)
+
+
+class PolymerTgWholeView(WholeContentSplits):
+    """polymer-tg: one published CSV, every row a record, served as ``train``.
+
+    ``CSVDataset`` takes a path rather than a hub, which is not the same thing
+    as being unconstructible: the manifest publishes one ``main`` role and the
+    path is resolved through the hub here, exactly as :class:`ThreeBPASplits`
+    resolves a benchmark file. What it may **not** do is pass the upstream URL —
+    that path has no manifest behind it and therefore no declared digest, which
+    is the whole reason coordinates exist.
+    """
+
+    PROVENANCE: ClassVar[str] = (
+        "CSVDataset: this dataset publishes no split, so its whole content is served "
+        "as one view; the count is the published table's own row count."
+    )
+
+    @property
+    def definition(self) -> type:
+        return CSVDataset
+
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Every row of the published table, read from the hub-resolved file.
+
+        *split* is not consulted, for the reason :meth:`QM9WholeView.view`
+        states.
+        """
+        path = hub.fetch(manifest.coordinate.canonical, roles=[_MAIN_ROLE])[_MAIN_ROLE]
+        return CSVDataset(str(path))
+
+
 class DatasetBuilder:
     """One dataset, described before it is read.
 
@@ -731,6 +932,12 @@ class DatasetBuilder:
     #: resolve to :class:`~molhub.registry.UnknownArtifact` — and this table is
     #: what a reader consults to find out what is loadable, so
     #: ``dataset:molcrafts/water-les`` is deliberately absent.
+    #:
+    #: ``qm9`` and ``polymer-tg`` are here as :class:`WholeContentSplits`: each
+    #: is a registry dataset whose class the builder can construct from a
+    #: coordinate and a hub alone, and neither publishes a split, so the whole
+    #: of it is served as ``train``. ``revmd17`` and the two THEMol relax
+    #: artifacts are deliberately **not** — see :data:`_CLASS_API_ESCAPES`.
     DECLARATIONS: ClassVar[Mapping[str, SplitDeclaration]] = MappingProxyType(
         {
             "dataset:themol/hessian": TableBackedSplits(THEMolHessian, source="hessian"),
@@ -741,6 +948,8 @@ class DatasetBuilder:
             "dataset:espaloma/zinc-typing": ZincTypingSplits(),
             "dataset:espaloma/phalkethoh-mm-small": PhalkethohSplits(),
             "dataset:molcrafts/3bpa": ThreeBPASplits(),
+            "dataset:molcrafts/qm9": QM9WholeView(),
+            "dataset:molcrafts/polymer-tg": PolymerTgWholeView(),
         }
     )
 
@@ -950,16 +1159,43 @@ class DatasetBuilder:
             split: The name the caller asked for, for the message.
 
         Raises:
-            UnknownSplit: If this dataset declares no splits at all.
+            UnknownSplit: If this dataset declares no splits at all. The message
+                hands over the class API that opens it when there is one — a
+                dead end that costs a resolution and gives nothing back is the
+                worst answer available — and says plainly that molhub ships no
+                reader when there is not.
         """
         coordinate, manifest = self._resolve()
         declaration = self.DECLARATIONS.get(coordinate.unversioned)
         if declaration is None:
             raise UnknownSplit(
                 f"{coordinate.canonical} declares no splits in this molhub, so there is "
-                f"no {split!r} to open. Its whole content is one view."
+                f"no {split!r} to open. {self._other_door(coordinate)}"
             )
         return declaration, manifest
+
+    @staticmethod
+    def _other_door(coordinate: Coordinate) -> str:
+        """What to do instead, for a dataset this façade cannot serve as a view.
+
+        Args:
+            coordinate: The resolved coordinate that has no declaration.
+
+        Returns:
+            The class-API escape for a dataset molhub reads but cannot address
+            by split alone, or the sentence for one it ships no reader for at
+            all. Never "its whole content is one view": that is true of the
+            datasets :class:`WholeContentSplits` serves, and saying it here
+            would promise a call that raises.
+        """
+        escape = _CLASS_API_ESCAPES.get(coordinate.unversioned)
+        if escape is not None:
+            return escape
+        return (
+            "molhub ships no reader for it either, so there is no view to open. Fetch "
+            f"its published files with 'molhub fetch {coordinate.canonical}' and read "
+            "them yourself."
+        )
 
     def _describe(self) -> DatasetInfo:
         """Compose the description from the manifest and the class declarations."""

@@ -53,6 +53,7 @@ import inspect
 import json
 import shutil
 import sys
+import traceback
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -639,6 +640,55 @@ class TestPrepareRefusesUnroutableTargets:
         """ac-003 holds for a refusal too — it is the message a user reads."""
         message = str(self._refusal(verified_registry, landing_hub, factory, output_dir))
         assert leaks(message) == []
+
+    # -- what the traceback shows (re-evaluation, ruling 4) ----------------
+    #
+    # This refusal is raised `from` the encoder's own, which prints "The above
+    # exception was the direct cause of the following exception" and then the
+    # same sentence twice, in the conveyor's vocabulary and then in this
+    # layer's. The chain is not evidence here: this layer *asked* the encoder,
+    # the encoder said no, and the answer was restated with the coordinate. One
+    # wording, one frame the reader has to read.
+
+    def test_the_refusal_carries_no_cause(
+        self,
+        verified_registry,
+        landing_hub: LandingHub,
+        factory: RecordingWriterFactory,
+        output_dir: Path,
+    ) -> None:
+        """``raise ... from None``: the encoder's refusal is this one's *input*,
+        not a second failure the reader has to correlate."""
+        refusal = self._refusal(verified_registry, landing_hub, factory, output_dir)
+        assert refusal.__cause__ is None
+
+    def test_the_refusal_suppresses_the_context_it_was_raised_inside(
+        self,
+        verified_registry,
+        landing_hub: LandingHub,
+        factory: RecordingWriterFactory,
+        output_dir: Path,
+    ) -> None:
+        """Dropping ``from error`` alone would leave the implicit chain, and
+        Python would still print both — the suppression flag is the whole
+        difference between one traceback and two."""
+        refusal = self._refusal(verified_registry, landing_hub, factory, output_dir)
+        assert refusal.__suppress_context__ is True
+
+    def test_the_reader_is_shown_exactly_one_refusal(
+        self,
+        verified_registry,
+        landing_hub: LandingHub,
+        factory: RecordingWriterFactory,
+        output_dir: Path,
+    ) -> None:
+        """The two flags above, as the property they exist for. Rendered through
+        :mod:`traceback`, which is what a reader actually sees: it honours
+        ``__suppress_context__``, so this is the claim and the two flags are how
+        it is kept."""
+        refusal = self._refusal(verified_registry, landing_hub, factory, output_dir)
+        rendered = "".join(traceback.format_exception(refusal))
+        assert rendered.count("UnsupportedRecordError:") == 1, rendered
 
 
 def _chain(error: BaseException) -> str:

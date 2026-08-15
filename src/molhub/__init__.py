@@ -43,8 +43,11 @@ re-exported here. So is everything those three promise a caller will be able to
   :class:`~molhub.loader.naming.AmbiguousRevision`,
   :class:`~molhub.loader.mapstyle.UnknownRecordKey`,
   :class:`~molhub.conveyor.errors.UnsupportedRecordError`,
-  :class:`~molhub.conveyor.errors.UnroutableUnitError` and
-  :class:`~molhub.conveyor.splits.SplitProvenanceMismatch`;
+  :class:`~molhub.conveyor.errors.UnroutableUnitError`,
+  :class:`~molhub.conveyor.splits.SplitProvenanceMismatch` and
+  :class:`~molhub.sources.errors.AllLocatorsFailed` (every mirror of a published
+  file is down — the one failure here that is nobody's bug, and the one a script
+  retries or reports rather than debugs);
 * the records they hand back and a caller annotates or ``isinstance``-checks —
   :class:`~molhub.conveyor.prepare.PreparedBlocks`,
   :class:`~molhub.loader.info.Feature` and
@@ -60,6 +63,7 @@ is written.
 from molhub._version import __version__
 from molhub.coordinate import Coordinate, InvalidCoordinate
 from molhub.loader import (
+    AllLocatorsFailed,
     AmbiguousRevision,
     DatasetBuilder,
     DatasetInfo,
@@ -90,6 +94,7 @@ __all__ = [
     "Feature",
     "SplitInfo",
     "PreparedBlocks",
+    "AllLocatorsFailed",
     "AmbiguousRevision",
     "SplitProvenanceMismatch",
     "SplitTableUnavailable",

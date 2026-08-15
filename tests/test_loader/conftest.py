@@ -60,8 +60,10 @@ from __future__ import annotations
 import csv
 import gzip
 import hashlib
+import io
 import json
-from collections.abc import Iterable, Mapping, Sequence
+import tarfile
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -321,13 +323,23 @@ LICENSE = "CC-BY-NC-4.0"
 CITATION = "10.48550/arXiv.2605.14973"
 
 
-def manifest_yaml(*, namespace: str = "themol", name: str = "mbis", version: str = "1") -> str:
+def manifest_yaml(
+    *,
+    namespace: str = "themol",
+    name: str = "mbis",
+    version: str = "1",
+    index_size: int = INDEX_SIZE,
+) -> str:
     """A valid manifest for one version of the fixture dataset.
 
     Args:
         namespace: Coordinate namespace segment.
         name: Coordinate name segment.
         version: Coordinate version label.
+        index_size: Declared byte size of the ``index`` role. The default is the
+            three-digit :data:`INDEX_SIZE` every existing fixture sums; a caller
+            that needs a *humanized* byte count to be observable — ``303 B``
+            renders the same either way — passes something above a kibibyte.
 
     Returns:
         YAML in the shape ``scripts/generate_themol_manifests.py`` emits: one
@@ -349,7 +361,7 @@ def manifest_yaml(*, namespace: str = "themol", name: str = "mbis", version: str
         "  - role: index\n"
         "    filename: mbis_dataset.csv\n"
         "    format: csv\n"
-        f"    size: {INDEX_SIZE}\n"
+        f"    size: {index_size}\n"
         "    locators:\n"
         "      - fake://mbis-index\n"
         "  - role: shard-000\n"
@@ -373,6 +385,7 @@ def build_registry(
     versions: Sequence[str] = ("1",),
     namespace: str = "themol",
     name: str = "mbis",
+    index_size: int = INDEX_SIZE,
 ) -> Registry:
     """Write one manifest per version under *root* and load them.
 
@@ -385,6 +398,8 @@ def build_registry(
         versions: Version labels to declare for the artifact.
         namespace: Coordinate namespace segment.
         name: Coordinate name segment.
+        index_size: Declared byte size of the ``index`` role; see
+            :func:`manifest_yaml`.
 
     Returns:
         The loaded registry.
@@ -393,7 +408,8 @@ def build_registry(
         path = root / "dataset" / namespace / name / f"{version}.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            manifest_yaml(namespace=namespace, name=name, version=version), encoding="utf-8"
+            manifest_yaml(namespace=namespace, name=name, version=version, index_size=index_size),
+            encoding="utf-8",
         )
     return Registry.load(root)
 
@@ -799,6 +815,35 @@ class FakeHub:
         return {role: self._files[role] for role in requested}
 
 
+class NoticeWatchingHub(FakeHub):
+    """A :class:`FakeHub` that records what was on stderr *before* each fetch.
+
+    "The notice is printed before the bytes move" is a claim about order, and
+    order is only observable from something that watched. ``capsys`` can be
+    drained mid-test — :meth:`pytest.CaptureFixture.readouterr` returns what has
+    been captured so far and resets — so draining it at the top of every fetch
+    turns the ordering claim into a list of strings a test can assert on:
+    ``notices[0]`` is everything stderr held before the first byte was asked
+    for, ``notices[1]`` everything between the first fetch and the second.
+
+    Args:
+        files: Role to the local path this hub serves for it.
+        capture: What drains stderr and returns it — ``lambda:
+            capsys.readouterr().err`` at the call site, so this class needs no
+            pytest fixture of its own.
+    """
+
+    def __init__(self, files: Mapping[str, Path], *, capture: Callable[[], str]) -> None:
+        super().__init__(files)
+        self._capture = capture
+        self.notices: list[str] = []
+
+    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
+        """Record stderr as it stands, then serve the requested roles."""
+        self.notices.append(self._capture())
+        return super().fetch(coordinate, roles=roles)
+
+
 #: The conveyor's vocabulary, which ``hf-facade-04``'s ac-003 keeps off every
 #: value the loader returns and every message it raises. ``"ledger"`` and
 #: ``"conveyor"`` are in it because the canonical ledger path is
@@ -921,6 +966,252 @@ class LandingHub(FakeHub):
 
 
 # ---------------------------------------------------------------------------
+# The two whole-view fixture datasets: a miniature QM9 and a miniature
+# polymer-tg.
+#
+# Both are registry datasets whose class the builder can construct from a
+# coordinate and a hub alone, and neither declares a split — so the HF idiom is
+# that their entire content is served as `train`. Counting that content means
+# *reading* it, which is why they are built here in miniature: the real QM9 is
+# 86 MB of bz2 holding 130 831 molecules, and a test that counted those would be
+# measuring tarfile rather than the loader.
+#
+# The declared sizes are the artifacts' *manifest* metadata, not the fixture
+# files' real sizes (as in `manifest_yaml` above), and they are chosen so that
+# their humanized rendering is not their raw one: `ByteSize(3_145_728)` is
+# `3.0 MiB`, which is what makes "the notice states both" observable.
+# ---------------------------------------------------------------------------
+
+QM9_COORDINATE = "dataset:molcrafts/qm9@v2"
+
+#: The two published QM9 roles, as `molhub.dataset.qm9` fetches them, and the
+#: byte size each manifest declares. Distinct, so a total that dropped one is
+#: visible rather than plausible.
+QM9_MAIN_SIZE = 3_000_000
+QM9_EXCLUDE_SIZE = 145_728
+
+#: Every declared byte of the miniature QM9 — 3.0 MiB exactly, so the humanized
+#: form in the download notice is a literal a test can pin.
+QM9_DOWNLOAD_SIZE = QM9_MAIN_SIZE + QM9_EXCLUDE_SIZE
+
+#: The molecule indices the fixture tarball holds, and the ones its
+#: uncharacterized list excludes. Five in, two out, three left: three differs
+#: from both, so a count that read the wrong list cannot pass.
+QM9_INDICES: tuple[int, ...] = (1, 2, 3, 4, 5)
+QM9_EXCLUDED: tuple[int, ...] = (2, 4)
+QM9_RECORD_COUNT = len(QM9_INDICES) - len(QM9_EXCLUDED)
+
+#: The fifteen scalar targets a QM9 record carries, as the real manifest
+#: declares them.
+QM9_TARGETS: tuple[str, ...] = (
+    "A",
+    "B",
+    "C",
+    "mu",
+    "alpha",
+    "homo",
+    "lumo",
+    "gap",
+    "r2",
+    "zpve",
+    "U0",
+    "U",
+    "H",
+    "G",
+    "Cv",
+)
+
+POLYMER_TG_COORDINATE = "dataset:molcrafts/polymer-tg@1"
+
+#: The one published polymer-tg role's declared size — 2.0 MiB exactly, for the
+#: reason :data:`QM9_DOWNLOAD_SIZE` states.
+POLYMER_TG_SIZE = 2_097_152
+
+#: The target column the polymer-tg manifest declares, spelled as upstream
+#: spells it (the dot and the parenthesised unit are part of the column name).
+POLYMER_TG_TARGET = "labels.Exp_Tg(K)"
+
+#: The rows of the miniature CSV: one PSMILES and one glass-transition
+#: temperature each. Floats, so the parsed value cannot be confused with a row
+#: index, and four of them because four is not three.
+POLYMER_TG_ROWS: tuple[tuple[str, float], ...] = (
+    ("[*]CC[*]", 300.5),
+    ("[*]CC(C)[*]", 373.5),
+    ("[*]CC(c1ccccc1)[*]", 373.0),
+    ("[*]CC(Cl)[*]", 354.5),
+)
+POLYMER_TG_RECORD_COUNT = len(POLYMER_TG_ROWS)
+
+
+def qm9_xyz_record(index: int, *, u0: float) -> str:
+    """One structurally faithful raw QM9 record: one carbon, 15 scalars.
+
+    The second line carries ``tag``, ``index`` and the fifteen properties in the
+    order ``molhub.dataset.qm9._PROPERTY_NAMES`` reads them; the coordinate line
+    carries the trailing Mulliken charge the parser ignores.
+
+    Args:
+        index: The molecule index, which also lands in the member filename.
+        u0: The ``U0`` value, distinct per record so a reader that returned the
+            wrong molecule is visible.
+
+    Returns:
+        The record's extended-XYZ text.
+    """
+    return (
+        "1\n"
+        f"gdb {index} 1.0 2.0 3.0 0 1.0 -0.1 0.1 0.2 1.0 0.01 "
+        f"{u0} -1.0 -1.0 -1.0 1.0\n"
+        "C 0.0 0.0 0.0 0.0\n"
+    )
+
+
+def write_qm9_payload(
+    root: Path,
+    *,
+    indices: Sequence[int] = QM9_INDICES,
+    excluded: Sequence[int] = QM9_EXCLUDED,
+) -> dict[str, Path]:
+    """Write a miniature QM9 payload under *root*, by published role.
+
+    Member names follow the real ``dsgdb9nsd_%06d.xyz`` convention because
+    ``molhub.dataset.qm9`` recovers the molecule index by slicing the filename,
+    and the exclusion list keeps the nine header lines and the trailer line its
+    reader skips. Mirrored from ``tests/test_dataset/test_qm9.py``'s builder
+    rather than imported, exactly as :func:`write_shard` mirrors the THEMol
+    one: a fixture for the loader must not break because a reader test was
+    edited.
+
+    Args:
+        root: Directory to write the two files into.
+        indices: Molecule indices the tarball holds.
+        excluded: Molecule indices the uncharacterized list names.
+
+    Returns:
+        ``{"main": tarball, "exclude": list}`` — the two roles a hub serves.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    tarball = root / "dsgdb9nsd.xyz.tar.bz2"
+    with tarfile.open(tarball, "w:bz2") as archive:
+        for index in indices:
+            payload = qm9_xyz_record(index, u0=float(-index)).encode("utf-8")
+            info = tarfile.TarInfo(name=f"dsgdb9nsd_{index:06d}.xyz")
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    header = "\n".join(f"header {line}" for line in range(9))
+    body = "\n".join(f"{index} 0.0" for index in excluded)
+    exclude = root / "uncharacterized.txt"
+    exclude.write_text(f"{header}\n{body}\ntrailer\n", encoding="utf-8")
+    return {"main": tarball, "exclude": exclude}
+
+
+def qm9_manifest_yaml() -> str:
+    """A manifest for ``dataset:molcrafts/qm9@v2``, in the shape ``v2.yaml`` has.
+
+    Two roles — the tarball and the uncharacterized list — with the declared
+    sizes this module states and no digest, because nothing on the loader path
+    verifies bytes.
+    """
+    targets = ", ".join(QM9_TARGETS)
+    return (
+        "schema_version: 1\n"
+        "kind: dataset\n"
+        "namespace: molcrafts\n"
+        "name: qm9\n"
+        'version: "v2"\n'
+        "\n"
+        "title: QM9 miniature\n"
+        'description: "Five-molecule stand-in for the GDB-9 subset."\n'
+        "license: CC0-1.0\n"
+        "doi: 10.1038/sdata.2014.22\n"
+        "\n"
+        "artifacts:\n"
+        "  - role: main\n"
+        "    filename: dsgdb9nsd.xyz.tar.bz2\n"
+        f"    size: {QM9_MAIN_SIZE}\n"
+        "    locators:\n"
+        "      - fake://qm9-main\n"
+        "  - role: exclude\n"
+        "    filename: uncharacterized.txt\n"
+        f"    size: {QM9_EXCLUDE_SIZE}\n"
+        "    locators:\n"
+        "      - fake://qm9-exclude\n"
+        "\n"
+        "targets:\n"
+        f"  graph_level: [{targets}]\n"
+        "  atom_level: []\n"
+    )
+
+
+def write_polymer_tg_csv(path: Path, rows: Sequence[tuple[str, float]] = POLYMER_TG_ROWS) -> Path:
+    """Write the miniature LAMALAB polymer-Tg CSV at *path*.
+
+    Args:
+        path: File to write.
+        rows: ``(psmiles, Tg)`` pairs, one per data row.
+
+    Returns:
+        *path*, for chaining into a fake hub's role table.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(("PSMILES", POLYMER_TG_TARGET))
+        writer.writerows(rows)
+    return path
+
+
+def polymer_tg_manifest_yaml() -> str:
+    """A manifest for ``dataset:molcrafts/polymer-tg@1``, one ``main`` CSV role."""
+    return (
+        "schema_version: 1\n"
+        "kind: dataset\n"
+        "namespace: molcrafts\n"
+        "name: polymer-tg\n"
+        'version: "1"\n'
+        "\n"
+        "title: LAMALAB polymer glass-transition miniature\n"
+        'description: "Four-row stand-in for the LAMALAB curated Tg table."\n'
+        "license: CC-BY-4.0\n"
+        "doi: 10.5281/zenodo.14980914\n"
+        "\n"
+        "artifacts:\n"
+        "  - role: main\n"
+        "    filename: LAMALAB_CURATED_Tg_structured.csv\n"
+        f"    size: {POLYMER_TG_SIZE}\n"
+        "    locators:\n"
+        "      - fake://polymer-tg-main\n"
+        "\n"
+        "targets:\n"
+        f'  graph_level: ["{POLYMER_TG_TARGET}"]\n'
+        "  atom_level: []\n"
+    )
+
+
+def build_manifest_registry(root: Path, *, path: Sequence[str], text: str) -> Registry:
+    """Write one hand-written manifest under *root* and load the registry.
+
+    The sibling of :func:`build_registry` for the datasets whose manifests are
+    not THEMol-shaped: those two roles are ``main`` / ``exclude``, not
+    ``index`` / ``shard-*``, and a shard-shaped stand-in would let a whole-view
+    declaration pass while fetching roles no real manifest publishes.
+
+    Args:
+        root: Registry directory to create.
+        path: Path segments under *root*, e.g.
+            ``("dataset", "molcrafts", "qm9", "v2.yaml")``.
+        text: The manifest YAML.
+
+    Returns:
+        The loaded registry.
+    """
+    manifest = root.joinpath(*path)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(text, encoding="utf-8")
+    return Registry.load(root)
+
+
+# ---------------------------------------------------------------------------
 # Fixtures.
 # ---------------------------------------------------------------------------
 
@@ -1035,3 +1326,36 @@ def verified_torsion_registry(tmp_path: Path, pristine_torsion_shards: dict[str,
 def torsion_hub(pristine_torsion_shards: dict[str, Path], molhub_home: Path) -> LandingHub:
     """A hub that lands the torsion-scan shards at their cache paths, and watches."""
     return LandingHub(pristine_torsion_shards, home=molhub_home, coordinate=TORSION_COORDINATE)
+
+
+@pytest.fixture
+def qm9_hub(tmp_path: Path) -> FakeHub:
+    """A counting hub serving the miniature QM9 tarball and exclusion list."""
+    return FakeHub(write_qm9_payload(tmp_path / "qm9-payload"))
+
+
+@pytest.fixture
+def qm9_registry(tmp_path: Path) -> Registry:
+    """A registry declaring exactly ``dataset:molcrafts/qm9@v2``."""
+    return build_manifest_registry(
+        tmp_path / "qm9-registry",
+        path=("dataset", "molcrafts", "qm9", "v2.yaml"),
+        text=qm9_manifest_yaml(),
+    )
+
+
+@pytest.fixture
+def polymer_tg_hub(tmp_path: Path) -> FakeHub:
+    """A counting hub serving the miniature polymer-Tg CSV as role ``main``."""
+    path = write_polymer_tg_csv(tmp_path / "polymer-tg-payload" / "polymer_tg.csv")
+    return FakeHub({"main": path})
+
+
+@pytest.fixture
+def polymer_tg_registry(tmp_path: Path) -> Registry:
+    """A registry declaring exactly ``dataset:molcrafts/polymer-tg@1``."""
+    return build_manifest_registry(
+        tmp_path / "polymer-tg-registry",
+        path=("dataset", "molcrafts", "polymer-tg", "1.yaml"),
+        text=polymer_tg_manifest_yaml(),
+    )

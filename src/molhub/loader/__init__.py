@@ -33,6 +33,15 @@ declare, decided before anything is fetched) are both things a script
 legitimately catches, so both are reachable from here and from ``molhub``
 itself rather than only from the module that raises them.
 
+**And so is the transport's own.**
+:class:`~molhub.sources.errors.AllLocatorsFailed` is what opening a split raises
+when every mirror of a published file is down: the one failure on this path that
+is nobody's bug and that a script has a real reason to catch — to retry, to fall
+back, to report. Reaching it means importing :mod:`molhub.sources.errors`, a
+transport-layer module this façade exists to hide, so a caller who has only
+``import molhub`` writes ``except Exception`` and swallows their own bugs with
+it. It is re-exported unchanged: catching it here catches what the driver raised.
+
 **``split`` is required.** Omitting it would have to return a dict of splits —
 a new container type — or make ``ds[0]`` mean different things depending on an
 argument nobody passed. Discovery is ``load_dataset_builder(name).info.splits``,
@@ -84,6 +93,7 @@ from molhub.loader.materialize import BlockExport, SplitRouting, prepare
 from molhub.loader.naming import AmbiguousRevision, DatasetName
 from molhub.loader.streaming import BoundedStream, PublishedParts, StreamingSplitDataset
 from molhub.registry import Registry
+from molhub.sources.errors import AllLocatorsFailed
 
 __all__ = [
     "load_dataset",
@@ -110,6 +120,7 @@ __all__ = [
     "SplitProvenanceMismatch",
     "UnroutableUnitError",
     "UnsupportedRecordError",
+    "AllLocatorsFailed",
 ]
 
 

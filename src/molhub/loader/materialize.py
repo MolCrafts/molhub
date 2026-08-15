@@ -308,10 +308,19 @@ class BlockExport:
             UnsupportedRecordError: If the encoder refuses this dataset's subset
                 label, restated with the coordinate, the format whose column
                 routes are missing, and what exporting anyway would cost.
+
+                Raised ``from None``: the encoder's own refusal is this one's
+                *input*, not a second failure to correlate. Chaining it prints
+                "the direct cause of the following exception" and then the same
+                sentence twice — once in the conveyor's vocabulary, once in this
+                layer's — and the reader has to read both to find they say the
+                same thing. Suppressing the implicit context too is what makes
+                that one traceback rather than one plus a "during handling of
+                the above exception" block.
         """
         try:
             THEMolUnitEncoder(task=coordinate.name)
-        except UnsupportedRecordError as error:
+        except UnsupportedRecordError:
             raise UnsupportedRecordError(
                 f"{coordinate.canonical} cannot be materialized as {_BLOCK_FORMAT} "
                 "blocks: its atom-level electrostatics targets (atomic_charge, "
@@ -322,7 +331,7 @@ class BlockExport:
                 f"created. The fix is a routable atom-level column space in {_BLOCK_FORMAT}, "
                 "not a flag here; until it exists, read the targets with "
                 "load_dataset(name, split=...)."
-            ) from error
+            ) from None
 
     def _own_provenance(self) -> dict[str, object]:
         """The four keys ``molix.block/1`` requires, stated by this layer.

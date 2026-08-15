@@ -14,7 +14,7 @@ actually read.
 ```python
 import molhub
 
-info = molhub.load_dataset_builder("themol/mbis").info   # content, before any shard bytes
+info = molhub.load_dataset_builder("themol/mbis").info   # table-backed: content, no shard bytes
 assert info.coordinate.canonical.startswith("dataset:themol/mbis@")
 assert info.features[0] == molhub.Feature(name="atomic_charge", level="atom", units="e")
 assert [split.name for split in info.splits]             # names, from the split derivation
@@ -31,6 +31,36 @@ assert "mbis_shells" in frame
 row *i*, plus every earlier file it has not indexed yet. Sequential access pays
 once per file, random access to a late row pays for the walk — the same semantic
 `datasets.load_dataset` has, charged out loud.
+
+Opening a *declared* split downloads that split's file — `load_dataset("3bpa",
+split="test_600K")` fetches the 3BPA file carrying it — and both the map-style
+record path and `.info` announce what they are about to pull on stderr first,
+staying silent for anything already cached. One honest gap remains: constructing
+the view itself for a declared or whole-content dataset (3BPA, qm9, polymer-tg)
+fetches inside the dataset's own constructor and is the one path that can still
+move bytes without a notice. A later spec closes it; until then, ask
+`load_dataset_builder(name).describe_download_size` first if the number matters.
+
+### Which datasets this door serves
+
+`load_dataset` / `load_dataset_builder` / `prepare` dispatch off one table, and
+a dataset that is not in it is refused rather than half-served. Eight entries:
+
+| Dataset | Splits | Where they come from |
+|---|---|---|
+| `themol/hessian`, `themol/mbis`, `themol/torsion-scan` | `train`, `val`, `test` | the published derivation `class1-universal-splits@1` — a table, so counting is free |
+| `molcrafts/3bpa` | `train_300K`, `test_300K`, `test_600K`, `test_1200K` | one published extended-XYZ file per split |
+| `espaloma/zinc-typing`, `espaloma/phalkethoh-mm-small` | `train`, `val`, `test` (names only) | the payload's own `splits.json`, reachable only once the published bytes have been converted — see the conversion refusal below |
+| `molcrafts/qm9`, `molcrafts/polymer-tg` | `train` | nobody publishes a split of them, so their whole content is served as one view, under the name HuggingFace uses for "all of it" |
+
+Three more are addressable and describable but have no split to declare, and
+their refusal hands over the class API that opens them: `molcrafts/revmd17`
+(`RevMD17Dataset(root, molecule="aspirin")` — the molecule is a selector no
+coordinate carries), `themol/hessian-relax` and `themol/torsion-relax`
+(`THEMolHessianRelax(hub=hub).load(role="shard-000")` and its torsion sibling —
+published in parts, with no table saying which record is in which split).
+Anything else in the registry is bytes molhub ships no reader for: fetch it with
+`molhub fetch <coordinate>` and read it yourself.
 
 ### What you get back
 
@@ -199,9 +229,19 @@ conformer, scan and subset row of one molecule lands in one split.
 
 **`UnknownSplit` — a name this dataset does not declare.** A `KeyError` that
 renders as a sentence listing the names that do exist. It is decided against the
-declaration before any byte is fetched, so a typo cannot cost a download. A
-dataset that declares no splits at all raises the same type: its whole content
-is one view.
+declaration before any byte is fetched, so a typo cannot cost a download.
+
+A dataset the door does not serve at all raises the same type, and the message
+hands over the door that *is* open rather than dead-ending on molhub's own
+table. `molcrafts/qm9` and `molcrafts/polymer-tg` are not in that group — their
+whole content is served as `split="train"` — so what it covers is the three
+artifacts whose reader needs a selector a coordinate does not carry:
+`load_dataset("revmd17", split="train")` refuses by naming
+`RevMD17Dataset(root, molecule="aspirin")`, and the two THEMol relax artifacts
+refuse by naming `THEMolHessianRelax(hub=hub).load(role="shard-000")` /
+`THEMolTorsionRelax(hub=hub).load(role="shard-000")`. For a registry artifact
+molhub ships no reader for, the refusal says so and points at
+`molhub fetch <coordinate>`.
 
 **`UnsupportedRecordError` — the block format has no columns for this dataset.**
 `prepare("themol/mbis", ...)` raises it, and creates nothing: `molix.block/1`
@@ -211,9 +251,28 @@ exists for. Read them with `load_dataset("themol/mbis", split=...)` until the
 format routes them.
 
 **`ValueError` — the payload needs a conversion this machine has not run.** Both
-espaloma datasets publish bytes their own reader cannot open (a tarball of SDF
-structures, a zip of DGL heterographs), and the refusal comes *before* the
-download rather than as a `FileNotFoundError` after it.
+espaloma datasets publish bytes their own reader cannot open, and the refusal
+comes *before* the download rather than as a `FileNotFoundError` after it. Both
+readers want the same converted tree: a `splits.json` beside a `mols/`
+directory.
+
+`espaloma/phalkethoh-mm-small` is a zip of DGL heterographs, and molhub ships
+the conversion inside the wheel:
+
+```bash
+python -m molhub.scripts.convert_espaloma_phalkethoh_mm --src <zip> --out <dir>
+```
+
+`--help` answers in any environment, because the arguments are parsed before dgl
+is imported; *running* it needs `dgl==1.1.3`, which molhub does not depend on and
+which is why the conversion is offline and once. Without dgl it says which
+package is missing and that nothing was written. Then point
+`PhalkethohMMDataset` at what it wrote.
+
+`espaloma/zinc-typing` is a tarball of SDF structures and has **no** shipped
+converter — the module above reads the other payload and would not help. Fetch
+the archive with `molhub fetch dataset:espaloma/zinc-typing@1`, write the
+`splits.json` + `mols/` tree once yourself, and point `ZincTypingDataset` at it.
 
 <!-- test: fixture-home -->
 

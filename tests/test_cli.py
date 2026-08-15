@@ -79,6 +79,38 @@ def _words(output: str) -> set[str]:
     return set(re.findall(r"\w+", output))
 
 
+def _summary(output: str) -> str:
+    """The one-line summary of a ``--help`` screen, unwrapped.
+
+    Typer wraps the docstring's first paragraph to the terminal width and prints
+    the option boxes after it, so "the one-liner" is not a line: it is the first
+    paragraph of the prose above the first box, joined back together. Read this
+    way rather than by line so a test cannot pass because a word happened to
+    land past a wrap point.
+
+    Args:
+        output: The captured ``--help`` screen.
+
+    Returns:
+        The summary sentence, or ``""`` when the screen has no prose at all.
+    """
+    prose = output.split("╭")[0]
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for raw in prose.splitlines():
+        line = raw.strip()
+        if line.startswith("Usage:"):
+            continue
+        if line:
+            current.append(line)
+        elif current:
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return paragraphs[0] if paragraphs else ""
+
+
 def _reports(output: str, *, name: str, count: int) -> bool:
     """Whether one line of *output* names *name* and *count* as words of their own."""
     return any(
@@ -149,27 +181,48 @@ class TestInfo:
         monkeypatch.setattr(Molhub, "fetch", refuse)
         return ["--registry", str(root)]
 
-    def test_prints_the_coordinate(self, idx):
-        result = runner.invoke(app, ["info", "qm9@v2", *idx])
-        assert result.exit_code == 0
-        assert "dataset:molcrafts/qm9@v2" in result.stdout
+    @pytest.fixture
+    def undeclared(self, tmp_path):
+        """A registry holding one artifact molhub ships no reader for.
 
-    def test_prints_license_and_citation(self, idx):
-        out = runner.invoke(app, ["info", "qm9@v2", *idx]).stdout
+        ``molhub info qm9@v2`` is no longer free: qm9's whole content is one
+        view now (re-evaluation, ruling 1) and counting it means reading the
+        tarball, so describing it goes through the hub. The tests below are
+        about the *rendering* — coordinate, license, doi, declared targets, and
+        the transport table behind ``--files`` — which is the same for every
+        artifact, so they are pinned on one with the same manifest shape and no
+        declaration entry behind it. What qm9 now costs at the terminal is
+        pinned where it belongs, in :class:`TestInfoOnAWholeViewDataset`.
+        """
+        from .conftest import manifest_yaml
+
+        root = tmp_path / "undeclared-registry"
+        path = root / "dataset" / "molcrafts" / "fixture-only" / "v2.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(manifest_yaml(name="fixture-only"), encoding="utf-8")
+        return ["--registry", str(root)]
+
+    def test_prints_the_coordinate(self, undeclared):
+        result = runner.invoke(app, ["info", "fixture-only@v2", *undeclared])
+        assert result.exit_code == 0, result.output
+        assert "dataset:molcrafts/fixture-only@v2" in result.stdout
+
+    def test_prints_license_and_citation(self, undeclared):
+        out = runner.invoke(app, ["info", "fixture-only@v2", *undeclared]).stdout
         assert "CC0-1.0" in out
         assert "10.1038/sdata.2014.22" in out
 
-    def test_files_prints_every_artifact_role(self, idx):
-        out = runner.invoke(app, ["info", "qm9@v2", "--files", *idx]).stdout
+    def test_files_prints_every_artifact_role(self, undeclared):
+        out = runner.invoke(app, ["info", "fixture-only@v2", "--files", *undeclared]).stdout
         assert "[main]" in out and "[exclude]" in out
 
-    def test_files_prints_the_digest_and_locators(self, idx):
-        out = runner.invoke(app, ["info", "qm9@v2", "--files", *idx]).stdout
+    def test_files_prints_the_digest_and_locators(self, undeclared):
+        out = runner.invoke(app, ["info", "fixture-only@v2", "--files", *undeclared]).stdout
         assert "md5:" in out
         assert "fake://main-backup" in out
 
-    def test_prints_declared_targets(self, idx):
-        assert "U0" in runner.invoke(app, ["info", "qm9@v2", *idx]).stdout
+    def test_prints_declared_targets(self, undeclared):
+        assert "U0" in runner.invoke(app, ["info", "fixture-only@v2", *undeclared]).stdout
 
     def test_unknown_coordinate_exits_nonzero(self, idx):
         assert runner.invoke(app, ["info", "qm9@v9", *idx]).exit_code == 1
@@ -646,3 +699,130 @@ class TestBrokenRegistry:
         result = runner.invoke(app, ["search", "--registry", str(tmp_path)])
         assert result.exit_code != 0
         assert "Traceback" not in result.stdout
+
+
+class TestCacheHelpText:
+    """``--help`` is written for the person who has not read the source.
+
+    ``molhub cache status`` reports how much disk the local cache is holding
+    against a budget. What it *says* is "Report each conveyor tier's residency
+    against its own byte budget" — three words of internal vocabulary in a
+    sentence of nine. "Conveyor" is a molhub implementation noun that appears
+    nowhere in the product's own documentation of what a cache is; "residency"
+    and "tier" are the streaming design's words for "how much is on disk" and
+    "which pile it is in". A user scanning ``molhub cache --help`` to find out
+    whether this command is the one they want cannot tell from it.
+
+    The pin is deliberately one-sided: the *one-liners* — what the subcommand
+    listing shows, and the first paragraph of each screen — must be plain, and
+    the byte budget the verb is actually about must be named in plain words. The
+    option help for ``--budget-raw`` may still say which tier it bounds, because
+    that flag genuinely addresses one, and the report's own lines are not help
+    text at all.
+    """
+
+    def _help(self, *command: str) -> str:
+        result = runner.invoke(app, [*command, "--help"])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_the_status_summary_does_not_say_conveyor(self):
+        """A word for molhub's own plumbing, in the first sentence a user reads."""
+        assert "conveyor" not in _summary(self._help("cache", "status")).lower()
+
+    def test_the_status_summary_does_not_say_tier(self):
+        """ "Tier" is the streaming design's word for a pile of cached files; the
+        report below prints one line per pile and names each of them, which is
+        where a reader can learn it from an example instead of a definition."""
+        assert "tier" not in _summary(self._help("cache", "status")).lower()
+
+    def test_the_status_summary_says_what_it_is_about(self):
+        """Dropping the jargon must not drop the meaning: the verb is about a
+        budget in bytes, and the summary is where that is stated."""
+        assert "budget" in _summary(self._help("cache", "status")).lower()
+
+    def test_the_status_help_names_the_byte_budget_in_plain_words(self):
+        assert "byte budget" in self._help("cache", "status").lower()
+
+    def test_the_status_help_never_says_conveyor(self):
+        """Not just the summary: the body says "conveyor tier" too, and a reader
+        who read past the first line is the one who was trying hardest."""
+        assert "conveyor" not in self._help("cache", "status").lower()
+
+    def test_the_coverage_summary_does_not_say_conveyor(self):
+        assert "conveyor" not in _summary(self._help("cache", "coverage")).lower()
+
+    def test_the_coverage_summary_does_not_say_tier(self):
+        assert "tier" not in _summary(self._help("cache", "coverage")).lower()
+
+    def test_the_subcommand_listing_carries_no_jargon(self):
+        """What ``molhub cache --help`` shows is the summaries above, side by
+        side — the one screen a user reads before choosing a verb."""
+        listing = self._help("cache").lower()
+        assert "conveyor" not in listing, listing
+
+
+class TestTheDownloadNoticeIsPrintedOnce:
+    """One warning per command, now that the library prints one too.
+
+    The re-evaluation gives ``DatasetBuilder.info`` the stderr notice this verb
+    has had since the reachability wave (ruling 2): the Python API is what a
+    notebook calls, and it surprised people. Two layers stating the same
+    sentence is one notice printed twice at the terminal — which is how a
+    warning becomes noise, and noise is how the real one gets skipped.
+    """
+
+    def test_the_notice_appears_exactly_once(self, tmp_path, monkeypatch):
+        """Counted on the humanized size, so the raw count on the report's own
+        download line — a different stream and a different sentence — cannot be
+        mistaken for a second notice."""
+        from molhub.molhub import Molhub
+
+        root = tmp_path / "3bpa-registry"
+        path = root / "dataset" / "molcrafts" / "3bpa" / "1.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(THREEBPA_MANIFEST, encoding="utf-8")
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+
+        def refuse(self, coordinate, *, roles=None):
+            raise AssertionError(f"`molhub info` fetched {coordinate} roles={roles!r}.")
+
+        monkeypatch.setattr(Molhub, "fetch", refuse)
+        result = runner.invoke(app, ["info", "molcrafts/3bpa", "--registry", str(root)])
+        assert result.stderr.count(THREEBPA_DOWNLOAD_HUMANIZED) == 1, result.stderr
+
+
+class TestInfoOnAWholeViewDataset:
+    """What ``molhub info qm9`` costs now, said before it is spent.
+
+    qm9 declares no split of its own, so its entire content is served as
+    ``train`` (re-evaluation, ruling 1) — and the count of that split is the
+    dataset's own ``len``, which means reading the 86 MB tarball. That is the
+    price of a dataset nobody published a split table for, and it is the same
+    price 3BPA already pays; what makes it acceptable is that the verb says so
+    on stderr first, and that a reader who does not want to spend it can stop.
+
+    The fixture registry's locators resolve to nothing, so this is also the
+    honest shape of the failure: the notice, then a clean refusal, and no
+    traceback.
+    """
+
+    def test_it_says_what_describing_will_cost(self, idx):
+        result = runner.invoke(app, ["info", "qm9@v2", *idx])
+        assert "download" in result.stderr.lower(), result.stderr
+
+    def test_the_notice_names_the_declared_bytes(self, idx):
+        """19 B of fixture manifest — the sum the report itself would print."""
+        result = runner.invoke(app, ["info", "qm9@v2", *idx])
+        assert "19" in result.stderr, result.stderr
+
+    def test_a_dataset_whose_bytes_cannot_be_had_exits_nonzero(self, idx):
+        """The fixture publishes ``fake://`` locators and this run has no driver
+        for them, which is what "the mirror is down" looks like from here."""
+        assert runner.invoke(app, ["info", "qm9@v2", *idx]).exit_code == 1
+
+    def test_that_failure_is_not_a_traceback(self, idx):
+        """Transport failures have been a clean exit on every other verb since
+        the beginning; describing a dataset that now downloads is not the place
+        to start printing stack frames at users."""
+        assert "Traceback" not in runner.invoke(app, ["info", "qm9@v2", *idx]).output

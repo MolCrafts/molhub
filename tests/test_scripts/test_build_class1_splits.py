@@ -98,6 +98,19 @@ SOURCES: Mapping[str, str] = {
 #: the real one is ~5 GB.
 INDEX_DOWNLOAD_SIZE = 3 * INDEX_SIZE
 
+#: The same three manifests with an index size above a kibibyte, and what that
+#: total is worth. :data:`INDEX_SIZE` is 101 bytes, whose humanized form is its
+#: raw form — ``101 B`` either way — so it cannot tell a rendering through
+#: :class:`~molhub.loader.info.ByteSize` apart from a hand-written ``{n} B``.
+#: The real indexes are gigabytes, which is the case the notice exists for.
+BIG_INDEX_SIZE = 5_000_000
+BIG_INDEX_DOWNLOAD_SIZE = 3 * BIG_INDEX_SIZE
+
+#: That total as ``ByteSize`` renders it: 1024-based, one decimal. A literal,
+#: never a call into the type under test — a golden that computed itself would
+#: agree with any rendering at all.
+BIG_INDEX_DOWNLOAD_HUMANIZED = "14.3 MiB"
+
 #: Five molecules that appear in no other fixture, used to pad the hessian index
 #: so the identity universe is ten molecules and the 8:1:1 molecule-level split
 #: lands non-empty in all three splits. They never reach a shard: the mbis view
@@ -288,6 +301,15 @@ def registry(tmp_path: Path) -> Registry:
 
 
 @pytest.fixture
+def humanizing_registry(tmp_path: Path) -> Registry:
+    """The same three sources, declaring index sizes worth humanizing."""
+    root = tmp_path / "big-registry"
+    for source in SOURCES:
+        build_registry(root, namespace="themol", name=source, index_size=BIG_INDEX_SIZE)
+    return Registry.load(root)
+
+
+@pytest.fixture
 def staged(home: Path, pristine_indexes: dict[str, Path]) -> Path:
     """The three indexes already in the cache, where a fetch would have put them."""
     for source, path in pristine_indexes.items():
@@ -367,6 +389,28 @@ class TestIndexResolution:
         assert generator.main([], registry=registry, hub=index_hub) != 0
         captured = capsys.readouterr()
         assert str(INDEX_DOWNLOAD_SIZE) in captured.out + captured.err
+
+    def test_the_refusal_humanizes_the_bytes_it_would_have_pulled(
+        self, generator, home: Path, humanizing_registry, index_hub: StagedHub, capsys
+    ):
+        """``5063580160 B`` is a number a reader counts digits on, and this is
+        the sentence they weigh before typing ``--fetch``. The library already
+        owns the rendering (:class:`~molhub.loader.info.ByteSize`, which
+        ``molhub info`` and its stderr notice both print); a second spelling here
+        is the drift that shared type exists to end."""
+        assert generator.main([], registry=humanizing_registry, hub=index_hub) != 0
+        captured = capsys.readouterr()
+        assert BIG_INDEX_DOWNLOAD_HUMANIZED in captured.out + captured.err, captured
+
+    def test_the_refusal_keeps_the_raw_byte_count(
+        self, generator, home: Path, humanizing_registry, index_hub: StagedHub, capsys
+    ):
+        """Humanizing is lossy on purpose and the manifest's own number is not:
+        a script greps the count, a human reads the unit, and both are answers
+        to the same question."""
+        assert generator.main([], registry=humanizing_registry, hub=index_hub) != 0
+        captured = capsys.readouterr()
+        assert str(BIG_INDEX_DOWNLOAD_SIZE) in captured.out + captured.err, captured
 
     def test_the_refusal_names_the_flag_that_authorises_it(
         self, generator, home: Path, registry, index_hub: StagedHub, capsys

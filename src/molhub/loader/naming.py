@@ -22,6 +22,17 @@ that did not (``molhub search``). It says nothing about revisions: there is no
 revision of a dataset nobody publishes. The *ordering* refusal below is a
 different sentence about a real revision problem and still says so.
 
+**The refusal reports what was typed, never what was defaulted.** A name with no
+``namespace/`` takes ``molcrafts``, which is the right rule and the wrong
+sentence: ``dataset:molcrafts/mbis is not in the registry`` names a coordinate
+the reader never typed and never meant, for a dataset that is published one
+segment away under ``themol``, and it reads like a registry that lost the
+dataset rather than a name that needs its namespace. So a bare name is echoed
+bare, a namespaced one is echoed in full, and when exactly **one** published
+artifact carries the bare name, the refusal hands over its full ``ns/name``.
+Exactly one, because two candidates are a choice the reader has to make and
+listing both is what :meth:`~molhub.registry.Registry.search` is for.
+
 **Why an unorderable version set is refused rather than picked.** The default is
 a numeric-aware natural order: ``2`` before ``10``, ``v2`` before ``v3``. When
 two labels first differ at a *text* segment — ``v2`` against ``beta`` — no
@@ -98,6 +109,7 @@ class DatasetName:
         self._kind = kind
         self._namespace = namespace
         self._name = name
+        self._namespaced = bool(slash)
         self._revision = revision
         # Validates every segment through the one type that owns those rules.
         # A placeholder version is used because this name has none yet; the
@@ -154,9 +166,9 @@ class DatasetName:
         declared = registry.versions(self.unversioned)
         if not declared:
             raise UnknownArtifact(
-                f"{self.unversioned} is not in the registry ({len(registry)} artifacts "
+                f"{self._addressed} is not in the registry ({len(registry)} artifacts "
                 f"loaded). Check the spelling, or list what is published with "
-                f"'molhub search'.{self._namespace_hint(registry)}"
+                f"'molhub search'.{self._near_miss(registry)}{self._namespace_hint(registry)}"
             )
         if len(declared) == 1:
             return declared[0]
@@ -167,6 +179,52 @@ class DatasetName:
                 "explicit revision= — a silently picked version is not a pinned one."
             )
         return max(declared, key=self._key)
+
+    @property
+    def _addressed(self) -> str:
+        """This name as the reader typed it, never as this class defaulted it.
+
+        Returns:
+            ``kind:namespace/name`` for a name that carried a namespace, and the
+            bare name for one that did not — because ``molcrafts`` is then
+            molhub's own defaulting, and reporting it back describes a call the
+            reader never made.
+        """
+        return self.unversioned if self._namespaced else self._name
+
+    def _near_miss(self, registry: Registry) -> str:
+        """The one published artifact this bare name would have hit, if there is one.
+
+        ``load_dataset("mbis")`` is one namespace away from working, and the
+        registry can see that: exactly one artifact is called ``mbis``. Holding
+        that back and reporting a defaulted coordinate instead is the same
+        failure :meth:`_namespace_hint` fixes from the other direction.
+
+        Args:
+            registry: The registry that has just declared no such artifact.
+
+        Returns:
+            A sentence naming the full ``namespace/name`` to type, or ``""``
+            when the name was already namespaced, or when the number of
+            published artifacts carrying it is not exactly one — two candidates
+            are a choice only the reader can make, and ``molhub search`` (which
+            the refusal already names) is what lists them.
+        """
+        if self._namespaced:
+            return ""
+        matches = sorted(
+            {
+                f"{manifest.coordinate.namespace}/{manifest.coordinate.name}"
+                for manifest in registry.search(kind=self._kind)
+                if manifest.coordinate.name == self._name
+            }
+        )
+        if len(matches) != 1:
+            return ""
+        return (
+            f" One published dataset is called {self._name!r}: {matches[0]}. "
+            "Names take a namespace; a bare one is read under 'molcrafts'."
+        )
 
     def _namespace_hint(self, registry: Registry) -> str:
         """What to suggest when the name typed is really a namespace.

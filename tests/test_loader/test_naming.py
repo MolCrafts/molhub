@@ -152,3 +152,79 @@ class TestAnUnknownNameIsRefusedAsANameProblem:
         with pytest.raises(AmbiguousRevision) as raised:
             DatasetName("themol/mbis").resolve(registry)
         assert "revision" in str(raised.value).lower()
+
+
+class TestABareNameThatMissesSuggestsTheOneThatHits:
+    """``load_dataset("mbis")`` is one namespace away from working — say which.
+
+    A name with no ``namespace/`` takes the default one, ``molcrafts``. That is
+    the right rule and it produces the wrong sentence: ``dataset:molcrafts/mbis
+    is not in the registry`` names a coordinate the reader never typed and never
+    meant, for a dataset that is published, one segment away, under ``themol``.
+    The registry knows this — it can see exactly one artifact called ``mbis`` —
+    and holding that back to report an invented coordinate instead is the same
+    failure the bare-namespace hint already fixed from the other direction.
+
+    Pinned against the **bundled** registry, not a fixture one: what a reader
+    with no configuration gets is what this refusal has to be right about, and
+    the near-miss only exists because two namespaces really do ship side by side.
+    """
+
+    @pytest.fixture
+    def bundled(self, monkeypatch: pytest.MonkeyPatch):
+        """The registry that ships in the wheel, with any override removed."""
+        monkeypatch.delenv("MOLHUB_REGISTRY", raising=False)
+        from molhub.registry import Registry
+
+        return Registry.load()
+
+    def test_a_bare_name_that_exists_in_another_namespace_still_misses(self, bundled):
+        """The default namespace is not a search: ``mbis`` is not ``molcrafts``'."""
+        with pytest.raises(UnknownArtifact):
+            DatasetName("mbis").resolve(bundled)
+
+    def test_the_refusal_suggests_the_full_name(self, bundled):
+        """One artifact is called ``mbis``; naming it is the whole next step."""
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("mbis").resolve(bundled)
+        assert "themol/mbis" in str(raised.value), str(raised.value)
+
+    def test_the_refusal_echoes_what_was_typed(self, bundled):
+        """The reader has to recognise their own call in the sentence."""
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("mbis").resolve(bundled)
+        assert "mbis" in str(raised.value)
+
+    def test_the_refusal_does_not_report_a_coordinate_nobody_typed(self, bundled):
+        """``dataset:molcrafts/mbis`` is molhub's own defaulting, shown back to a
+        reader who wrote four characters. It reads like a registry that lost the
+        dataset rather than a name that needs its namespace."""
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("mbis").resolve(bundled)
+        assert "molcrafts/mbis" not in str(raised.value), str(raised.value)
+
+    def test_a_bare_name_nothing_matches_still_refuses(self, bundled):
+        """No suggestion to make; the refusal is still a refusal."""
+        with pytest.raises(UnknownArtifact):
+            DatasetName("mbsi").resolve(bundled)
+
+    def test_that_refusal_names_no_invented_coordinate_either(self, bundled):
+        """The defaulted spelling is unhelpful whether or not a near miss exists:
+        the reader typed ``mbsi``, and that is the string to lead with."""
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("mbsi").resolve(bundled)
+        message = str(raised.value)
+        assert "molcrafts/mbsi" not in message, message
+        assert "mbsi" in message
+
+    def test_that_refusal_still_names_the_verb_that_lists_them(self, bundled):
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("mbsi").resolve(bundled)
+        assert "molhub search" in str(raised.value)
+
+    def test_a_namespaced_name_still_echoes_the_namespace_it_was_given(self, bundled):
+        """The contrast: ``themol/mbsi`` *was* typed in full, so it is reported in
+        full — the rule is "do not invent", not "do not name the coordinate"."""
+        with pytest.raises(UnknownArtifact) as raised:
+            DatasetName("themol/mbsi").resolve(bundled)
+        assert "themol/mbsi" in str(raised.value)

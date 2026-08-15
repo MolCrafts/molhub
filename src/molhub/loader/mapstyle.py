@@ -22,6 +22,18 @@ that key space and the declared alternative (molecular identity, via
 ``identity_splits.csv.gz``). There is no runtime fallback: a fabricated split
 leaks between train and test with nothing to detect it.
 
+**And the cost is said out loud, before it is spent.** :class:`DownloadNotice`
+is the one thing in this package that writes to stderr: ``ds[0]`` fetches a
+published file — 3.9 GiB of real THEMol shard — and that was documented and
+never *said*. It states the byte total for a human and the raw count for whoever
+reconciles it against the manifest, on stderr so a piped record or a captured
+``print(info)`` is unchanged by it, and it is silent when nothing will move: the
+file is already in the cache, or was already announced. A warning printed on
+every cache hit is one nobody reads by the third call, and being read is the
+whole point of it. :class:`~molhub.loader.builder.DatasetBuilder` builds the same
+type for its ``.info`` path, so what a dataset costs is stated in one sentence
+however it is opened, rather than in one wording here and another there.
+
 Reference:
     ``.claude/specs/hf-facade-03-builder-info.md`` § Design (D6), ac-004 and
     ac-005, under the 2026-08-15 operator override recorded in
@@ -31,7 +43,9 @@ Reference:
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import operator
+import sys
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -40,8 +54,17 @@ from molhub.conveyor.splits import _SplitTable
 from molhub.conveyor.tier import DerivedLayout
 from molhub.coordinate import Coordinate
 from molhub.dataset.protocol import Sample
+from molhub.loader.info import ByteSize
+from molhub.sources.blobs import BlobStore
 
-__all__ = ["UnknownRecordKey", "ShardRecords", "ShardSource", "ShardIndex", "SplitDataset"]
+__all__ = [
+    "UnknownRecordKey",
+    "DownloadNotice",
+    "ShardRecords",
+    "ShardSource",
+    "ShardIndex",
+    "SplitDataset",
+]
 
 #: What the memo of one shard's keys is called, and what wrote it. The layout
 #: files it beside the artifact it describes, so a stale index is deletable by
@@ -66,6 +89,73 @@ class UnknownRecordKey(KeyError):
 
     def __str__(self) -> str:
         return self._message
+
+
+class DownloadNotice:
+    """What a fetch is about to pull, said on stderr before it moves.
+
+    One notice per set of published files, so a dataset opened through the
+    façade warns once about each file it fetches, however many records are read
+    out of it. It answers three questions in one sentence — why bytes are about
+    to move, how many of them (humanized, through the same
+    :class:`~molhub.loader.info.ByteSize` the report prints), and the raw count
+    for a script — and it stays quiet whenever nothing will actually move.
+
+    Args:
+        coordinate: The **resolved** coordinate whose files these are; a notice
+            that named an unversioned artifact would not say which release is
+            being pulled.
+        sizes: Declared byte size per role, from the registry manifest.
+            Declared rather than measured: the files are not here, which is the
+            whole question.
+        because: How this notice opens — "Reading a record of", "Counting the
+            splits of". The caller knows why it is about to fetch; this type
+            knows how much and whether to say anything at all.
+        home: The molhub home whose cache is probed. Probing is a read: it
+            creates nothing and fetches nothing.
+    """
+
+    def __init__(
+        self,
+        *,
+        coordinate: Coordinate,
+        sizes: Mapping[str, int],
+        because: str,
+        home: str | Path | None = None,
+    ) -> None:
+        self._coordinate = coordinate
+        self._sizes = dict(sizes)
+        self._because = because
+        self._blobs = BlobStore(home)
+        self._announced: set[str] = set()
+
+    def announce(self, *roles: str) -> None:
+        """Say what fetching *roles* will pull, unless it will pull nothing.
+
+        Silent for a role whose bytes are already in this home's cache — the
+        bytes are on this machine, and announcing a download would be a lie
+        printed often enough to train the reader to ignore the true one — and
+        silent for one already announced, so a second record out of one open
+        file says nothing.
+
+        Args:
+            roles: The roles about to be asked for, in the manifest's order.
+        """
+        pending = [role for role in roles if role not in self._announced and not self._cached(role)]
+        self._announced.update(roles)
+        size = sum(self._sizes.get(role, 0) for role in pending)
+        if not size:
+            return
+        print(
+            f"{self._because} {self._coordinate.canonical} will download {ByteSize(size)} "
+            f"({size} B) first. The files stay in the molhub cache, so reading them again "
+            "costs nothing.",
+            file=sys.stderr,
+        )
+
+    def _cached(self, role: str) -> bool:
+        """Whether *role*'s bytes already sit at the path a fetch would use."""
+        return self._blobs.has(f"{self._coordinate.cache_path()}/{role}")
 
 
 @runtime_checkable
@@ -106,6 +196,10 @@ class ShardIndex:
         roles: The shard roles, in the order the registry manifest declares
             them. That order is the record order of the dataset.
         layout: Where the memo is written.
+        notice: What says, on stderr, that a file is about to be pulled.
+            ``None`` opens shards silently, which is what a caller that has
+            already accounted for the bytes — or a test measuring fetches
+            rather than warnings — wants.
     """
 
     def __init__(
@@ -115,11 +209,13 @@ class ShardIndex:
         coordinate: Coordinate,
         roles: Sequence[str],
         layout: DerivedLayout,
+        notice: DownloadNotice | None = None,
     ) -> None:
         self._source = shards
         self._coordinate = coordinate
         self._roles = tuple(roles)
         self._layout = layout
+        self._notice = notice
         self._keys: dict[str, tuple[str, ...]] = {}
         self._open: dict[str, ShardRecords] = {}
 
@@ -178,6 +274,8 @@ class ShardIndex:
         self._require_role(role)
         opened = self._open.get(role)
         if opened is None:
+            if self._notice is not None:
+                self._notice.announce(role)
             opened = self._source.load(role)
             self._open[role] = opened
         return opened
@@ -326,14 +424,32 @@ class SplitDataset:
             reader builds — no wrapper on top of it.
 
         Raises:
+            TypeError: If *index* is not an integer. Deciding it here is what
+                keeps ``ds["train"]`` — the mistake a reader coming from a dict
+                makes — from surfacing as ``'<' not supported between instances
+                of 'str' and 'int'``, which names this class's bounds check
+                rather than the caller's mistake.
             IndexError: If *index* is out of range, or if the shards hold fewer
-                records of this split than the table counts.
+                records of this split than the table counts. The message names
+                the dataset, the split, the bound and the index asked for: this
+                is the one refusal a user meets by accident, three frames deep
+                in a training loop, and all four facts are already in hand.
             UnknownRecordKey: If a shard's key is outside the table's key space.
         """
-        position = index + self._length if index < 0 else index
+        try:
+            position = operator.index(index)
+        except TypeError:
+            raise TypeError(
+                f"A split view is addressed by integer position, not by {index!r} "
+                f"({type(index).__name__}). This is split {self._split!r} of "
+                f"{self._index.coordinate.canonical}; its first record is ds[0]."
+            ) from None
+        asked = position
+        position = position + self._length if position < 0 else position
         if position < 0 or position >= self._length:
             raise IndexError(
-                f"{position} is outside the {self._length} records of split {self._split!r}."
+                f"{asked} is outside split {self._split!r} of "
+                f"{self._index.coordinate.canonical}, which holds {self._length} records."
             )
         remaining = position
         held = 0
@@ -344,9 +460,10 @@ class SplitDataset:
                 return self._index.shard(role)[positions[remaining]]
             remaining -= len(positions)
         raise IndexError(
-            f"The shards hold {held} records of split {self._split!r}, but the split "
-            f"table counts {self._length}. The table and the shards are from different "
-            "releases of this dataset."
+            f"The published files hold {held} records of split {self._split!r} of "
+            f"{self._index.coordinate.canonical}, but the split table counts "
+            f"{self._length}. The table and the files are from different releases of "
+            "this dataset."
         )
 
     def _positions(self, role: str) -> tuple[int, ...]:

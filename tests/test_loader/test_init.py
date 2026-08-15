@@ -56,6 +56,7 @@ from molhub.loader.info import Feature, SplitInfo
 from molhub.loader.mapstyle import UnknownRecordKey
 from molhub.loader.naming import AmbiguousRevision
 from molhub.loader.streaming import StreamingSplitDataset
+from molhub.sources.errors import AllLocatorsFailed
 
 #: Every name the package root re-exports beside the three functions, and the
 #: module that defines it. Written out rather than derived from ``__all__``: what
@@ -65,7 +66,16 @@ from molhub.loader.streaming import StreamingSplitDataset
 #: The two refusals of the reachability wave are in the table for completeness —
 #: they are already exported, and a table missing them would read as if only the
 #: new ones mattered.
+#:
+#: ``AllLocatorsFailed`` joins them (re-evaluation, ruling 6): it is what
+#: ``load_dataset`` raises when every mirror of a published file is down, which
+#: is the one failure on this path that is nobody's bug and that a script has a
+#: real reason to catch — to retry, to fall back, to report. Reaching it means
+#: importing ``molhub.sources.errors``, a transport-layer module this façade
+#: exists to hide, so a caller who only has ``import molhub`` writes
+#: ``except Exception`` and swallows their own bugs with it.
 RE_EXPORTED: Mapping[str, object] = {
+    "AllLocatorsFailed": AllLocatorsFailed,
     "AmbiguousRevision": AmbiguousRevision,
     "Feature": Feature,
     "PreparedBlocks": PreparedBlocks,

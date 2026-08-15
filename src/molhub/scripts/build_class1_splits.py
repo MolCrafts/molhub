@@ -63,6 +63,7 @@ from types import MappingProxyType
 from molhub.conveyor import DerivedLayout, THEMolUnitEncoder
 from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
+from molhub.loader import ByteSize
 from molhub.molhub import Molhub
 from molhub.registry import Registry
 from molhub.sources import BlobStore, Fetcher
@@ -353,10 +354,11 @@ def main(
 
     absent = indexes.absent()
     if absent and not args.fetch:
+        size = indexes.download_size(absent)
         print(
             f"{len(absent)} of the {len(SOURCES)} THEMol indexes this derivation is folded "
             f"from are not under {home}: {', '.join(absent)}. Fetching them would download "
-            f"{indexes.download_size(absent)} B, which is not a side effect a script should "
+            f"{ByteSize(size)} ({size} B), which is not a side effect a script should "
             "have. Re-run with --fetch to authorise it. Nothing was fetched and nothing "
             "was written.",
             file=sys.stderr,

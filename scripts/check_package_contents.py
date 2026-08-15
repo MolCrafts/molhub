@@ -25,18 +25,21 @@ with tempfile.TemporaryDirectory(prefix="molhub-package-audit-") as temporary:
     with zipfile.ZipFile(wheel) as archive:
         wheel_files = archive.namelist()
     assert_clean(wheel_files, "Python wheel")
-    # `molhub/scripts/build_class1_splits.py` is here because the product's own
-    # refusals promise it: every THEMol split view and every prepared block is
+    # The two `molhub/scripts/…` members are here because the product's own
+    # refusals promise them. Every THEMol split view and every prepared block is
     # routed by a derivation nobody publishes, and the only way to produce it is
-    # `python -m molhub.scripts.build_class1_splits`. If it falls out of the
-    # wheel, every THEMol dataset becomes unopenable for a pip-installed reader
-    # and the message that was meant to rescue them names a module that is not
-    # there.
+    # `python -m molhub.scripts.build_class1_splits`; the espaloma
+    # phalkethoh-mm payload cannot be opened at all until
+    # `python -m molhub.scripts.convert_espaloma_phalkethoh_mm` has written the
+    # tree its dataset class reads. If either falls out of the wheel, those
+    # datasets become unopenable for a pip-installed reader and the message that
+    # was meant to rescue them names a module that is not there.
     required_wheel = {
         "molhub/cli.py",
         "molhub/schema/manifest.schema.yaml",
         "molhub/registry_data/dataset/molcrafts/qm9/v2.yaml",
         "molhub/scripts/build_class1_splits.py",
+        "molhub/scripts/convert_espaloma_phalkethoh_mm.py",
     }
     missing_wheel = required_wheel.difference(wheel_files)
     if missing_wheel:

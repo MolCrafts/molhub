@@ -147,6 +147,16 @@ include = ["src/molhub/conveyor/prepare.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# And for the espaloma converter: `dgl` is why that conversion is offline and
+# once — molhub does not depend on it, no extra pulls it, and it is imported
+# inside the one method that needs it so `--help` answers without it. The lint
+# environment can never resolve it, by design.
+[[tool.ty.overrides]]
+include = ["src/molhub/scripts/convert_espaloma_phalkethoh_mm.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py
 [tool.tox]
 requires = ["tox>=4.23"]
