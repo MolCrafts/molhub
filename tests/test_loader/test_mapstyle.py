@@ -28,13 +28,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from molhub.loader.mapstyle import ShardIndex, SplitDataset, UnknownRecordKey
 from molpy import Frame
 
 from molhub.conveyor.splits import _SplitTable
 from molhub.coordinate import Coordinate
 from molhub.dataset import THEMolMBIS
 from molhub.dataset.protocol import Dataset
+from molhub.loader.mapstyle import ShardIndex, SplitDataset, UnknownRecordKey
 
 from .conftest import COORDINATE, SHARD_KEYS, SPLIT_COUNTS, TRAIN_KEYS, FakeHub, write_shard
 

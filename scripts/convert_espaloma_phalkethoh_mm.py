@@ -95,13 +95,25 @@ def convert(src: Path, out: Path, *, seed: int = DEFAULT_SEED) -> dict:
 
         legacy: dict = {}
         if g.num_nodes("n2") > 0:
-            legacy["bond_k_ref"] = g.nodes["n2"].data["k_ref"].detach().cpu().numpy().reshape(-1).tolist()
-            legacy["bond_eq_ref"] = g.nodes["n2"].data["eq_ref"].detach().cpu().numpy().reshape(-1).tolist()
-            legacy["bond_idxs"] = g.nodes["n2"].data["idxs"].detach().cpu().numpy().astype(int).tolist()
+            legacy["bond_k_ref"] = (
+                g.nodes["n2"].data["k_ref"].detach().cpu().numpy().reshape(-1).tolist()
+            )
+            legacy["bond_eq_ref"] = (
+                g.nodes["n2"].data["eq_ref"].detach().cpu().numpy().reshape(-1).tolist()
+            )
+            legacy["bond_idxs"] = (
+                g.nodes["n2"].data["idxs"].detach().cpu().numpy().astype(int).tolist()
+            )
         if g.num_nodes("n3") > 0 and "k_ref" in g.nodes["n3"].data:
-            legacy["angle_k_ref"] = g.nodes["n3"].data["k_ref"].detach().cpu().numpy().reshape(-1).tolist()
-            legacy["angle_eq_ref"] = g.nodes["n3"].data["eq_ref"].detach().cpu().numpy().reshape(-1).tolist()
-            legacy["angle_idxs"] = g.nodes["n3"].data["idxs"].detach().cpu().numpy().astype(int).tolist()
+            legacy["angle_k_ref"] = (
+                g.nodes["n3"].data["k_ref"].detach().cpu().numpy().reshape(-1).tolist()
+            )
+            legacy["angle_eq_ref"] = (
+                g.nodes["n3"].data["eq_ref"].detach().cpu().numpy().reshape(-1).tolist()
+            )
+            legacy["angle_idxs"] = (
+                g.nodes["n3"].data["idxs"].detach().cpu().numpy().astype(int).tolist()
+            )
 
         md = mols_dir / mid
         md.mkdir()

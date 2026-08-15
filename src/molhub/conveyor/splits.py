@@ -5,9 +5,17 @@ molecule belong to*, and every consumer downstream of it — the roster's
 provenance stamp, the prepare stage's routing — has to be able to say which
 version of that answer it used. So the split tables are never read bare: each
 one is checked against the ``output_sha256`` block that
-``scripts/build_class1_splits.py`` wrote beside it, and a table that no longer
-matches its own record is refused rather than silently routing molecules into
-the wrong split for the rest of a training run.
+``molhub.scripts.build_class1_splits`` wrote beside it, and a table that no
+longer matches its own record is refused rather than silently routing molecules
+into the wrong split for the rest of a training run.
+
+**A refusal names the module, not the recorded field.** Every derivation already
+on disk records ``scripts/build_class1_splits.py`` in its own ``metadata.json``,
+which is now a shim that never shipped in the wheel; echoing that field would
+tell a pip-installed reader to run a file they do not have. The messages here
+state ``python -m molhub.scripts.build_class1_splits`` and quote the recorded
+generator beside it, so the provenance is still visible and the instruction is
+still runnable.
 
 **Hashing a local file here is not molhub inventing a digest.** The repo rule
 (``.claude/notes/notes.md``) forbids computing a digest for an *upstream*
@@ -69,7 +77,18 @@ __all__ = ["SplitProvenance", "SplitProvenanceMismatch"]
 
 _METADATA_FILENAME = "metadata.json"
 
-# The literal table from `scripts/build_class1_splits.py`'s own `out_name` block.
+# The generator that rewrites a derivation, as a command a reader can type.
+# Every table already on disk records the *legacy* `scripts/build_class1_splits.py`
+# path in its own `metadata.json`, and that file is a shim which never shipped in
+# the wheel — so echoing the recorded field would name something a pip-installed
+# reader does not have. The module is stated here instead, mirrored from
+# `molhub.scripts.build_class1_splits` rather than imported for the reason the
+# filename table above is mirrored: it is a script, run once per derivation, and
+# importing it would drag its argument parsing into every reader.
+_GENERATOR_MODULE = "molhub.scripts.build_class1_splits"
+_GENERATOR_COMMAND = f"python -m {_GENERATOR_MODULE}"
+
+# The literal table from `molhub.scripts.build_class1_splits`'s own filename block.
 # Mirrored rather than imported: that file is a script, run once per derivation,
 # and importing it would drag its argument parsing into every reader.
 _SOURCE_FILENAMES: Mapping[str, str] = MappingProxyType(
@@ -103,7 +122,7 @@ def _text(metadata: Mapping[str, object], name: str, path: Path) -> str:
     if not isinstance(value, str):
         raise SplitProvenanceMismatch(
             f"{path} records {name!r} as {value!r}; a split derivation's provenance "
-            "field must be a string. Re-run the generator rather than editing it."
+            f"field must be a string. Re-run {_GENERATOR_COMMAND} rather than editing it."
         )
     return value
 
@@ -158,7 +177,7 @@ class SplitProvenance:
             raise SplitProvenanceMismatch(
                 f"{path} could not be read ({error}); without it a split table has nothing "
                 "to be verified against, and an unverified split assignment silently routes "
-                f"molecules for a whole run. Re-run the generator to rewrite "
+                f"molecules for a whole run. Re-run {_GENERATOR_COMMAND} to rewrite "
                 f"{_METADATA_FILENAME}."
             ) from error
         try:
@@ -228,8 +247,9 @@ class SplitProvenance:
             raise SplitProvenanceMismatch(
                 f"{path} hashes to {actual}, but its own producer recorded {recorded} in "
                 f"{_METADATA_FILENAME}. These bytes changed after they were written; "
-                f"re-run {self.generator} rather than loading a split assignment nobody "
-                "can reproduce."
+                f"rewrite the derivation with {_GENERATOR_COMMAND} rather than loading a "
+                f"split assignment nobody can reproduce (this one records its generator as "
+                f"{self.generator!r})."
             )
 
 

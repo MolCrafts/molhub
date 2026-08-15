@@ -41,13 +41,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
-from molhub.loader.streaming import StreamingSplitDataset
 from molpy import Frame
 
 import molhub
 from molhub.conveyor import DEFAULT_BUDGET_BYTES, default_ledger_path
 from molhub.dataset.protocol import IterableDataset
 from molhub.dataset.themol import THEMolShardDataset
+from molhub.loader.streaming import StreamingSplitDataset
 
 from .conftest import (
     LEDGER_SEGMENTS,

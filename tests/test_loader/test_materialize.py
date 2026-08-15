@@ -48,7 +48,10 @@ Shapes picked here, because a test cannot call them otherwise:
 
 from __future__ import annotations
 
+import importlib
 import json
+import shutil
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -584,3 +587,188 @@ class TestPrepareRefusesUnroutableTargets:
         """ac-003 holds for a refusal too — it is the message a user reads."""
         message = str(self._refusal(verified_registry, landing_hub, factory, output_dir))
         assert leaks(message) == []
+
+
+def _chain(error: BaseException) -> str:
+    """Every exception in *error*'s chain, rendered as one searchable string.
+
+    A refusal that re-raises what it caught keeps the original underneath, and
+    "the reason survived the wrapping" is a claim about the chain rather than
+    about the outermost message. Follows ``__cause__`` first (an explicit
+    ``raise ... from``) and ``__context__`` second, so an implicit chain counts
+    too, and stops on a cycle.
+    """
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts.append(f"{type(current).__name__}: {current}")
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
+class TestCheapRefusalsPrecedeTheSplitTable:
+    """What ``prepare`` refuses for free, it refuses before reading anything.
+
+    Two of ``prepare``'s refusals are decidable from the arguments alone: the
+    dataset's targets have no column route in ``molix.block/1``, and this
+    install cannot import a block writer. Both already fire before a byte is
+    fetched and before ``output_dir`` exists — but they fire *after*
+    ``DatasetBuilder`` has resolved the split, and resolving a split for a
+    table-backed dataset loads the split derivation off disk.
+
+    So on a machine that has never built the derivation, ``prepare`` answers
+    "the split table is not here" for a call that was never going to run — and
+    the reader chases a 5 GB rebuild for an export that would have refused
+    anyway. Ordering is the whole claim, and the only way to observe it is to
+    take the derivation away and read which refusal comes back.
+    """
+
+    @staticmethod
+    def _without_derivation(home: Path) -> Path:
+        """Remove the split derivation the ``molhub_home`` fixture filed."""
+        shutil.rmtree(home / "derived")
+        return home
+
+    def test_an_unroutable_dataset_is_refused_without_reading_the_split_table(
+        self,
+        verified_registry,
+        landing_hub: LandingHub,
+        factory: RecordingWriterFactory,
+        molhub_home: Path,
+        output_dir: Path,
+    ) -> None:
+        """MBIS cannot be exported at all; that answer does not need a table."""
+        self._without_derivation(molhub_home)
+        with pytest.raises(UnsupportedRecordError):
+            molhub.prepare(
+                UNROUTABLE_DATASET,
+                split="train",
+                output_dir=output_dir,
+                registry=verified_registry,
+                hub=landing_hub,
+                writer_factory=factory,
+                provenance=PROVENANCE,
+            )
+
+    def test_a_missing_writer_is_refused_without_reading_the_split_table(
+        self,
+        verified_torsion_registry,
+        torsion_hub: LandingHub,
+        molhub_home: Path,
+        output_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """No molnex means no export, whichever split it would have been."""
+        monkeypatch.delenv("MOLNEX_SRC", raising=False)
+        self._without_derivation(molhub_home)
+        with pytest.raises(ImportError):
+            molhub.prepare(
+                "themol/torsion-scan",
+                split="train",
+                output_dir=output_dir,
+                registry=verified_torsion_registry,
+                hub=torsion_hub,
+                provenance=PROVENANCE,
+            )
+
+
+class TestMolnexSourceOverride:
+    """``MOLNEX_SRC`` is named in the refusal, so it has to be honoured.
+
+    molnex is not on PyPI: the ``prepare`` extra can only install torch, and the
+    documented way to supply the other half is a source checkout pointed at by
+    ``MOLNEX_SRC`` — which is what the refusal already tells the reader to set,
+    and what ``tests/test_dataset/test_neighbor.py`` sets to reach the real
+    thing. Nothing on the ``prepare`` path reads it: ``import_module`` looks
+    down :data:`sys.path`, so a reader who follows the instruction gets the same
+    refusal a second time and no way to tell why.
+
+    The stub checkout below raises a marker on import. If ``MOLNEX_SRC`` is
+    genuinely consulted, that marker is what comes back — a real failure from the
+    checkout the reader named — instead of "no module named molix".
+    """
+
+    @pytest.fixture
+    def molnex_src(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A ``src/`` directory holding a ``molix`` that announces itself and dies.
+
+        ``sys.path`` is replaced with a copy so that whatever the resolution
+        inserts is thrown away with the fixture, and every ``molix`` module the
+        attempt left behind is dropped afterwards — an import that raises is
+        already removed from :data:`sys.modules`, but a partially imported
+        package's parents are not.
+        """
+        root = tmp_path / "molnex" / "src"
+        (root / "molix").mkdir(parents=True)
+        (root / "molix" / "__init__.py").write_text(
+            'raise RuntimeError("MOLNEX_SRC_MARKER")\n', encoding="utf-8"
+        )
+        monkeypatch.setenv("MOLNEX_SRC", str(root))
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        yield root
+        for name in [key for key in sys.modules if key == "molix" or key.startswith("molix.")]:
+            del sys.modules[name]
+        importlib.invalidate_caches()
+
+    def test_the_writer_is_looked_for_under_molnex_src(
+        self,
+        verified_torsion_registry,
+        torsion_hub: LandingHub,
+        output_dir: Path,
+        molnex_src: Path,
+    ) -> None:
+        """The marker is the checkout's own voice: it can only be heard from there."""
+        with pytest.raises(Exception) as raised:
+            molhub.prepare(
+                "themol/torsion-scan",
+                split="train",
+                output_dir=output_dir,
+                registry=verified_torsion_registry,
+                hub=torsion_hub,
+                provenance=PROVENANCE,
+            )
+        assert "MOLNEX_SRC_MARKER" in _chain(raised.value)
+
+    def test_the_attempt_writes_no_partial_block_directory(
+        self,
+        verified_torsion_registry,
+        torsion_hub: LandingHub,
+        output_dir: Path,
+        molnex_src: Path,
+    ) -> None:
+        """A checkout that fails to import is still fail-closed, not half-done."""
+        with pytest.raises(Exception):
+            molhub.prepare(
+                "themol/torsion-scan",
+                split="train",
+                output_dir=output_dir,
+                registry=verified_torsion_registry,
+                hub=torsion_hub,
+                provenance=PROVENANCE,
+            )
+        assert not output_dir.exists()
+
+    def test_without_molnex_src_the_refusal_still_names_it(
+        self,
+        verified_torsion_registry,
+        torsion_hub: LandingHub,
+        output_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With nothing to consult, the message is the one already landed — and it
+        is now telling the truth, because setting the variable does something."""
+        monkeypatch.delenv("MOLNEX_SRC", raising=False)
+        with pytest.raises(ImportError) as raised:
+            molhub.prepare(
+                "themol/torsion-scan",
+                split="train",
+                output_dir=output_dir,
+                registry=verified_torsion_registry,
+                hub=torsion_hub,
+                provenance=PROVENANCE,
+            )
+        message = str(raised.value)
+        assert "MOLNEX_SRC" in message
+        assert "molhub[prepare]" in message

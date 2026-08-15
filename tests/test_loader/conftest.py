@@ -271,6 +271,23 @@ SPLIT_SEED = 20260814
 SPLIT_RATIOS = "8:1:1 train:val:test, molecule level"
 SPLIT_GENERATOR = "scripts/build_class1_splits.py"
 
+#: What the generator is called once it ships **inside** the wheel
+#: (``src/molhub/scripts/build_class1_splits.py``) rather than beside it, and
+#: the command a reader can actually type.
+#:
+#: :data:`SPLIT_GENERATOR` above deliberately keeps the *legacy* spelling: every
+#: derivation already on disk records it in its own ``metadata.json``, and a
+#: refusal that could only name the module because the metadata already did
+#: would be pinning the fixture rather than the message. So the fixture writes
+#: the old name and the refusals are required to state the new command anyway.
+GENERATOR_MODULE = "molhub.scripts.build_class1_splits"
+SPLIT_TABLE_COMMAND = f"python -m {GENERATOR_MODULE}"
+
+#: The three THEMol index files that generator reads, by source name. A split
+#: table cannot be rebuilt without all three, which is what makes the rebuild
+#: expensive and what a "run the generator" message has to say out loud.
+SPLIT_TABLE_INPUTS: tuple[str, ...] = ("hessian", "mbis", "torsion-scan")
+
 #: The literal filenames from ``scripts/build_class1_splits.py``'s ``out_name``
 #: block, mirrored (not imported) exactly as ``molhub.conveyor.splits`` does.
 #: The torsion one carries no ``_uuid_`` — that irregularity is the producer's,
@@ -390,6 +407,46 @@ def species_of(key: str) -> Species:
     return SPECIES[SPECIES_BY_KEY.get(key, "water")]
 
 
+#: The two inverse Slater widths a fixture shell carries, in ``angstrom^-1``:
+#: a core shell is tight and a valence shell is loose, which is the only thing
+#: about them the loader path can observe. Real values land at ~24-67 and ~3-8
+#: (probe recorded in ``tests/test_dataset/test_themol.py``).
+CORE_WIDTH = 32.0
+VALENCE_WIDTH = 5.0
+
+
+def mbis_shell_rows(numbers: Sequence[int], charges: Sequence[float]) -> np.ndarray:
+    """The ``(S, 3)`` MBIS Slater shell table of one fixture record.
+
+    ``parameters`` is **not** per atom — it is one row per Slater *shell*
+    (``src/molhub/dataset/themol.py``, ``_read_mbis``): column 0 addresses an
+    atom, column 1 is that shell's population in electrons and column 2 its
+    inverse Slater width. Hydrogen carries one shell and a heavier atom two
+    (core, then valence), so ``S != N`` here exactly as in the real shards —
+    water's three atoms make four rows.
+
+    Populations divide each atom's ``Z - q``, so the fixture satisfies the sum
+    rule the real data does (``sum(population) == Z.sum() - charge.sum()``)
+    rather than carrying numbers that are merely the right shape.
+
+    Args:
+        numbers: Atomic numbers, in atom-map order.
+        charges: The per-atom MBIS charge this record declares, same order.
+
+    Returns:
+        ``(S, 3)`` float64 rows, one atom's shells consecutive.
+    """
+    rows: list[tuple[float, float, float]] = []
+    for index, (number, charge) in enumerate(zip(numbers, charges, strict=True)):
+        electrons = float(number) - float(charge)
+        if number == 1:
+            rows.append((float(index), electrons, VALENCE_WIDTH))
+            continue
+        rows.append((float(index), 2.0, CORE_WIDTH))
+        rows.append((float(index), electrons - 2.0, VALENCE_WIDTH))
+    return np.asarray(rows, dtype=np.float64)
+
+
 def write_shard(path: Path, keys: Sequence[str]) -> Path:
     """Write a THEMol MBIS shard holding one record per key in *keys*.
 
@@ -419,18 +476,13 @@ def write_shard(path: Path, keys: Sequence[str]) -> Path:
                 "atomic_numbers", data=np.asarray(species.numbers, dtype=np.int32)[:, None]
             )
             group.create_dataset("coords", data=species.coords)
+            charges = [0.4 if number == 1 else -0.8 for number in species.numbers]
             info = group.create_group("mbis_info")
             info.create_dataset("atomic_volumes", data=np.ones((n_atoms, 1)))
-            info.create_dataset(
-                "atomic_charge",
-                data=np.asarray([[0.4 if number == 1 else -0.8] for number in species.numbers]),
-            )
+            info.create_dataset("atomic_charge", data=np.asarray([[value] for value in charges]))
             info.create_dataset("atomic_dipole", data=np.ones((n_atoms, 3)))
             info.create_dataset("atomic_quadrupole", data=np.ones((n_atoms, 3, 3)))
-            group.create_dataset(
-                "parameters",
-                data=np.arange(2 * n_atoms, dtype=np.float64).reshape(n_atoms, 2),
-            )
+            group.create_dataset("parameters", data=mbis_shell_rows(species.numbers, charges))
     return path
 
 
@@ -554,6 +606,27 @@ def write_split_derivation(
     }
     (root / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return root
+
+
+def corrupt_split_table(root: Path, *, filename: str = UUID_FILENAME) -> Path:
+    """Change one table's bytes *after* its ``metadata.json`` recorded them.
+
+    The one state that is neither "the derivation is not here" nor "the
+    derivation is fine": the directory, the record and the file all exist, and
+    the file is no longer what the record says it is. Distinguishing that from
+    an absent derivation is the whole of the first ruling — one is a rebuild the
+    reader has never run, the other is bytes that changed under them.
+
+    Args:
+        root: The derivation directory, already written.
+        filename: Which of its tables to disturb.
+
+    Returns:
+        The path whose bytes no longer verify.
+    """
+    path = root / filename
+    path.write_bytes(path.read_bytes() + b"\n")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -881,6 +954,21 @@ def molhub_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """``$MOLHUB_HOME`` pointed at ``tmp_path``, split derivation already in it."""
     home = tmp_path / "home"
     write_split_derivation(home.joinpath(*SPLIT_SUBPATH))
+    monkeypatch.setenv("MOLHUB_HOME", str(home))
+    return home
+
+
+@pytest.fixture
+def bare_molhub_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """``$MOLHUB_HOME`` pointed at a home with **no** split derivation in it.
+
+    The sibling of :func:`molhub_home`, and the state every reader is in before
+    they have ever built the table: the home exists, the cache under it may even
+    be warm, and ``derived/`` is simply not there. Absent is not corrupt, so it
+    gets its own fixture rather than a flag on the other one.
+    """
+    home = tmp_path / "bare-home"
+    home.mkdir()
     monkeypatch.setenv("MOLHUB_HOME", str(home))
     return home
 

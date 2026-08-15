@@ -15,12 +15,12 @@ dict-of-splits container to return when it is omitted — omitting it is a
 
 from __future__ import annotations
 
-import molhub.loader
 import pytest
-from molhub.loader.builder import DatasetBuilder
 
 import molhub
+import molhub.loader
 from molhub.dataset.protocol import Dataset
+from molhub.loader.builder import DatasetBuilder
 
 
 class TestLoadDataset:
@@ -84,3 +84,45 @@ class TestNoDatasetDictLikeContainer:
 
     def test_the_package_exports_the_two_free_functions(self):
         assert {"load_dataset", "load_dataset_builder"} <= set(molhub.loader.__all__)
+
+
+class TestRefusalExports:
+    """The two refusals a caller has to be able to name, exported where they look.
+
+    A reachability wave adds two typed failures to this layer:
+
+    * ``SplitTableUnavailable`` — the published split derivation is not on this
+      machine, and no download produces it: it is *built*, by a generator that
+      now ships inside the wheel.
+    * ``UnknownSplit`` — the split name is not one this dataset declares, decided
+      before anything is fetched.
+
+    Both are things a script legitimately catches — one to run the generator, the
+    other to print the declared names — so both have to be importable from the
+    same two places every other loader type is: :mod:`molhub.loader`, and the
+    package root beside ``load_dataset`` itself. An exception you can only catch
+    by importing a private module is one callers catch as ``Exception``.
+    """
+
+    def test_the_loader_exports_the_absent_split_table_refusal(self):
+        assert "SplitTableUnavailable" in molhub.loader.__all__
+
+    def test_the_package_root_exports_the_absent_split_table_refusal(self):
+        assert "SplitTableUnavailable" in molhub.__all__
+
+    def test_both_spellings_are_the_same_class(self):
+        """Two exports of one type, never two types that read alike."""
+        assert molhub.SplitTableUnavailable is molhub.loader.SplitTableUnavailable
+
+    def test_the_loader_exports_the_unknown_split_refusal(self):
+        assert "UnknownSplit" in molhub.loader.__all__
+
+    def test_the_package_root_exports_the_unknown_split_refusal(self):
+        assert "UnknownSplit" in molhub.__all__
+
+    def test_both_spellings_of_the_unknown_split_are_the_same_class(self):
+        assert molhub.UnknownSplit is molhub.loader.UnknownSplit
+
+    def test_an_unknown_split_is_still_a_key_error(self):
+        """``load_dataset``'s documented failure narrows; it does not change."""
+        assert issubclass(molhub.loader.UnknownSplit, KeyError)

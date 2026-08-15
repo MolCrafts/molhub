@@ -146,7 +146,7 @@ class DatasetName:
         if not declared:
             raise UnknownArtifact(
                 f"{self.unversioned} is not in the registry ({len(registry)} artifacts "
-                "loaded), so there is no revision to default to."
+                f"loaded), so there is no revision to default to.{self._namespace_hint(registry)}"
             )
         if len(declared) == 1:
             return declared[0]
@@ -157,6 +157,34 @@ class DatasetName:
                 "explicit revision= — a silently picked version is not a pinned one."
             )
         return max(declared, key=self._key)
+
+    def _namespace_hint(self, registry: Registry) -> str:
+        """What to suggest when the name typed is really a namespace.
+
+        ``molhub info themol`` reads as "tell me about themol" and resolves as
+        ``molcrafts/themol``, which nothing declares — while the registry knows
+        perfectly well what the ``themol`` namespace holds. Reporting only the
+        coordinate the user never typed makes the miss look like a broken
+        registry; handing over the names under it is the next step they wanted.
+
+        Args:
+            registry: The registry that has just declared no such artifact.
+
+        Returns:
+            A sentence listing the datasets published under a namespace of this
+            name, or ``""`` when the name is not one.
+        """
+        under = sorted(
+            f"{manifest.coordinate.namespace}/{manifest.coordinate.name}"
+            for manifest in registry.search(kind=self._kind)
+            if manifest.coordinate.namespace == self._name
+        )
+        if not under:
+            return ""
+        return (
+            f" {self._name!r} is a namespace rather than a dataset; it publishes "
+            f"{', '.join(dict.fromkeys(under))}. Name one of those."
+        )
 
     @classmethod
     def _orders(cls, declared: tuple[str, ...]) -> bool:

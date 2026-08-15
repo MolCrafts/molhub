@@ -15,6 +15,48 @@ from molhub.cli import app
 
 runner = CliRunner()
 
+#: How many bytes each published 3BPA file declares, and what they add up to.
+#: Distinct powers-of-ten so a sum that dropped a role cannot match, and large
+#: enough that the total reads as a real download rather than a rounding error.
+THREEBPA_SIZES: dict[str, int] = {
+    "train_300K": 1000000,
+    "test_300K": 200000,
+    "test_600K": 30000,
+    "test_1200K": 4000,
+}
+THREEBPA_DOWNLOAD_SIZE = 1234000
+
+#: A manifest declaring one role per published 3BPA file, as ``v1.yaml`` does.
+#: Written here rather than imported from ``tests/test_loader``: what a CLI test
+#: needs from it is the declared *sizes*, and those are this file's fixture.
+THREEBPA_MANIFEST = (
+    "schema_version: 1\n"
+    "kind: dataset\n"
+    "namespace: molcrafts\n"
+    "name: 3bpa\n"
+    'version: "1"\n'
+    "\n"
+    "title: 3BPA miniature\n"
+    'description: "Two-atom-type stand-in for the 3BPA benchmark files."\n'
+    "license: MIT\n"
+    "doi: 10.1021/acs.jctc.1c00647\n"
+    "\n"
+    "artifacts:\n"
+    + "".join(
+        f"  - role: {role}\n"
+        f"    filename: {role}.xyz\n"
+        f"    format: extxyz\n"
+        f"    size: {size}\n"
+        f"    locators:\n"
+        f"      - fake://3bpa-{role}\n"
+        for role, size in THREEBPA_SIZES.items()
+    )
+    + "\n"
+    "targets:\n"
+    "  graph_level: [energy]\n"
+    "  atom_level: [forces]\n"
+)
+
 
 @pytest.fixture
 def idx(registry_dir):
@@ -182,6 +224,101 @@ class TestInfo:
 
         out = runner.invoke(app, ["info", "themol/mbis", "--files", *themol]).output
         assert out.index(DESCRIPTION) < out.index("shard-000")
+
+    # -- reachability: what `info` costs, and where it looks ---------------
+    #
+    # `info` is free for a table-backed dataset and costs the whole artifact for
+    # one whose class owns its splits — that asymmetry is documented in
+    # `cli.py`'s module docstring and invisible at the terminal. A verb that
+    # sometimes downloads a benchmark has to say so before it does, not in a
+    # docstring the caller is not reading.
+
+    @pytest.fixture
+    def threebpa(self, tmp_path, monkeypatch):
+        """``dataset:molcrafts/3bpa@1`` declared, four published files, hub sealed.
+
+        The one remaining declared-split dataset: counting its splits means
+        reading its files, so ``info`` on it is a download. The hub's one verb is
+        made an error for the duration, so *whatever* is printed before the
+        attempt is all the warning a reader would have got.
+        """
+        from molhub.molhub import Molhub
+
+        root = tmp_path / "3bpa-registry"
+        path = root / "dataset" / "molcrafts" / "3bpa" / "1.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(THREEBPA_MANIFEST, encoding="utf-8")
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+
+        def refuse(self, coordinate, *, roles=None):
+            raise AssertionError(f"`molhub info` fetched {coordinate} roles={roles!r}.")
+
+        monkeypatch.setattr(Molhub, "fetch", refuse)
+        return ["--registry", str(root)]
+
+    def test_it_says_what_describing_will_cost_before_it_fetches(self, threebpa):
+        """The notice is on stderr, so a piped report is unchanged by it."""
+        result = runner.invoke(app, ["info", "molcrafts/3bpa", *threebpa])
+        assert "download" in result.stderr.lower()
+
+    def test_the_notice_names_the_bytes_it_is_about_to_pull(self, threebpa):
+        """A warning without a number is one nobody can weigh: 1.2 MB here, 4 GB
+        for the real benchmark. The byte total is the manifest's own sum, and it
+        is what the report itself prints once it gets that far."""
+        result = runner.invoke(app, ["info", "molcrafts/3bpa", *threebpa])
+        assert str(THREEBPA_DOWNLOAD_SIZE) in result.stderr
+
+    def test_the_help_warns_that_describing_can_download(self):
+        """``--help`` is where a reader looks *before* typing the command."""
+        result = runner.invoke(app, ["info", "--help"])
+        assert result.exit_code == 0
+        assert "download" in result.output.lower()
+
+    def test_home_selects_the_cache_root_the_split_table_is_read_from(self, tmp_path, monkeypatch):
+        """Parity with ``cache status`` / ``cache verify``, which have taken
+        ``--home`` all along: the derivation ``info`` reads lives under it, and
+        with only ``$MOLHUB_HOME`` to go on there is no way to point this verb at
+        a second molhub home without exporting a variable around it."""
+        from .test_loader.conftest import SPLIT_SUBPATH, build_registry, write_split_derivation
+
+        root = tmp_path / "registry"
+        build_registry(root)
+        home = tmp_path / "elsewhere"
+        write_split_derivation(home.joinpath(*SPLIT_SUBPATH))
+        # The environment points somewhere with no derivation in it, so a pass
+        # here can only mean the option was read.
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "empty-home"))
+
+        result = runner.invoke(
+            app, ["info", "themol/mbis", "--home", str(home), "--registry", str(root)]
+        )
+        assert result.exit_code == 0, result.output
+        assert _reports(result.output, name="train", count=3), result.output
+
+    def test_a_bare_namespace_suggests_the_full_names_under_it(self, themol):
+        """``molhub info themol`` reads as "tell me about themol" and resolves as
+        ``molcrafts/themol``, which nothing declares. The registry knows perfectly
+        well what that namespace holds, so the refusal can hand it over instead of
+        reporting a coordinate the user never typed."""
+        result = runner.invoke(app, ["info", "themol", *themol])
+        assert result.exit_code == 1
+        assert "themol/mbis" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_missing_split_table_names_the_command_that_builds_it(self, tmp_path, monkeypatch):
+        """The first-run state, at the terminal: nothing publishes the split
+        derivation, so ``info`` on a THEMol dataset fails on a machine that has
+        never built one — and the only useful reply is the command that does."""
+        from .test_loader.conftest import SPLIT_TABLE_COMMAND, build_registry
+
+        root = tmp_path / "registry"
+        build_registry(root)
+        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "empty-home"))
+
+        result = runner.invoke(app, ["info", "themol/mbis", "--registry", str(root)])
+        assert result.exit_code == 1
+        assert SPLIT_TABLE_COMMAND in result.output
+        assert "Traceback" not in result.output
 
 
 class TestFetch:

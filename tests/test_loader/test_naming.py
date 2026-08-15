@@ -22,9 +22,9 @@ them without picking one:
 from __future__ import annotations
 
 import pytest
-from molhub.loader.naming import AmbiguousRevision, DatasetName
 
 from molhub.coordinate import Coordinate
+from molhub.loader.naming import AmbiguousRevision, DatasetName
 
 from .conftest import build_registry
 

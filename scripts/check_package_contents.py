@@ -20,9 +20,7 @@ def assert_clean(files: list[str], label: str) -> None:
 
 with tempfile.TemporaryDirectory(prefix="molhub-package-audit-") as temporary:
     output = Path(temporary)
-    subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(output)], cwd=ROOT, check=True
-    )
+    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(output)], cwd=ROOT, check=True)
     wheel = next(output.glob("molhub-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         wheel_files = archive.namelist()

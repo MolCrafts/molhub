@@ -25,6 +25,14 @@ keeps one published file on disk at a time, with ``disk_budget`` bounding what
 "one file at a time" is allowed to cost. Map-style access needs the whole split
 addressable; a walk does not, which is the entire difference.
 
+**Two refusals are exported beside them.**
+:class:`~molhub.loader.errors.SplitTableUnavailable` (the published split
+derivation has never been built on this machine — nothing downloads it) and
+:class:`~molhub.loader.errors.UnknownSplit` (a name this dataset does not
+declare, decided before anything is fetched) are both things a script
+legitimately catches, so both are reachable from here and from ``molhub``
+itself rather than only from the module that raises them.
+
 **``split`` is required.** Omitting it would have to return a dict of splits —
 a new container type — or make ``ds[0]`` mean different things depending on an
 argument nobody passed. Discovery is ``load_dataset_builder(name).info.splits``,
@@ -43,6 +51,7 @@ from molhub.conveyor import DEFAULT_BUDGET_BYTES
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import Dataset, IterableDataset
 from molhub.loader.builder import DatasetBuilder
+from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
 from molhub.loader.info import DatasetInfo, Feature, SplitInfo
 from molhub.loader.mapstyle import ShardIndex, SplitDataset, UnknownRecordKey
 from molhub.loader.materialize import BlockExport, SplitRouting, prepare
@@ -60,6 +69,8 @@ __all__ = [
     "Feature",
     "DatasetName",
     "AmbiguousRevision",
+    "SplitTableUnavailable",
+    "UnknownSplit",
     "ShardIndex",
     "SplitDataset",
     "UnknownRecordKey",
@@ -108,12 +119,19 @@ def load_dataset(
         dataset's own reader builds.
 
     Raises:
-        KeyError: If *split* is not one of the dataset's declared splits.
+        UnknownSplit: If *split* is not one of the dataset's declared splits.
+            It is a ``KeyError``; the name is checked against the declaration
+            before any byte is fetched.
+        SplitTableUnavailable: If the dataset's splits come from a published
+            derivation and this molhub has not built it. The message names the
+            command that does.
         UnknownArtifact: If the registry has no such dataset or version.
         AmbiguousRevision: If no revision was given and the declared versions
             do not order.
         ValueError: If *streaming* is asked of a dataset published as whole
-            files, which there is no way to walk a piece at a time.
+            files, which there is no way to walk a piece at a time, or if the
+            dataset's payload needs an offline conversion this machine has not
+            run.
     """
     builder = DatasetBuilder(name, revision=revision, registry=registry, hub=hub)
     if streaming:

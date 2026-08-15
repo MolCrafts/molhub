@@ -39,6 +39,26 @@ extra and the ``MOLNEX_SRC`` escape hatch. A bare ``No module named 'torch'`` is
 not an answer to "why did my export not run", and a half-written block directory
 is not a smaller failure than none.
 
+**``MOLNEX_SRC`` is honoured, because the refusal names it.** molnex is not on
+PyPI, so the ``prepare`` extra can only install torch and the documented way to
+supply the other half is a source checkout. Nothing on this path used to read
+that variable — ``import_module`` looks down :data:`sys.path` — so a reader who
+followed the instruction got the same refusal a second time and no way to tell
+why. :meth:`BlockExport.resolve_writer` now puts ``$MOLNEX_SRC`` at the front of
+:data:`sys.path` before probing, and **leaves it there**: the writer imports
+molnex again when it opens its first block, so a path restored on the way out
+would resolve the probe and break the write. A checkout that is present but
+broken then fails in its own voice instead of as "no module named molix".
+
+**Two of the preconditions are public** (reachability wave, ruling 6).
+:meth:`BlockExport.refuse_unroutable` and :meth:`BlockExport.resolve_writer` are
+decidable from the arguments alone, and a caller that can reach them separately
+can ask them *before* it pays for anything else — which is what
+:meth:`~molhub.loader.builder.TableBackedSplits.block_export` does, so a dataset
+that cannot be exported at all never provokes "the split table is not here".
+They are the same two checks the constructor makes, so asking early costs an
+already-resolved answer rather than a second implementation.
+
 **A dataset ``molix.block/1`` has no routes for is refused, not exported.**
 :class:`~molhub.conveyor.encoder.THEMolUnitEncoder` refuses the subset label
 ``"mbis"`` because the block format defines no columns for its atom-level
@@ -62,9 +82,11 @@ Reference:
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Iterable, Iterator, Mapping
 from datetime import UTC, datetime
-from importlib import import_module
+from importlib import import_module, invalidate_caches
 from pathlib import Path
 
 from molhub.conveyor import DEFAULT_BUDGET_BYTES
@@ -85,9 +107,15 @@ from molhub.registry import Registry
 
 __all__ = ["SplitRouting", "BlockExport", "prepare"]
 
-# What the default writer needs before it can open anything, in the order a
-# reader would install them: the publishable half, then molnex itself.
-_WRITER_MODULES = ("torch", "molix.store.block")
+# What the default writer needs before it can open anything, molnex first: it is
+# the half `MOLNEX_SRC` selects, so a checkout that is present and broken has to
+# be able to say so rather than being pre-empted by the absence of torch — which
+# `pip install 'molhub[prepare]'` fixes and the message names anyway.
+_WRITER_MODULES = ("molix.store.block", "torch")
+
+# The documented escape hatch for the half that is not on PyPI: a molnex source
+# checkout's `src/` directory.
+_MOLNEX_SRC = "MOLNEX_SRC"
 
 # The block format this layer writes, named in the refusal above so a reader
 # knows where the missing column routes have to be added. Mirrored from
@@ -215,12 +243,12 @@ class BlockExport:
         provenance: Mapping[str, object] | None = None,
     ) -> None:
         self._coordinate = Coordinate.parse(source)
-        self._refuse_unroutable()
+        self.refuse_unroutable(self._coordinate)
         self._records = records
         self._split_of = split_of
         self._task = task
         self._output_dir = Path(output_dir)
-        self._writer_factory = self._resolved_factory(writer_factory)
+        self._writer_factory = self.resolve_writer(writer_factory)
         self._provenance = dict(provenance) if provenance is not None else self._own_provenance()
 
     @property
@@ -254,7 +282,8 @@ class BlockExport:
             provenance=self._provenance,
         ).run()
 
-    def _refuse_unroutable(self) -> None:
+    @staticmethod
+    def refuse_unroutable(coordinate: Coordinate) -> None:
         """Refuse a dataset whose targets this block format has no columns for.
 
         Asked of :class:`~molhub.conveyor.encoder.THEMolUnitEncoder`'s
@@ -268,7 +297,11 @@ class BlockExport:
         exemption from the refusal.
 
         Deciding it from the coordinate alone is what makes it cheap: a refusal
-        that first had to read 150 GB of published files would not be one.
+        that first had to read 150 GB of published files would not be one, and a
+        caller holding only a coordinate can ask before it builds anything.
+
+        Args:
+            coordinate: The **resolved** coordinate of the dataset to export.
 
         Raises:
             UnsupportedRecordError: If the encoder refuses this dataset's subset
@@ -276,10 +309,10 @@ class BlockExport:
                 routes are missing, and what exporting anyway would cost.
         """
         try:
-            THEMolUnitEncoder(task=self._coordinate.name)
+            THEMolUnitEncoder(task=coordinate.name)
         except UnsupportedRecordError as error:
             raise UnsupportedRecordError(
-                f"{self._coordinate.canonical} cannot be materialized as {_BLOCK_FORMAT} "
+                f"{coordinate.canonical} cannot be materialized as {_BLOCK_FORMAT} "
                 "blocks: its atom-level electrostatics targets (atomic_charge, "
                 "atomic_volume, the dipole and quadrupole components and the per-atom "
                 f"Slater parameters) have no column route in {_BLOCK_FORMAT}. Exporting it "
@@ -304,16 +337,30 @@ class BlockExport:
         }
 
     @staticmethod
-    def _resolved_factory(factory: BlockWriterFactory | None) -> BlockWriterFactory:
+    def resolve_writer(factory: BlockWriterFactory | None) -> BlockWriterFactory:
         """The writer to open blocks with, or a refusal a reader can act on.
 
         The default is probed by importing what it will import anyway, here,
         where nothing has been created yet — so an install without molnex fails
         with an answer instead of with a bare missing-module error halfway
-        through a directory tree.
+        through a directory tree. A caller holding nothing but the argument can
+        ask before it builds anything; a caller that already has a writer gets it
+        back untouched, so asking twice costs one dictionary lookup.
+
+        Args:
+            factory: The caller's own writer, or ``None`` to resolve molnex's.
+
+        Returns:
+            The factory blocks will be opened with.
+
+        Raises:
+            ImportError: If *factory* is ``None`` and molnex or torch cannot be
+                imported. Anything else the checkout raises on import is left
+                alone: a broken checkout's own failure is the answer.
         """
         if factory is not None:
             return factory
+        BlockExport._admit_molnex_source()
         try:
             for module in _WRITER_MODULES:
                 import_module(module)
@@ -327,6 +374,24 @@ class BlockExport:
                 "was written."
             ) from error
         return MolnexBlockWriter
+
+    @staticmethod
+    def _admit_molnex_source() -> None:
+        """Put ``$MOLNEX_SRC`` at the front of :data:`sys.path`, once.
+
+        The refusal above tells the reader to set this variable, so it has to do
+        something. The entry is **not** removed afterwards: the writer imports
+        molnex again when it opens its first block, and a path restored on the
+        way out would resolve the probe and fail the write. Inserting only when
+        it is absent keeps a repeated export from growing :data:`sys.path`, and
+        the import caches are invalidated because the checkout may have appeared
+        after this process started.
+        """
+        source = os.environ.get(_MOLNEX_SRC)
+        if not source or source in sys.path:
+            return
+        sys.path.insert(0, source)
+        invalidate_caches()
 
 
 def prepare(

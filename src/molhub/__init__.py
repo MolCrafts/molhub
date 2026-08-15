@@ -32,7 +32,12 @@ Layers, each usable on its own:
 All three dataset functions are defined in :mod:`molhub.loader` — the two
 reading ones in its ``__init__``, :func:`~molhub.loader.materialize.prepare`
 beside the :class:`~molhub.loader.materialize.BlockExport` it delegates to — and
-re-exported here. This module is the front door, not a place work is written.
+re-exported here. So are the two refusals a caller acts on:
+:class:`~molhub.loader.errors.SplitTableUnavailable` (build the split derivation
+with ``python -m molhub.scripts.build_class1_splits``) and
+:class:`~molhub.loader.errors.UnknownSplit` (ask
+``load_dataset_builder(name).info.splits`` what the names are). This module is
+the front door, not a place work is written.
 """
 
 from molhub._version import __version__
@@ -40,6 +45,8 @@ from molhub.coordinate import Coordinate, InvalidCoordinate
 from molhub.loader import (
     DatasetBuilder,
     DatasetInfo,
+    SplitTableUnavailable,
+    UnknownSplit,
     load_dataset,
     load_dataset_builder,
     prepare,
@@ -55,6 +62,8 @@ __all__ = [
     "prepare",
     "DatasetBuilder",
     "DatasetInfo",
+    "SplitTableUnavailable",
+    "UnknownSplit",
     "Molhub",
     "Coordinate",
     "InvalidCoordinate",

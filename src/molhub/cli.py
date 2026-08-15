@@ -16,6 +16,15 @@ states; for the few whose class owns its splits the count is the dataset's own
 ``len``, which costs what reading it costs — that price is
 :class:`~molhub.loader.builder.DatasetBuilder`'s, stated in its docstring, and
 this verb inherits it rather than inventing a second, cheaper answer.
+
+**That asymmetry is said out loud, before it is spent** (reachability wave,
+ruling 7). A docstring is not where a reader finds out that describing a dataset
+downloaded a benchmark: ``--help`` says a description can download, and the verb
+prints the byte total to **stderr** before it fetches — stderr, so a piped report
+is unchanged by the warning. ``--home`` joins it for parity with
+``cache status`` / ``cache verify``: the split derivation ``info`` reads lives
+under the cache root, and with only ``$MOLHUB_HOME`` to go on there is no way to
+point this verb at a second molhub home without exporting a variable around it.
 """
 
 from __future__ import annotations
@@ -27,7 +36,12 @@ import typer
 
 from molhub.conveyor import DEFAULT_BUDGET_BYTES, ConveyorError, default_ledger_path
 from molhub.coordinate import InvalidCoordinate
-from molhub.loader import AmbiguousRevision, DatasetBuilder, DatasetInfo
+from molhub.loader import (
+    AmbiguousRevision,
+    DatasetBuilder,
+    DatasetInfo,
+    SplitTableUnavailable,
+)
 from molhub.manifest import InvalidManifest, Manifest
 from molhub.molhub import Molhub
 from molhub.registry import UnknownArtifact
@@ -78,7 +92,7 @@ def _resolve(hub: Molhub, coordinate: str) -> Manifest:
         raise typer.Exit(code=1) from error
 
 
-def _describe(hub: Molhub, name: str) -> DatasetInfo:
+def _describe(hub: Molhub, name: str, home: Path | None) -> DatasetInfo:
     """What *name* contains, from the same authority the Python API reports.
 
     The argument is accepted in either spelling a user is likely to type — the
@@ -89,35 +103,70 @@ def _describe(hub: Molhub, name: str) -> DatasetInfo:
     :class:`~molhub.loader.naming.DatasetName`, which refuses it on purpose so
     that one name has one spelling on that path.
 
+    What describing costs is asked before it is spent, and announced on stderr
+    when it is not zero: for a dataset whose class owns its splits the counts are
+    the dataset's own ``len``, so the description *is* the download.
+
     Args:
         hub: The resolved registry.
         name: The dataset name or coordinate, as typed.
+        home: Cache root the split derivation is read from; ``None`` uses
+            ``$MOLHUB_HOME``.
 
     Returns:
         The description — content only, and never a file role.
 
     Raises:
         typer.Exit: With code 1 when the name is malformed, is not declared,
-            declares versions that do not order, has a split derivation that
-            does not verify, or — for a dataset whose class owns its splits, and
-            whose counts are therefore its own — cannot be read. Each of those is
-            something the reader can act on, and a traceback would bury it.
+            declares versions that do not order, takes its splits from a
+            derivation this machine has not built, has one that does not verify,
+            or — for a dataset whose class owns its splits, and whose counts are
+            therefore its own — cannot be read. Each of those is something the
+            reader can act on, and a traceback would bury it.
     """
     text, separator, revision = name.partition("@")
     try:
         builder = DatasetBuilder(
-            text, revision=revision if separator else None, registry=hub.registry, hub=hub
+            text,
+            revision=revision if separator else None,
+            registry=hub.registry,
+            hub=hub,
+            home=home,
         )
+        _announce_download(builder)
         return builder.info
     except (
         InvalidCoordinate,
         UnknownArtifact,
         AmbiguousRevision,
+        SplitTableUnavailable,
         ConveyorError,
         SourceError,
     ) as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
+
+
+def _announce_download(builder: DatasetBuilder) -> None:
+    """Say what describing this dataset will pull, before it pulls it.
+
+    On stderr, so redirecting the report to a file leaves the report exactly as
+    it was. Silent when the answer is zero, which is every dataset whose splits a
+    published derivation states — a warning printed every time is one nobody
+    reads by the third dataset.
+
+    Args:
+        builder: The builder about to be asked for its description.
+    """
+    size = builder.describe_download_size
+    if not size:
+        return
+    typer.secho(
+        f"Describing this dataset counts its splits by reading them, so it will download "
+        f"{size} B first. Only its own files are pulled, and they stay in the cache.",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
 
 
 @app.command()
@@ -154,10 +203,16 @@ def info(
         typer.Option("--files", help="Also list the artifact's roles, digests and locators."),
     ] = False,
     registry: _RegistryOption = None,
+    home: _HomeOption = None,
 ) -> None:
-    """Show what NAME contains — and, with --files, which files carry it."""
+    """Show what NAME contains — and, with --files, which files carry it.
+
+    Describing some datasets downloads them: where no split table is published,
+    the split counts are the dataset's own and reading them is the only way to
+    have them. The byte total is printed to stderr before that happens.
+    """
     hub = _hub(registry)
-    described = _describe(hub, name)
+    described = _describe(hub, name, home)
     manifest = _resolve(hub, described.coordinate.canonical)
 
     typer.echo(described.coordinate.canonical)
