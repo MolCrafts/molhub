@@ -88,4 +88,4 @@ artifacts:
 
 targets:
   graph_level: []
-  atom_level: [atomic_charge, atomic_dipole, atomic_quadrupole, atomic_volume, mbis_parameters]
+  atom_level: [atomic_charge, atomic_volume, dipole_x, dipole_y, dipole_z, quadrupole_xx, quadrupole_xy, quadrupole_xz, quadrupole_yx, quadrupole_yy, quadrupole_yz, quadrupole_zx, quadrupole_zy, quadrupole_zz]

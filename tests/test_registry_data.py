@@ -85,6 +85,99 @@ class TestPolymerTgEntry:
         assert manifest.artifact("main").size == 6024335
 
 
+class TestTHEMolMbisEntry:
+    """The bundled MBIS manifest must name the columns a reader actually finds.
+
+    ``targets.atom_level`` is not decoration: when a dataset class carries no
+    ``TARGET_SCHEMA``, ``DatasetBuilder._target_schema``
+    (``src/molhub/loader/builder.py:741-742``) builds the schema straight out of
+    this yaml block, so whatever is written here is what a user sees in
+    ``DatasetInfo``. The grouped spellings this manifest was generated with
+    (``atomic_dipole`` / ``atomic_quadrupole`` / ``mbis_parameters``) match no
+    column of any MBIS sample — the frame carries ``dipole_<axis>``,
+    ``quadrupole_<axis><axis>`` and numbered ``mbis_parameter_<slot>`` columns
+    instead.
+
+    The fourteen names are written out as literals rather than imported from
+    ``_MBIS_ATOM_COLUMNS``, so drift on *either* side trips this pin.
+    """
+
+    #: The atom-level target names the MBIS format fixes. The Slater-parameter
+    #: columns are deliberately absent: their arity is the shard's, read off an
+    #: ``(N, arity)`` array at load time, so a static manifest cannot name them
+    #: without inventing an arity (see the ``THEMolMBIS`` docstring).
+    ATOM_LEVEL = frozenset(
+        {
+            "atomic_charge",
+            "atomic_volume",
+            "dipole_x",
+            "dipole_y",
+            "dipole_z",
+            "quadrupole_xx",
+            "quadrupole_xy",
+            "quadrupole_xz",
+            "quadrupole_yx",
+            "quadrupole_yy",
+            "quadrupole_yz",
+            "quadrupole_zx",
+            "quadrupole_zy",
+            "quadrupole_zz",
+        }
+    )
+
+    #: The pre-dissolution names, kept only so their return is loud.
+    GROUPED = frozenset({"atomic_dipole", "atomic_quadrupole", "mbis_parameters"})
+
+    @pytest.fixture
+    def manifest(self) -> Manifest:
+        return Molhub(BUNDLED).resolve("dataset:themol/mbis@1")
+
+    def test_atom_level_targets_are_the_fourteen_real_column_names(
+        self, manifest: Manifest
+    ) -> None:
+        declared = frozenset(manifest.targets.atom_level)
+        assert declared == self.ATOM_LEVEL, (
+            "the bundled MBIS manifest declares atom-level targets that are not "
+            f"the columns on a record — unexpected: {sorted(declared - self.ATOM_LEVEL)}, "
+            f"missing: {sorted(self.ATOM_LEVEL - declared)}"
+        )
+        assert len(manifest.targets.atom_level) == 14
+        assert manifest.targets.graph_level == (), "every MBIS target is per atom"
+
+    def test_no_grouped_or_parameter_name_survives(self, manifest: Manifest) -> None:
+        """A grouped name promises one column and delivers three, nine, or none."""
+        declared = frozenset(manifest.targets.atom_level)
+        assert not [name for name in declared if "mbis_parameter" in name], (
+            "the parameter arity is read off the shard at load time, so no manifest "
+            f"can name those columns: {sorted(n for n in declared if 'mbis_parameter' in n)}"
+        )
+        assert declared & self.GROUPED == frozenset(), (
+            f"pre-dissolution grouped target names are back: {sorted(declared & self.GROUPED)}"
+        )
+
+    def test_the_manifest_and_the_adapter_declare_the_same_targets(
+        self, manifest: Manifest
+    ) -> None:
+        """Two sources of the same fact; this is what keeps them one fact.
+
+        The loader falls back to the manifest only when a dataset class has no
+        ``TARGET_SCHEMA``, so a disagreement is invisible until the day someone
+        reads the yaml instead of the class.
+        """
+        from molhub.dataset.themol import THEMolMBIS
+
+        assert frozenset(manifest.targets.atom_level) == frozenset(
+            THEMolMBIS.TARGET_SCHEMA.atom_level
+        ), (
+            "the bundled manifest and THEMolMBIS.TARGET_SCHEMA disagree about the "
+            f"atom-level targets — manifest: {sorted(manifest.targets.atom_level)}, "
+            f"class: {sorted(THEMolMBIS.TARGET_SCHEMA.atom_level)}"
+        )
+        assert frozenset(manifest.targets.graph_level) == frozenset(
+            THEMolMBIS.TARGET_SCHEMA.graph_level
+        )
+
+
 @pytest.mark.network
 class TestAgainstRealUpstream:
     def test_fetching_the_bundled_dataset_verifies(self, tmp_path, monkeypatch):

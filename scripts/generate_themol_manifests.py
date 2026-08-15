@@ -103,12 +103,27 @@ SOURCES = (
             "B3LYP-D3(BJ)/DZVP energy and force sources."
         ),
         graph_targets=(),
+        # The atoms columns whose names the MBIS format fixes. The
+        # `mbis_parameter_<slot>` Slater columns are deliberately omitted: their
+        # arity belongs to the shard and is read off an `(N, arity)` array at
+        # load time, so a static manifest cannot name them without inventing an
+        # arity. The `THEMolMBIS` docstring in src/molhub/dataset/themol.py is
+        # the authority for this list.
         atom_targets=(
             "atomic_charge",
-            "atomic_dipole",
-            "atomic_quadrupole",
             "atomic_volume",
-            "mbis_parameters",
+            "dipole_x",
+            "dipole_y",
+            "dipole_z",
+            "quadrupole_xx",
+            "quadrupole_xy",
+            "quadrupole_xz",
+            "quadrupole_yx",
+            "quadrupole_yy",
+            "quadrupole_yz",
+            "quadrupole_zx",
+            "quadrupole_zy",
+            "quadrupole_zz",
         ),
         expected_files=9,
         expected_bytes=31_041_658_614,
@@ -204,9 +219,7 @@ def generate(inventory: Path, roots: list[Path]) -> None:
         )
 
     for source in SOURCES:
-        selected = [
-            row for row in rows if row["relative_path"].startswith(f"{source.directory}/")
-        ]
+        selected = [row for row in rows if row["relative_path"].startswith(f"{source.directory}/")]
         rendered = _render(source, selected)
         for root in roots:
             output = root / "dataset" / "themol" / source.name / "1.yaml"
