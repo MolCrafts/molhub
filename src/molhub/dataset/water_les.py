@@ -185,6 +185,11 @@ def _parse_water_extxyz(path: Path) -> list[Frame]:
     homepage="https://github.com/ChengUCB/les_fit",
     citation="10.1038/s41524-025-01577-7",
     tags=("water", "periodic", "energy", "forces", "dft"),
+    # Unscaled pass-through, as this module's docstring states: energies in eV,
+    # forces in eV per angstrom. ASCII and solidus-composed, not the prose
+    # `eV·Å⁻¹`, because `molhub.dataset.transforms.UnitConvert` parses these
+    # strings back through the molpy unit registry.
+    units={"energy": "eV", "forces": "eV/angstrom"},
 )
 class WaterLESDataset:
     """One split of the WaterLES benchmark, declared on the ``@dataset`` protocol.

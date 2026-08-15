@@ -11,7 +11,8 @@ composition — *describe, then decide, then read* — stays the caller's.
 * *table-backed* (THEMol): the split assignment is a published derivation,
   ``class1-universal-splits@1``. Counts come from one gzipped CSV under
   ``$MOLHUB_HOME/derived/``, memoized per process, and cost **zero shard
-  bytes** — which is what makes ``.info`` usable on a 150 GB artifact.
+  bytes** — which is what makes ``.info`` usable on an artifact of tens of GiB
+  to several TiB.
 * *declared* (zinc-typing, phalkethoh-mm, 3BPA): the dataset class already owns
   its splits, so the builder delegates to its constructor. The constructors do
   not agree on a spelling — two take ``split=``, 3BPA takes ``tag=`` with a

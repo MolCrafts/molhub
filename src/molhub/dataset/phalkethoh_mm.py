@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
@@ -187,6 +188,25 @@ def _load_molecule_confs(mol_dir: Path, molecule_id: str) -> list[Frame]:
     return frames
 
 
+@dataset(
+    name="phalkethoh-mm-small",
+    namespace="espaloma",
+    version="1",
+    description=(
+        "Espaloma subsampled PhAlkEthOH MM-fitting set: 173 C/H/O molecules "
+        "with 100 conformers each."
+    ),
+    license="MIT",
+    citation="10.1039/D2SC02739A",
+    tags=("molecular-mechanics", "conformers", "energy", "forces"),
+    # Post-conversion units, as the module docstring and the registry
+    # description agree: the native DGL payload stores `u_ref` in Hartree, and
+    # what this reader hands back is `mm_energy` in kcal/mol. ASCII and
+    # solidus-composed, not the docstring's `kcal/(mol·Å)`, because
+    # `molhub.dataset.transforms.UnitConvert` parses these strings back through
+    # the molpy unit registry.
+    units={"mm_energy": "kcal/mol", "forces": "kcal/mol/angstrom"},
+)
 class PhalkethohMMDataset:
     """Map-style PhAlkEthOH MM-small multi-conformer dataset.
 

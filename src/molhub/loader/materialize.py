@@ -4,8 +4,8 @@
 sits beside the type it delegates to, and ``molhub/__init__`` re-exports it, so
 ``from molhub import prepare`` reaches the same object. The export reads the
 split's records through the same bounded walk :mod:`molhub.loader.streaming`
-yields — so materializing a 150 GB dataset costs one file of disk at a time —
-encodes each record whole, and hands it to
+yields — so materializing a dataset of tens of GiB to several TiB costs one file
+of disk at a time — encodes each record whole, and hands it to
 :class:`~molhub.conveyor.prepare.PrepareJob`, which routes it to its molecule's
 split and seals the blocks. What comes back is the conveyor's own
 :class:`~molhub.conveyor.prepare.PreparedBlocks`; this layer adds no fourth block
@@ -297,8 +297,9 @@ class BlockExport:
         exemption from the refusal.
 
         Deciding it from the coordinate alone is what makes it cheap: a refusal
-        that first had to read 150 GB of published files would not be one, and a
-        caller holding only a coordinate can ask before it builds anything.
+        that first had to read tens of GiB to several TiB of published files
+        would not be one, and a caller holding only a coordinate can ask before
+        it builds anything.
 
         Args:
             coordinate: The **resolved** coordinate of the dataset to export.

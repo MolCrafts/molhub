@@ -134,6 +134,55 @@ class TestPhalkethohMMDataset:
         assert PhalkethohMMDataset.TARGET_SCHEMA.graph_level == frozenset({"mm_energy"})
         assert PhalkethohMMDataset.TARGET_SCHEMA.atom_level == frozenset({"forces"})
 
+    # -- what those two numbers mean -----------------------------------------
+    #
+    # ``PhalkethohMMDataset`` carries no ``@dataset`` declaration at all, so
+    # ``DatasetBuilder._declared_manifest`` falls back to an empty
+    # ``DatasetManifest`` and ``molhub info espaloma/phalkethoh-mm-small``
+    # prints an empty unit column for both targets — while two in-repo
+    # declarations state the units outright:
+    #
+    #   src/molhub/dataset/phalkethoh_mm.py:6-11 (module docstring)
+    #       "Boundary units match the published Espaloma toy experiment
+    #        exactly: coordinates — Å; ``mm_energy`` — kcal/mol; forces
+    #        (optional) — kcal/(mol·Å)"
+    #   src/molhub/registry_data/dataset/espaloma/phalkethoh-mm-small/1.yaml
+    #       (description) "Reference MM energies stored as graph-level u_ref in
+    #        Hartree in the native DGL payload; after conversion they are
+    #        mm_energy in kcal/mol (×627.5094740631). Coordinates in Å."
+    #
+    # The Hartree in that second quote is the *payload's* unit before the
+    # conversion script runs; what this reader hands back is post-conversion
+    # kcal/mol, which is what the declaration must say.
+    #
+    # Spelling: ASCII and solidus-composed, so ``kcal/mol/angstrom`` rather
+    # than the docstring's ``kcal/(mol·Å)`` — the identical string
+    # ``THEMOL_UNITS["forces"]`` already declares for the other kcal/mol dataset
+    # in this repo, and the form the molpy unit registry parses for
+    # ``molhub.dataset.transforms.UnitConvert``. Coordinates are in Å but are
+    # not a declared target name, so the mapping carries no key for them.
+    #
+    # Forces are optional in the payload (``confs.npz`` may omit them); the unit
+    # says what the number means when it is there, which is what
+    # ``TARGET_SCHEMA`` already promises by declaring the name.
+
+    def test_the_declaration_says_the_mm_energy_is_in_kcal_per_mole(self):
+        assert PhalkethohMMDataset.manifest.units["mm_energy"] == "kcal/mol"
+
+    def test_the_declaration_says_the_forces_are_in_kcal_per_mole_per_angstrom(self):
+        assert PhalkethohMMDataset.manifest.units["forces"] == "kcal/mol/angstrom"
+
+    def test_the_units_mapping_names_exactly_the_declared_targets(self):
+        """No stray key: a unit for a name no record carries never renders."""
+        schema = PhalkethohMMDataset.TARGET_SCHEMA
+        assert set(PhalkethohMMDataset.manifest.units) == set(schema.graph_level) | set(
+            schema.atom_level
+        )
+
+    def test_the_declaration_carries_this_modules_coordinate(self):
+        """One identity: the manifest on the class names the artifact it reads."""
+        assert PhalkethohMMDataset.manifest.canonical == COORDINATE
+
     def test_no_url_literals(self):
         src = Path(molhub.__file__).parent / "dataset" / "phalkethoh_mm.py"
         assert re.search(r"https?://|figshare://|zenodo://|hf://", src.read_text()) is None

@@ -3,7 +3,8 @@
 What ``tests/test_conveyor/conftest.py`` is to the conveyor, this is to the
 loader: every byte a loader test reads is written into ``tmp_path`` here, so no
 test depends on ``$MOLHUB_HOME`` as the developer happens to have it, on the
-bundled registry snapshot, or on the 150 GB of real THEMol shards.
+bundled registry snapshot, or on the real THEMol shards — 28.9 GiB for MBIS,
+5.9 TiB for the whole collection.
 
 **Nothing here imports ``molhub.loader`` or ``molhub.conveyor.splits``.** The
 first does not exist yet and the second is mid-rename (``SplitTable`` ->

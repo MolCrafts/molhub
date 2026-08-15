@@ -1,11 +1,11 @@
 """The i-th record of a split, and an honest account of what asking costs.
 
 ``ds[i]`` needs to know which shard owns row *i*, and no published artifact says.
-Building that answer eagerly would require every shard on local disk — ≈150 GB
-for THEMol MBIS, ≈6.5 TB for the whole collection — which is exactly the
-residency invariant the streaming tiers exist to keep. So :class:`ShardIndex`
-builds the answer **one shard at a time**, from the group keys
-``THEMolShardDataset`` already listed, and memoizes it under the same
+Building that answer eagerly would require every shard on local disk — 28.9 GiB
+for THEMol MBIS, 4.4 TiB for torsion-relax, 5.9 TiB for the whole collection —
+which is exactly the residency invariant the streaming tiers exist to keep. So
+:class:`ShardIndex` builds the answer **one shard at a time**, from the group
+keys ``THEMolShardDataset`` already listed, and memoizes it under the same
 :class:`~molhub.conveyor.tier.DerivedLayout` every other derived artifact uses.
 
 The consequence is stated rather than hidden: a map-style view fetches the shard

@@ -29,6 +29,7 @@ hero:
 <div class="molcrafts-manual-grid molcrafts-manual-grid--cols-3">
 <a href="concepts/coordinates/"><strong>Coordinates</strong><em>Name one immutable artifact version.</em></a>
 <a href="concepts/manifests/"><strong>Manifests</strong><em>Describe roles, byte semantics, and ordered sources.</em></a>
+<a href="reference/python/"><strong>Load a dataset</strong><em>One split at a time, map-style or streamed.</em></a>
 <a href="inspector/opening-an-artifact/"><strong>Inspector</strong><em>Link structures, trajectory frames, and properties.</em></a>
 </div>
 </section>

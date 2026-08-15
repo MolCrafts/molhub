@@ -184,7 +184,7 @@ class TestDatasetBuilder:
         assert builder.info.coordinate.canonical == COORDINATE
 
     def test_info_describes_the_dataset_without_fetching_bytes(self, builder, hub):
-        """Discovery that downloads 150 GB first is not discovery."""
+        """Discovery that downloads 28.9 GiB first is not discovery."""
         assert builder.info.features
         assert hub.fetch_count == 0
 

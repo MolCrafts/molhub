@@ -13,7 +13,9 @@ import pytest
 import molhub
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, ZincTypingDataset
+from molhub.dataset.definition import DatasetManifest
 from molhub.dataset.zinc_typing import COORDINATE
+from molhub.loader.info import Feature
 from molhub.manifest import Manifest
 
 _MANIFEST_BUNDLED = (
@@ -134,6 +136,37 @@ class TestZincTypingDataset:
         assert ZincTypingDataset.TARGET_SCHEMA.atom_level == frozenset({"atom_type"})
         assert ZincTypingDataset.TARGET_SCHEMA.graph_level == frozenset()
         assert ZincTypingDataset.TARGET_SCHEMA.chemical_perception == frozenset({"atom_type"})
+
+    # -- what this dataset's one target is measured in: nothing ---------------
+    #
+    # ZincTypingDataset carries no ``@dataset`` declaration at all, so
+    # ``DatasetBuilder._declared_manifest`` falls back to an empty
+    # ``DatasetManifest`` and every feature of this dataset renders with an
+    # empty unit column. That is the honest answer here, not a gap somebody
+    # forgot to fill: the single declared target is ``atom_type``, a GAFF 1.81
+    # type *string* (``c3``, ``hc``) which is a label and has no dimension, and
+    # the only quantity this dataset ever carries in angstrom — the *optional*
+    # ``x``/``y``/``z`` columns (``src/molhub/dataset/zinc_typing.py``, module
+    # docstring line 6 and ``_load_molecule``) — is not a target, so
+    # ``Feature.declared`` is never asked about it. A ``units`` mapping here
+    # could only invent a unit for a label or name a column nobody declares.
+    #
+    # Pinned the way the THEMol / 3BPA declarations are pinned in
+    # ``tests/test_loader/test_info.py``: through ``Feature.declared``, which is
+    # the derivation ``.info`` and ``molhub info`` both render from.
+
+    def test_the_class_carries_no_dataset_declaration(self):
+        """No ``@dataset`` block, so the builder's empty-manifest fallback is what renders."""
+        assert getattr(ZincTypingDataset, "manifest", None) is None
+
+    def test_atom_type_renders_with_no_units_through_the_builder_fallback(self):
+        """The one declared target, as ``molhub info espaloma/zinc-typing`` prints it."""
+        feature = Feature.declared(
+            "atom_type",
+            schema=ZincTypingDataset.TARGET_SCHEMA,
+            manifest=DatasetManifest(coordinate=Coordinate.parse(COORDINATE)),
+        )
+        assert (feature.name, feature.level, feature.units) == ("atom_type", "atom", "")
 
     def test_frame_contract(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)

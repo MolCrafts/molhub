@@ -14,6 +14,7 @@
 </p>
 
 <p>
+  <a href="#load-a-dataset"><b>Load a dataset</b></a> &nbsp;&middot;&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;&middot;&nbsp;
   <a href="#molcrafts-ecosystem"><b>Ecosystem</b></a>
 </p>
@@ -27,6 +28,40 @@ What guarantees the bytes are usable is the **transport contract**: check the re
 On top of that, `molhub.dataset` gives every dataset the same interface — index by position, iterate sample by sample, or slice with subsets — so downstream code works identically across QM9, revMD17, 3BPA, or your own CSV files.
 
 > **Under active development.** Public APIs may change between minor releases.
+
+## Load a dataset
+
+The dataset door is HuggingFace-shaped, and there are exactly three functions behind it: describe, open, materialize.
+
+```python
+import molhub
+
+info = molhub.load_dataset_builder("themol/mbis").info    # what is in here? no dataset bytes fetched
+print(info)                                               # coordinate, features with units, splits with counts
+
+train = molhub.load_dataset("themol/mbis", split="train")  # map-style: len(train), train[0]
+walk = molhub.load_dataset(                                # one published file on local disk at a time
+    "themol/mbis", split="train", streaming=True, disk_budget=8_000_000_000
+)
+
+molhub.prepare("themol/torsion-scan", split="train", output_dir="blocks/")   # sealed molnex blocks
+```
+
+A record is a molpy `Frame` (one geometry) or a `Trajectory` (one inseparable multi-frame unit, e.g. a whole torsion scan) — never a molhub wrapper. `prepare`'s output is read back on the molnex side with `BlockDataset.load_from_disk("blocks/")`.
+
+Describing is free wherever a published derivation states the splits, as it does for THEMol; for a dataset whose own class owns them the counts are its `len`, so describing it reads its files, and `builder.describe_download_size` says what that costs before it is spent. What a record carries, how the walk's disk budget behaves, and every refusal you can catch by name are in [`docs/reference/python.md`](docs/reference/python.md).
+
+### Coming from HuggingFace `datasets`
+
+| There | Here | Why |
+|---|---|---|
+| `load_dataset(name)` returns a `DatasetDict` | `split=` is a **required** keyword | one call returns one dataset. The names are `load_dataset_builder(name).info.splits`, and there is deliberately no `DatasetDict` for them to come back in |
+| `revision="<git sha>"` | `revision="1"` — molhub's `@version` | a coordinate names one immutable artifact version, not a repository commit. Omitting `revision` takes the newest version the registry declares and echoes the resolved coordinate on `info.coordinate` |
+| `ds.map` / `.filter` / `.shuffle` / `.with_format` | — | composition is the caller's job; the library exposes primitives and nothing that hides multi-step work |
+| `ds.take(n)` on any dataset | `.take(n)` on a streaming walk only | a map-style split is indexed (`train[i]`), so bounding it is a loop or a `SubsetDataset` you build yourself; `take` exists where there is no index to build one from |
+| `ds.features` — a mutable dict of `Value` / `Sequence` | `info.features` — a tuple of frozen `Feature(name, level, units)` | one entry per declared target, saying where it sits on the record (`atom` column, `meta` entry, named block) and what it is measured in |
+| `builder.info.splits` — a dict of `SplitInfo` | `info.splits` — a tuple of frozen `SplitInfo(name, num_examples, provenance)` | every count carries the sentence that says who decided that split and how |
+| rows are dicts, or Arrow batches | records are molpy `Frame` / `Trajectory` | per-atom data are `atoms` columns, scalars are `frame.meta` entries, and anything shaped like neither is a named block |
 
 ## Repository boundaries
 
@@ -81,7 +116,9 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Transport | `Fetcher` | Tries an artifact's locators in order and takes the first that yields a complete `200`; status check → temp file → atomic rename, plus the optional digest cross-check |
 | Transport | `BlobStore` | On-disk cache keyed by coordinate and role under `$MOLHUB_HOME`, reserved as a cross-SDK contract so one machine downloads once |
 | Transport | `Source` drivers | `https`, `zenodo`, `figshare`, `hf`, `molhub` out of the box. A third party adds a scheme by publishing a driver to the `molhub.sources` entry point — no molhub source change. `PublishingSource` adds upload to the same driver |
-| CLI | `molhub` | `search`, `info`, `fetch --into`, `cache verify` — the same verbs as the Python API |
+| CLI | `molhub` | `search`, `info` (`--files`, `--home`), `fetch --into`, `cache verify`, `cache status`, `cache coverage` — the same verbs as the Python API |
+| Loading | `molhub.loader` (functions) | `load_dataset_builder(name).info` describes a dataset before any of its bytes move; `load_dataset(name, split=...)` opens one split, map-style or (`streaming=True`) as a walk that keeps one published file on disk at a time; `prepare(name, split=..., output_dir=...)` materializes one split as sealed molnex blocks |
+| Loading | `molhub.loader` (types) | `DatasetInfo` / `Feature` / `SplitInfo` / `ByteSize` — frozen records describing *content* (targets with units, splits with counts and provenance, download size), never a file role. `SplitTableUnavailable` and `UnknownSplit` are the two refusals a script catches by name |
 | Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one geometry) or a `molpy.Trajectory` (one inseparable multi-frame sampling unit, e.g. a torsion scan); scalars live in each frame's `frame.meta` |
 | Datasets | `molhub.dataset` (helpers) | `InMemoryDataset` wraps a list of frames; `SubsetDataset` slices any map-style dataset by index |
 | Datasets | `QM9Dataset` | 130,831 small organic molecules with quantum-chemical properties — auto-downloads & caches `dataset:molcrafts/qm9@v2` |
@@ -92,17 +129,20 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Publishing | `molhub.uploader` | Deprecated shims (`HuggingFaceUploader`, `FigshareUploader`) forwarding to those drivers, kept for existing callers |
 | Inspector | `apps/web/` | Shareable structure/trajectory and property-map exploration, with original-source provenance |
 
-Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame` — one molecule. The `atoms` block holds per-atom data; graph-level fields (energy, ids, units, …) live in `frame.meta`.
+Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame` — one geometry — or a `Trajectory` of them where the frames belong to one inseparable sampling unit. The `atoms` block holds per-atom data; graph-level fields (energy, ids, …) live in `frame.meta`.
 
 ## Install
 
 ```bash
 pip install molhub                 # core: source, registry, CLI, dataset sources, Figshare publishing
 pip install molhub[huggingface]    # + HuggingFace Hub upload support
+pip install molhub[prepare]        # + torch, for writing molnex molix.block/1 blocks with `prepare`
 pip install molhub[dev]            # + dev tooling (pytest, pytest-cov, pytest-mock, ruff, ty, jsonschema, tox)
 ```
 
-Requires Python >= 3.12. Core dependencies: `molcrafts-molpy >= 0.12, < 0.13`, `tqdm`, `requests >= 2.28`, `pyyaml >= 6.0`, `typer >= 0.12`. Installing the package also puts a `molhub` command on your `PATH`.
+Requires Python >= 3.12. Core dependencies: `molcrafts-molpy >= 0.13` (upper bound deliberately open, so the next molpy minor surfaces here instead of being resolved away), `numpy >= 1.26`, `tqdm`, `requests >= 2.28`, `h5py >= 3.11`, `pyyaml >= 6.0`, `typer >= 0.12`. Installing the package also puts a `molhub` command on your `PATH`.
+
+The `prepare` extra names only torch, because that is the publishable half: molnex itself is not on PyPI. Install it from a source checkout, or point `MOLNEX_SRC` at that checkout's `src/` directory — `prepare` puts it on `sys.path` before it probes for the writer, and refuses with a message naming both routes when neither works. Everything except the block writer runs without either.
 
 ## Quick start
 

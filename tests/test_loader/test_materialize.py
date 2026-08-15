@@ -590,7 +590,7 @@ class TestPrepareRefusesUnroutableTargets:
         output_dir: Path,
     ) -> None:
         """Which targets a dataset declares is known from its coordinate; a
-        refusal that had to read 150 GB of shards first would not be one."""
+        refusal that had to read 28.9 GiB of shards first would not be one."""
         self._refusal(verified_registry, landing_hub, factory, output_dir)
         assert landing_hub.fetch_count == 0
 

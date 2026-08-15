@@ -321,6 +321,42 @@ class TestWaterLESUnits:
         atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
         assert atoms["fx"].dtype == np.float64
 
+    # -- and the declaration that says so ------------------------------------
+    #
+    # The tests above pin that the loader rescales nothing; these pin that the
+    # class *says* what the numbers are. ``@dataset`` is already on
+    # ``WaterLESDataset`` but passes no ``units=``, so a reader of the
+    # declaration (and ``Feature.declared``) is told nothing.
+    #
+    # Provenance, in this module's own docstring, ``water_les.py:16-18``:
+    #     "Units pass through unscaled: energies in eV, forces in eV·Å⁻¹,
+    #      positions and cell in Å, exactly as written upstream."
+    #
+    # Spelling: the ASCII, solidus-composed ``eV/angstrom``, not the docstring's
+    # typographic ``eV·Å⁻¹``. Every declared unit string in molhub is ASCII —
+    # ``THEMOL_UNITS`` spells ``kcal/mol/angstrom``, ``angstrom^-1``,
+    # ``e*angstrom^2`` — and these strings are parsed back through the molpy
+    # unit registry by ``molhub.dataset.transforms.UnitConvert``, which knows
+    # ``angstrom`` and not ``Å``. Prose may use the typographic form; a
+    # declaration may not.
+    #
+    # Positions and the cell are in Å too, but ``pos`` is not a declared target
+    # name — ``units`` is keyed by the names in ``TARGET_SCHEMA`` — so the
+    # mapping carries no key for it.
+
+    def test_the_declaration_says_the_energy_is_in_electronvolts(self):
+        assert WaterLESDataset.manifest.units["energy"] == "eV"
+
+    def test_the_declaration_says_the_forces_are_in_electronvolts_per_angstrom(self):
+        assert WaterLESDataset.manifest.units["forces"] == "eV/angstrom"
+
+    def test_the_units_mapping_names_exactly_the_declared_targets(self):
+        """No stray key: a unit for a name no record carries never renders."""
+        schema = WaterLESDataset.TARGET_SCHEMA
+        assert set(WaterLESDataset.manifest.units) == set(schema.graph_level) | set(
+            schema.atom_level
+        )
+
 
 # ---------------------------------------------------------------------------
 # Target schema

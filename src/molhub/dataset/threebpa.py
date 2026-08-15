@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
@@ -102,6 +103,24 @@ def _parse_extxyz(path: Path) -> list[Frame]:
     return frames
 
 
+@dataset(
+    name="3bpa",
+    namespace="molcrafts",
+    version="v1",
+    description=(
+        "DFT energies and forces for 3-(benzyloxy)pyridin-2-amine (C13H14N2O), "
+        "sampled at 300 K, 600 K and 1200 K."
+    ),
+    license="MIT",
+    citation="10.1021/acs.jctc.1c00647",
+    tags=("benchmark", "energy", "forces", "dft"),
+    # As distributed: the registry description for this coordinate says
+    # "energies in eV, forces in eV/angstrom", and the reader rescales nothing.
+    # ASCII and solidus-composed, like every other declared unit here, because
+    # `molhub.dataset.transforms.UnitConvert` parses these strings back through
+    # the molpy unit registry, which knows `angstrom` and not `Å`.
+    units={"energy": "eV", "forces": "eV/angstrom"},
+)
 class ThreeBPADataset:
     """Map-style dataset for one 3BPA extended-XYZ split.
 

@@ -55,8 +55,11 @@ import pytest
 
 from molhub.coordinate import Coordinate
 from molhub.dataset.definition import DatasetManifest
+from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import TargetSchema
 from molhub.dataset.themol import THEMolHessian, THEMolMBIS, THEMolTorsionScan
+from molhub.dataset.threebpa import ThreeBPADataset
+from molhub.dataset.water_les import WaterLESDataset
 from molhub.loader.info import DatasetInfo, Feature, SplitInfo
 
 from .conftest import CITATION, COORDINATE, DESCRIPTION, DOWNLOAD_SIZE, LICENSE
@@ -233,6 +236,62 @@ class TestFeature:
             "meta",
             "degree",
         )
+
+    # 3BPA, the same way: what `molhub info molcrafts/3bpa` prints for the two
+    # targets every structure carries. It printed an empty unit column for both,
+    # while `README.md:309` and the description in
+    # `src/molhub/registry_data/dataset/molcrafts/3bpa/v1.yaml` both say the
+    # benchmark is distributed in eV and eV/angstrom. The spelling rationale for
+    # `eV/angstrom` over the prose `eV/Å` is with the declaration pins in
+    # `tests/test_dataset/test_threebpa.py`.
+
+    def test_the_3bpa_declaration_renders_its_energy_per_structure_in_electronvolts(self):
+        feature = Feature.declared(
+            "energy", schema=ThreeBPADataset.TARGET_SCHEMA, manifest=ThreeBPADataset.manifest
+        )
+        assert (feature.name, feature.level, feature.units) == ("energy", "meta", "eV")
+
+    def test_the_3bpa_declaration_renders_its_forces_per_atom_in_electronvolts_per_angstrom(self):
+        feature = Feature.declared(
+            "forces", schema=ThreeBPADataset.TARGET_SCHEMA, manifest=ThreeBPADataset.manifest
+        )
+        assert (feature.name, feature.level, feature.units) == ("forces", "atom", "eV/angstrom")
+
+    # The other two declarations that had nothing to render. WaterLES states its
+    # units in `src/molhub/dataset/water_les.py:16-18` and phalkethoh-mm in
+    # `src/molhub/dataset/phalkethoh_mm.py:6-11` (corroborated by its registry
+    # description); neither reached `Feature`. The ASCII spelling rationale is
+    # with the declaration pins in `tests/test_dataset/`, which is also where a
+    # per-dataset unit literal is argued from its source.
+    #
+    # `dataset:molcrafts/water-les` is deliberately absent from
+    # `DatasetBuilder.DECLARATIONS`, so `.info` cannot reach it today — the
+    # derivation is still `Feature.declared`'s, and pinning it here is what the
+    # declaration is for.
+
+    @pytest.mark.parametrize(
+        ("name", "level", "units"),
+        [("energy", "meta", "eV"), ("forces", "atom", "eV/angstrom")],
+    )
+    def test_the_water_les_declaration_renders_its_targets_in_electronvolts(
+        self, name, level, units
+    ):
+        feature = Feature.declared(
+            name, schema=WaterLESDataset.TARGET_SCHEMA, manifest=WaterLESDataset.manifest
+        )
+        assert (feature.name, feature.level, feature.units) == (name, level, units)
+
+    @pytest.mark.parametrize(
+        ("name", "level", "units"),
+        [("mm_energy", "meta", "kcal/mol"), ("forces", "atom", "kcal/mol/angstrom")],
+    )
+    def test_the_phalkethoh_declaration_renders_its_targets_in_kcal_per_mole(
+        self, name, level, units
+    ):
+        feature = Feature.declared(
+            name, schema=PhalkethohMMDataset.TARGET_SCHEMA, manifest=PhalkethohMMDataset.manifest
+        )
+        assert (feature.name, feature.level, feature.units) == (name, level, units)
 
 
 class TestSplitInfo:

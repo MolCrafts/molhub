@@ -10,12 +10,13 @@ record carries and which splits exist, sourced from
 API gives, rather than a second rendering of the manifest. Roles, filenames,
 sizes, digests and locators are transport, and transport moved behind
 ``--files``. Neither view prints an example record: producing one would cost the
-bytes of a 150 GB artifact to show one molecule, and ``info`` staying free is
-worth more. It *is* free for every dataset whose splits a published derivation
-states; for the few whose class owns its splits the count is the dataset's own
-``len``, which costs what reading it costs — that price is
-:class:`~molhub.loader.builder.DatasetBuilder`'s, stated in its docstring, and
-this verb inherits it rather than inventing a second, cheaper answer.
+bytes of a whole artifact — tens of GiB to several TiB — to show one molecule,
+and ``info`` staying free is worth more. It *is* free for every dataset whose
+splits a published derivation states; for the few whose class owns its splits
+the count is the dataset's own ``len``, which costs what reading it costs — that
+price is :class:`~molhub.loader.builder.DatasetBuilder`'s, stated in its
+docstring, and this verb inherits it rather than inventing a second, cheaper
+answer.
 
 **That asymmetry is said out loud, before it is spent** (reachability wave,
 ruling 7). A docstring is not where a reader finds out that describing a dataset

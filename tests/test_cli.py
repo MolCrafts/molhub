@@ -130,7 +130,7 @@ class TestInfo:
         ``info`` staying fetch-free is a feature, not an accident, so the hub's
         one verb is made an error for the duration: a rendering that reached for
         shard bytes to print an example record fails here rather than merely
-        being slow on a 150 GB artifact.
+        being slow on a 28.9 GiB artifact.
         """
         from molhub.molhub import Molhub
 

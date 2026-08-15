@@ -126,6 +126,55 @@ class TestThreeBPADataset:
         assert "energy" in src.TARGET_SCHEMA.graph_level
         assert "forces" in src.TARGET_SCHEMA.atom_level
 
+    # -- what those two numbers mean -----------------------------------------
+    #
+    # The benchmark is distributed in eV and eV/angstrom. Two in-repo
+    # declarations already say so and the class says neither, which is why
+    # ``molhub info molcrafts/3bpa`` prints its energy and forces with an empty
+    # unit column:
+    #
+    #   README.md:309
+    #       "Energies are in eV and forces in eV/Å, as distributed."
+    #   src/molhub/registry_data/dataset/molcrafts/3bpa/v1.yaml:39 (description)
+    #       "Distances in angstrom, energies in eV, forces in eV/angstrom."
+    #
+    # The pinned spelling is the registry entry's ASCII ``eV/angstrom``, not the
+    # prose ``eV/Å``. Every unit string molhub declares is ASCII and
+    # solidus-composed — ``THEMOL_UNITS`` spells ``kcal/mol/angstrom``,
+    # ``kcal/mol/angstrom^2``, ``angstrom^-1``, ``e*angstrom^2`` — and these
+    # strings are read back through the molpy unit registry by
+    # ``molhub.dataset.transforms.UnitConvert``, which knows ``angstrom`` and
+    # not ``Å``. One dataset spelling its unit column differently would also
+    # make that column un-greppable across ``molhub info`` output.
+    #
+    # Literals, never a reference to the mapping the code reads: a unit is a
+    # scientific claim, and a pin computed from the declaration under test would
+    # agree with whatever that declaration were edited to say. Same rule as the
+    # THEMol declaration pins in ``tests/test_loader/test_info.py``.
+
+    def test_the_declaration_says_the_energy_is_in_electronvolts(self):
+        assert ThreeBPADataset.manifest.units["energy"] == "eV"
+
+    def test_the_declaration_says_the_forces_are_in_electronvolts_per_angstrom(self):
+        assert ThreeBPADataset.manifest.units["forces"] == "eV/angstrom"
+
+    def test_the_units_mapping_names_exactly_the_declared_targets(self):
+        """No stray key: a unit for a name no record carries never renders.
+
+        ``Feature.declared`` is only ever asked about the names in
+        ``TARGET_SCHEMA`` (plus declared blocks, of which 3BPA has none), so an
+        extra entry here can mislead a reader of the declaration without ever
+        showing up in ``.info`` to be caught.
+        """
+        schema = ThreeBPADataset.TARGET_SCHEMA
+        assert set(ThreeBPADataset.manifest.units) == set(schema.graph_level) | set(
+            schema.atom_level
+        )
+
+    def test_the_declaration_carries_this_modules_coordinate(self):
+        """One identity: the manifest on the class names the artifact it reads."""
+        assert ThreeBPADataset.manifest.canonical == COORDINATE
+
     def test_missing_energy_tag_raises(self, tmp_path):
         path = tmp_path / "bad.xyz"
         path.write_text("2\nno energy here\nH 0 0 0 0 0 0\nH 1 0 0 0 0 0\n", encoding="utf-8")
