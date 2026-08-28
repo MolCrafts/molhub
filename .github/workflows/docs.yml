@@ -46,6 +46,10 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v6
+      # docs:check is `uv run pytest tests/test_docs_examples.py && …`.
+      # Without a synced env pytest is not on PATH (`Failed to spawn: pytest`).
+      # Local .venv hid this from pre-commit.
+      - run: uv sync --extra dev
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
