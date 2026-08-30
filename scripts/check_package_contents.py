@@ -37,7 +37,9 @@ with tempfile.TemporaryDirectory(prefix="molhub-package-audit-") as temporary:
     required_wheel = {
         "molhub/cli.py",
         "molhub/schema/manifest.schema.yaml",
-        "molhub/registry_data/dataset/molcrafts/qm9/v2.yaml",
+        "molhub/catalog.py",
+        "molhub/dataset/qm9.py",
+        "molhub/dataset/themol_files.py",
         "molhub/scripts/build_class1_splits.py",
         "molhub/scripts/convert_espaloma_phalkethoh_mm.py",
     }

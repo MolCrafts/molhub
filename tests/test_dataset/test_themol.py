@@ -253,7 +253,7 @@ class TestHessian:
         path = tmp_path / "shard-000.h5"
         _write_hessian(path)
         dataset = THEMolHessian(path).load()
-        record = dataset[0]
+        record = dataset[0][0]
         assert list(record["atoms"]["number"]) == [1, 8, 1]
         assert list(record["atoms"]["atom_map"]) == [1, 2, 3]
         assert list(record["bonds"]["atomi"]) == [1, 1]
@@ -268,7 +268,7 @@ class TestHessian:
         dataset = THEMolHessian(path).load()
         dataset[0]
         restored = pickle.loads(pickle.dumps(dataset))
-        assert np.asarray(restored[0]["hessian"]["value"]).shape == (81,)
+        assert np.asarray(restored[0][0]["hessian"]["value"]).shape == (81,)
 
     def test_atomic_number_mismatch_fails_closed(self, tmp_path: Path) -> None:
         path = tmp_path / "shard-000.h5"
@@ -290,14 +290,14 @@ class TestGroupedTasks:
     def test_hessian_relax_preserves_ordered_trajectory(self, tmp_path: Path) -> None:
         path = tmp_path / "shard-000.h5"
         _write_hessian_relax(path)
-        trajectory = THEMolHessianRelax(path).load()[0]
-        assert len(trajectory.frames) == 2
-        assert [frame.meta["step_index"] for frame in trajectory.frames] == [0, 1]
-        assert [frame.meta["energy"] for frame in trajectory.frames] == [-10.0, -10.5]
-        assert list(trajectory.frames[1]["atoms"]["fx"]) == [2.0, 2.0, 2.0]
+        frames = THEMolHessianRelax(path).load()[0]
+        assert len(frames) == 2
+        assert [frame.meta["step_index"] for frame in frames] == [0, 1]
+        assert [frame.meta["energy"] for frame in frames] == [-10.0, -10.5]
+        assert list(frames[1]["atoms"]["fx"]) == [2.0, 2.0, 2.0]
 
     def test_torsion_scan_is_one_complete_profile(self, tmp_path: Path) -> None:
-        """The profile is the record: one `Trajectory`, scalars in per-frame meta."""
+        """The profile is the record: one FrameCollection, scalars in per-frame meta."""
         path = tmp_path / "shard-000.h5"
         _write_torsion(path, relax=False)
         profile = THEMolTorsionScan(path).load()[0]
@@ -338,7 +338,7 @@ class TestGroupedTasks:
         """
         path = tmp_path / "shard-000.h5"
         _write_mbis(path)
-        atoms = THEMolMBIS(path).load()[0]["atoms"]
+        atoms = THEMolMBIS(path).load()[0][0]["atoms"]
         assert np.asarray(atoms["atomic_charge"]).tolist() == pytest.approx([0.4, -0.8, 0.4])
         assert [np.asarray(atoms[name]).shape for name in MBIS_QUADRUPOLE_COLUMNS] == [(3,)] * 9
         assert [
@@ -569,7 +569,7 @@ class TestTHEMolShardDataset:
     def test_keys_are_positionally_aligned_with_indexing(self, tmp_path: Path) -> None:
         """``keys()[i]`` names the record ``self[i]`` reads — the join's whole basis."""
         shard = THEMolHessian(self._shard(tmp_path)).load()
-        read = [shard[index].meta["source_record_id"] for index in range(len(shard))]
+        read = [shard[index][0].meta["source_record_id"] for index in range(len(shard))]
         assert read == ["eq-record-0", "eq-record-1"]
         assert read == list(shard.keys())
 
@@ -581,11 +581,14 @@ class TestTHEMolHessian:
     def _record(tmp_path: Path) -> Frame:
         path = tmp_path / "shard-000.h5"
         _write_hessian(path)
-        return THEMolHessian(path).load()[0]
+        return THEMolHessian(path).load()[0][0]
 
-    def test_a_hessian_record_is_a_molpy_frame(self, tmp_path: Path) -> None:
-        """No wrapper object on top of Frame — the record IS the molpy object."""
-        assert isinstance(self._record(tmp_path), Frame)
+    def test_a_hessian_record_is_a_length_one_collection(self, tmp_path: Path) -> None:
+        path = tmp_path / "shard-000.h5"
+        _write_hessian(path)
+        record = THEMolHessian(path).load()[0]
+        assert len(record) == 1
+        assert isinstance(record[0], Frame)
 
     def test_the_frame_keeps_its_topology_and_provenance(self, tmp_path: Path) -> None:
         record = self._record(tmp_path)
@@ -629,7 +632,7 @@ class TestTHEMolHessian:
         source = np.arange(81, dtype=np.float64).reshape(9, 9)
         path = tmp_path / "shard-000.h5"
         _write_hessian(path, hessian=source)
-        values = np.asarray(THEMolHessian(path).load()[0]["hessian"]["value"])
+        values = np.asarray(THEMolHessian(path).load()[0][0]["hessian"]["value"])
         assert values.reshape(9, 9).tolist() == source.tolist()
 
     def test_the_hessian_block_dtypes_are_int32_int32_float64(self, tmp_path: Path) -> None:
@@ -653,9 +656,10 @@ class TestTHEMolHessian:
         path = tmp_path / "shard-000.h5"
         _write_hessian(path, smiles=NEON, numbers=(10,), coords=np.zeros((1, 3)))
         record = THEMolHessian(path).load()[0]
-        assert isinstance(record, Frame)
-        assert "bonds" not in record
-        assert np.asarray(record["hessian"]["value"]).shape == (9,)
+        assert len(record) == 1
+        assert isinstance(record[0], Frame)
+        assert "bonds" not in record[0]
+        assert np.asarray(record[0]["hessian"]["value"]).shape == (9,)
 
 
 class TestTHEMolMBIS:
@@ -677,7 +681,7 @@ class TestTHEMolMBIS:
             atomic_dipole=MBIS_DIPOLE,
             atomic_quadrupole=MBIS_QUADRUPOLE,
         )
-        return THEMolMBIS(path).load()[0]
+        return THEMolMBIS(path).load()[0][0]
 
     @staticmethod
     def _refused(tmp_path: Path, parameters: np.ndarray) -> Path:
@@ -691,8 +695,16 @@ class TestTHEMolMBIS:
         )
         return path
 
-    def test_an_mbis_record_is_a_molpy_frame(self, tmp_path: Path) -> None:
-        assert isinstance(self._record(tmp_path), Frame)
+    def test_an_mbis_record_is_a_length_one_collection(self, tmp_path: Path) -> None:
+        path = tmp_path / "shard-000.h5"
+        _write_mbis(
+            path,
+            atomic_dipole=MBIS_DIPOLE,
+            atomic_quadrupole=MBIS_QUADRUPOLE,
+        )
+        record = THEMolMBIS(path).load()[0]
+        assert len(record) == 1
+        assert isinstance(record[0], Frame)
 
     def test_the_atoms_block_carries_exactly_the_mbis_columns(self, tmp_path: Path) -> None:
         """Geometry plus the fourteen per-atom columns, and nothing else.
@@ -923,9 +935,10 @@ class TestTHEMolTorsionScan:
         _write_torsion(path, relax=False)
         return THEMolTorsionScan(path).load()[0]
 
-    def test_a_torsion_scan_record_is_a_trajectory(self, tmp_path: Path) -> None:
+    def test_a_torsion_scan_record_is_a_frame_collection(self, tmp_path: Path) -> None:
         record = self._record(tmp_path)
-        assert isinstance(record, Trajectory)
+        assert isinstance(record, Sequence)
+        assert all(isinstance(frame, Frame) for frame in record)
         assert len(record) == 2
 
     def test_each_frame_carries_its_scan_scalars(self, tmp_path: Path) -> None:
@@ -979,9 +992,10 @@ class TestTHEMolHessianRelax:
         _write_hessian_relax(path)
         return THEMolHessianRelax(path).load()[0]
 
-    def test_a_relaxation_record_is_a_trajectory(self, tmp_path: Path) -> None:
+    def test_a_relaxation_record_is_a_frame_collection(self, tmp_path: Path) -> None:
         record = self._record(tmp_path)
-        assert isinstance(record, Trajectory)
+        assert isinstance(record, Sequence)
+        assert all(isinstance(frame, Frame) for frame in record)
         assert len(record) == 2
 
     def test_step_index_orders_the_frames(self, tmp_path: Path) -> None:
@@ -1014,7 +1028,7 @@ def test_local_shard_role_is_preserved_in_provenance(tmp_path: Path) -> None:
     path = tmp_path / "shard-123"
     _write_hessian(path)
     record = THEMolHessian(tmp_path).load(role="shard-123")[0]
-    assert record.meta["source_id"].endswith("#role=shard-123")
+    assert record[0].meta["source_id"].endswith("#role=shard-123")
 
 
 def test_the_scanned_dihedral_is_declared_in_degrees() -> None:

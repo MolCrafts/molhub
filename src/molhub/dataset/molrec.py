@@ -37,7 +37,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from molpy import Block, Element, Frame, MolRec
+from molpy import Block, Element, Frame
+
+try:  # molpy >= 0.14 renamed MolRec -> Record
+    from molpy import Record as MolRec
+except ImportError:  # molpy 0.13 still spells it MolRec
+    from molpy import MolRec
 
 from molhub.dataset.protocol import InMemoryDataset, TargetSchema
 

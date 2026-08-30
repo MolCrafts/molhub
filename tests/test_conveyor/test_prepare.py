@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from molpy import Block, Frame, Trajectory
+from molpy import Block, Frame
 
 import molhub
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder
@@ -155,25 +155,23 @@ def _frame(
     return frame
 
 
-def _trajectory(key: str, identity: str, n_frames: int) -> Trajectory:
+def _trajectory(key: str, identity: str, n_frames: int) -> tuple:
     """One whole relaxation of the species behind *identity*."""
     smiles, elements, numbers, bonds = _SPECIES[identity]
-    return Trajectory(
-        [
-            _frame(
-                smiles=smiles,
-                molecule_id=key,
-                elements=elements,
-                numbers=numbers,
-                bonds=bonds,
-                step=step,
-            )
-            for step in range(n_frames)
-        ]
+    return tuple(
+        _frame(
+            smiles=smiles,
+            molecule_id=key,
+            elements=elements,
+            numbers=numbers,
+            bonds=bonds,
+            step=step,
+        )
+        for step in range(n_frames)
     )
 
 
-def _shard() -> tuple[Trajectory, ...]:
+def _shard() -> tuple[tuple, ...]:
     """The five-record, three-identity, split-MIXED fixture shard."""
     return tuple(_trajectory(key, identity, n_frames) for key, identity, n_frames in SHARD_LAYOUT)
 
@@ -292,7 +290,7 @@ class RecordingWriterFactory:
 
 
 def _job(
-    records: Iterable[Trajectory],
+    records: Iterable[tuple],
     *,
     root: Path,
     factory: RecordingWriterFactory,

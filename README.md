@@ -31,37 +31,35 @@ On top of that, `molhub.dataset` gives every dataset the same interface — inde
 
 ## Load a dataset
 
-The dataset door is HuggingFace-shaped, and there are exactly three functions behind it: describe, open, materialize.
+A dataset is a class. Package verbs are distinguished only by the name.
 
 ```python
-import molhub
+from molhub.dataset import QM9
 
-info = molhub.load_dataset_builder("themol/mbis").info    # what is in here? (table-backed: no dataset bytes)
-print(info)                                               # coordinate, features with units, splits with counts
+ds = QM9()
+frame = ds[0]                     # molpy.Frame
 
-train = molhub.load_dataset("themol/mbis", split="train")  # map-style: len(train), train[0]
-walk = molhub.load_dataset(                                # one published file on local disk at a time
-    "themol/mbis", split="train", streaming=True, disk_budget=8_000_000_000
-)
+import molhub as mh
 
-molhub.prepare("themol/torsion-scan", split="train", output_dir="blocks/")   # sealed molnex blocks
+mh.fetch("qm9")                   # bytes, any kind of artifact
+mbis = mh.load("themol/mbis")     # records; the name picks dataset vs model
+train = mh.SubsetDataset(mbis, mh.assignment(mbis)["train"])
 ```
 
-A record is a molpy `Frame` (one geometry) or a `Trajectory` (one inseparable multi-frame unit, e.g. a whole torsion scan) — never a molhub wrapper. `prepare`'s output is read back on the molnex side with `BlockDataset.load_from_disk("blocks/")`.
+There is no `load_dataset` factory. Splitting is `SubsetDataset`, like PyTorch.
 
-Describing is free only where a published derivation states the splits, which today means the three THEMol subsets. Everywhere else — 3BPA's four benchmark files, and qm9 or polymer-tg, whose whole content is served as `split="train"` — the count is the dataset's own `len`, so describing it reads its files. `builder.describe_download_size` says what that costs before it is spent, and the library prints the same total to stderr before the first byte moves. What a record carries, how the walk's disk budget behaves, and every refusal you can catch by name are in [`docs/reference/python.md`](docs/reference/python.md).
+What a record carries, how the walk's disk budget behaves, and every refusal you can catch by name are in [`docs/reference/python.md`](docs/reference/python.md).
 
 ### Coming from HuggingFace `datasets`
 
 | There | Here | Why |
 |---|---|---|
-| `load_dataset(name)` returns a `DatasetDict` | `split=` is a **required** keyword | one call returns one dataset. The names are `load_dataset_builder(name).info.splits`, and there is deliberately no `DatasetDict` for them to come back in. A dataset nobody publishes a split of (qm9, polymer-tg) serves all of itself as `split="train"`, which is HuggingFace's own name for "all of it" |
-| `revision="<git sha>"` | `revision="1"` — molhub's `@version` | a coordinate names one immutable artifact version, not a repository commit. Omitting `revision` takes the newest version the registry declares and echoes the resolved coordinate on `info.coordinate` |
-| `ds.map` / `.filter` / `.shuffle` / `.with_format` | — | composition is the caller's job; the library exposes primitives and nothing that hides multi-step work |
-| `ds.take(n)` on any dataset | `.take(n)` on a streaming walk only | a map-style split is indexed (`train[i]`), so bounding it is a loop or a `SubsetDataset` you build yourself; `take` exists where there is no index to build one from |
-| `ds.features` — a mutable dict of `Value` / `Sequence` | `info.features` — a tuple of frozen `Feature(name, level, units)` | one entry per declared target, saying where it sits on the record (`atom` column, `meta` entry, named block) and what it is measured in |
-| `builder.info.splits` — a dict of `SplitInfo` | `info.splits` — a tuple of frozen `SplitInfo(name, num_examples, provenance)` | every count carries the sentence that says who decided that split and how |
-| rows are dicts, or Arrow batches | records are molpy `Frame` / `Trajectory` | per-atom data are `atoms` columns, scalars are `frame.meta` entries, and anything shaped like neither is a named block |
+| `load_dataset(name, split=...)` | `from molhub.dataset import QM9` or `mh.load(name)` + `SubsetDataset` | the class is the primitive; `load` is a name verb, not a kind-specific factory |
+| `load_dataset_builder` / `Features` | — | look at the `Frame`; `molhub info` prints names and counts |
+| `revision="<git sha>"` | `revision="1"` — molhub's `@version` | a coordinate names one immutable artifact version, not a repository commit |
+| `ds.map` / `.filter` / `.shuffle` / `.with_format` | — | composition is the caller's job |
+| `ds.take(n)` on any dataset | `.take(n)` on a streaming walk only | a map-style split is indexed (`train[i]`) |
+| rows are dicts, or Arrow batches | records are molpy `Frame` / `Trajectory` | per-atom data are `atoms` columns, scalars are `frame.meta`, anything else is a named block |
 
 ## Repository boundaries
 
@@ -117,11 +115,11 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Transport | `BlobStore` | On-disk cache keyed by coordinate and role under `$MOLHUB_HOME`, reserved as a cross-SDK contract so one machine downloads once |
 | Transport | `Source` drivers | `https`, `zenodo`, `figshare`, `hf`, `molhub` out of the box. A third party adds a scheme by publishing a driver to the `molhub.sources` entry point — no molhub source change. `PublishingSource` adds upload to the same driver |
 | CLI | `molhub` | `search`, `info` (`--files`, `--home`), `fetch --into`, `cache verify`, `cache status`, `cache coverage` — the same verbs as the Python API |
-| Loading | `molhub.loader` (functions) | `load_dataset_builder(name).info` describes a dataset — free where a published split table states the splits (THEMol), by reading the files where the counts are the dataset's own (3BPA, qm9, polymer-tg), with the byte total announced on stderr first; `load_dataset(name, split=...)` opens one split, map-style or (`streaming=True`) as a walk that keeps one published file on disk at a time; `prepare(name, split=..., output_dir=...)` materializes one split as sealed molnex blocks |
-| Loading | `molhub.loader` (types) | `DatasetInfo` / `Feature` / `SplitInfo` / `ByteSize` — frozen records describing *content* (targets with units, splits with counts and provenance, download size), never a file role. `SplitTableUnavailable` and `UnknownSplit` are the two refusals a script catches by name |
+| Loading | `molhub.load` | One function. Opens the whole artifact, map-style or (`streaming=True`) as a walk. Split with `SubsetDataset` + `assignment`. `prepare(name, output_dir=...)` writes sealed molnex blocks |
+| Loading | refusals | `SplitTableUnavailable` and `UnknownSplit` are the two refusals a script catches by name |
 | Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one geometry) or a `molpy.Trajectory` (one inseparable multi-frame sampling unit, e.g. a torsion scan); scalars live in each frame's `frame.meta` |
 | Datasets | `molhub.dataset` (helpers) | `InMemoryDataset` wraps a list of frames; `SubsetDataset` slices any map-style dataset by index |
-| Datasets | `QM9Dataset` | 130,831 small organic molecules with quantum-chemical properties — auto-downloads & caches `dataset:molcrafts/qm9@v2` |
+| Datasets | `QM9` | 130,831 small organic molecules with quantum-chemical properties — auto-downloads & caches `dataset:molcrafts/qm9@v2` |
 | Datasets | `RevMD17Dataset` | Revised MD17 trajectories for 10 molecules, with energies and forces — auto-downloads & caches one molecule of `dataset:molcrafts/revmd17@v4` |
 | Datasets | `ThreeBPADataset` | 3BPA temperature-transferability benchmark at 300 K / 600 K / 1200 K — auto-downloads & caches one split of `dataset:molcrafts/3bpa@v1` |
 | Datasets | `CSVDataset` | Generic CSV loader for local files or remote URLs — zero extra dependencies, each row becomes a `Frame` |
@@ -227,10 +225,10 @@ Two rules bite when you write a manifest by hand:
 Every built-in source resolves its own coordinate and fetches through `Molhub`, so there is nothing to download by hand. The blocks below reach upstream on a cold cache.
 
 ```python
-from molhub.dataset import QM9Dataset, CSVDataset
+from molhub.dataset import QM9, CSVDataset
 
 # Load QM9 — auto-downloads & caches dataset:molcrafts/qm9@v2
-qm9 = QM9Dataset("./data/qm9")
+qm9 = QM9("./data/qm9").load()
 print(len(qm9))          # 130831
 frame = qm9[42]          # one sample carries atoms + computed properties
 print(frame.meta["U0"])
@@ -298,15 +296,16 @@ print(subset.source_id)   # memory:my-frames:<len>:subset=<12-hex-chars>
 
 ### Built-in datasets
 
-**QM9** (`QM9Dataset`) — `dataset:molcrafts/qm9@v2`, 130,831 small organic molecules with quantum-chemical properties. Two roles: `main` (the tarball) and `exclude` (the uncharacterized list that brings 133,885 records down to 130,831). Reference: Ramakrishnan et al., *Scientific Data* 1, 140022 (2014).
+**QM9** (`QM9`) — `dataset:molcrafts/qm9@v2`, 130,831 small organic molecules with quantum-chemical properties. Two roles: `main` (the tarball) and `exclude` (the uncharacterized list that brings 133,885 records down to 130,831). Reference: Ramakrishnan et al., *Scientific Data* 1, 140022 (2014).
 
 ```python
-from molhub.dataset import QM9Dataset
+from molhub.dataset import QM9
 
-source = QM9Dataset("./data/qm9", targets=["U0", "H", "gap"])
-# Auto-downloads & caches both roles, then lazy-loads on first access.
-print(source.source_id)   # dataset:molcrafts/qm9@v2#targets=H+U0+gap
+ds = QM9("./data/qm9").load()
+# load() auto-downloads & caches both roles, then parses every frame.
+print(ds.source_id)   # dataset:molcrafts/qm9@v2
 
+# Subsetting / target pruning is the consumer's job: wrap with SubsetDataset.
 # Offline: pass download=False and put qm9.tar.bz2 + qm9_exclude.txt in root.
 ```
 
@@ -317,11 +316,11 @@ Graph-level targets: `A`, `B`, `C`, `mu`, `alpha`, `homo`, `lumo`, `gap`, `r2`, 
 ```python
 from molhub.dataset import RevMD17Dataset
 
-source = RevMD17Dataset("./data/revmd17", molecule="aspirin")
-# Auto-downloads & caches role "aspirin" of dataset:molcrafts/revmd17@v4.
-print(source.source_id)   # dataset:molcrafts/revmd17@v4#molecule=aspirin
+ds = RevMD17Dataset("./data/revmd17", molecule="aspirin").load()
+# load() auto-downloads & caches role "aspirin" of dataset:molcrafts/revmd17@v4.
+print(ds.source_id)   # dataset:molcrafts/revmd17@v4#molecule=aspirin
 
-frame = source[100]
+frame = ds[100][0]
 # atoms block: element, x, y, z, number, fx, fy, fz
 print(frame.meta["energy"])
 

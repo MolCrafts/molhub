@@ -297,6 +297,86 @@ class Manifest:
                 f"{self.coordinate.canonical} has no artifact role {role!r}. Available: {available}"
             ) from None
 
+    def to_mapping(self) -> dict[str, Any]:
+        """Authored-document shape of this manifest (``schema_version`` 1).
+
+        This is the Python catalog's serialisable form — the same mapping
+        :meth:`from_mapping` accepts. Optional empty fields are omitted.
+        """
+        document: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": self.coordinate.kind,
+            "namespace": self.coordinate.namespace,
+            "name": self.coordinate.name,
+            "version": self.coordinate.version,
+            "title": self.title,
+        }
+        if self.description:
+            document["description"] = self.description
+        if self.license:
+            document["license"] = self.license
+        if self.doi:
+            document["doi"] = self.doi
+        artifacts: list[dict[str, Any]] = []
+        for artifact in self.artifacts.values():
+            entry: dict[str, Any] = {
+                "role": artifact.role,
+                "filename": artifact.filename,
+                "locators": [str(locator) for locator in artifact.locators],
+            }
+            if artifact.format:
+                entry["format"] = artifact.format
+            if artifact.media_type:
+                entry["media_type"] = artifact.media_type
+            if artifact.digest is not None:
+                entry["digest"] = str(artifact.digest)
+            if artifact.size is not None:
+                entry["size"] = artifact.size
+            artifacts.append(entry)
+        document["artifacts"] = artifacts
+        if self.targets.graph_level or self.targets.atom_level:
+            document["targets"] = {
+                "graph_level": list(self.targets.graph_level),
+                "atom_level": list(self.targets.atom_level),
+            }
+        return document
+
+    def to_entry(self) -> dict[str, Any]:
+        """Aggregate-registry entry for the frontend snapshot.
+
+        Every key is present. Optional values that the authored document
+        omitted become ``null`` / empty lists so a consumer never branches
+        on missing keys. Artifacts are ordered by ``role``.
+        """
+        artifacts = [
+            {
+                "role": artifact.role,
+                "filename": artifact.filename,
+                "format": artifact.format,
+                "media_type": artifact.media_type,
+                "locators": [str(locator) for locator in artifact.locators],
+                "digest": str(artifact.digest) if artifact.digest is not None else None,
+                "size": artifact.size,
+            }
+            for artifact in sorted(self.artifacts.values(), key=lambda item: item.role)
+        ]
+        return {
+            "coordinate": self.coordinate.canonical,
+            "kind": self.coordinate.kind,
+            "namespace": self.coordinate.namespace,
+            "name": self.coordinate.name,
+            "version": self.coordinate.version,
+            "title": self.title,
+            "description": self.description or None,
+            "license": self.license,
+            "doi": self.doi,
+            "targets": {
+                "graph_level": list(self.targets.graph_level),
+                "atom_level": list(self.targets.atom_level),
+            },
+            "artifacts": artifacts,
+        }
+
     def matches(self, query: str) -> bool:
         """Whether *query* occurs in the fields a person would search on."""
         needle = query.casefold()

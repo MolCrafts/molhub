@@ -54,13 +54,9 @@ import typer
 
 from molhub.conveyor import DEFAULT_BUDGET_BYTES, ConveyorError, default_ledger_path
 from molhub.coordinate import InvalidCoordinate
-from molhub.loader import (
-    AmbiguousRevision,
-    ByteSize,
-    DatasetBuilder,
-    DatasetInfo,
-    SplitTableUnavailable,
-)
+from molhub.loader import AmbiguousRevision, SplitTableUnavailable
+from molhub.loader.builder import DatasetBuilder
+from molhub.loader.info import ByteSize, DatasetInfo
 from molhub.manifest import InvalidManifest, Manifest
 from molhub.molhub import Molhub
 from molhub.registry import UnknownArtifact
@@ -432,11 +428,11 @@ def _corpus_blocks(hub: Molhub) -> int:
         reporting a smaller one.
 
     Raises:
-        RosterError: If a manifest is present but cannot honestly be projected
-            into a roster — an unsized or undigested shard is a defect the
-            coverage number would otherwise hide.
+        RosterError: If a manifest declares shards but cannot honestly be
+            projected into a roster — an unsized or undigested shard is a
+            defect the coverage number would otherwise hide.
     """
-    from molhub.conveyor import BlockRoster
+    from molhub.conveyor import BlockRoster, NoShardArtifacts
     from molhub.dataset.universal_class_i import Class1Universal2026
 
     total = 0
@@ -446,5 +442,13 @@ def _corpus_blocks(hub: Molhub) -> int:
                 manifest = hub.resolve(coordinate)
             except (InvalidCoordinate, UnknownArtifact):
                 continue
-            total += len(BlockRoster(manifest, role).blocks())
+            try:
+                total += len(BlockRoster(manifest, role).blocks())
+            except NoShardArtifacts:
+                # Whole-artifact sources (OMol25-small, PhAlkEthOH-MM) publish
+                # no `shard-N` roles: they are fetched whole on the hot tier and
+                # are not part of the byte-bounded rolling corpus. The loud
+                # refusal stays for the conveyor pipeline, where an unsharded
+                # manifest under a sharded collection is a real defect.
+                continue
     return total

@@ -1,4 +1,4 @@
-"""Tests for the revMD17 source — synthetic NPZ files and a fake hub, never network.
+"""Tests for the revMD17 dataset — synthetic NPZ files and a fake hub, never network.
 
 The one class that talks to Figshare is marked ``network`` and deselected by
 default; it resolves metadata and fetches the 2 kB readme, never a 150 MB array.
@@ -6,24 +6,19 @@ default; it resolves metadata and fetches the 2 kB readme, never a 150 MB array.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pytest
+from molpy import UnitSystem
 
-import molhub
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, RevMD17Dataset
-from molhub.dataset.revmd17 import _MOLECULES, COORDINATE
-from molhub.manifest import Manifest
+from molhub.dataset.revmd17 import _MOLECULES, COORDINATE, MANIFEST
+from tests.test_dataset.conftest import FakeHub
 
 _N_FRAMES = 3
 _CHARGES = [6, 1, 8]  # C, H, O
-
-_MANIFEST_PATH = (
-    Path(molhub.__file__).parent / "registry_data" / Coordinate.parse(COORDINATE).relative_path()
-)
 
 
 def _write_npz(
@@ -49,23 +44,6 @@ def _write_npz(
     path = root / f"rmd17_{molecule}.npz"
     np.savez(path, **payload)
     return path
-
-
-@dataclass
-class FakeHub:
-    """An :class:`~molhub.dataset.hub.ArtifactHub` serving files already on disk.
-
-    Records what it was asked for so a test can assert the source requests one
-    pinned coordinate and only the role it actually needs.
-    """
-
-    paths: dict[str, Path] = field(default_factory=dict)
-    calls: list[tuple[str, list[str] | None]] = field(default_factory=list)
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self.paths) if roles is None else roles
-        return {role: self.paths[role] for role in wanted}
 
 
 @pytest.fixture
@@ -98,28 +76,36 @@ class TestRevMD17DatasetConstruction:
             RevMD17Dataset(tmp_path, molecule="caffeine", hub=hub)
         assert hub.calls == []
 
-    def test_missing_file_raises(self, tmp_path):
+    def test_construction_does_no_io(self, tmp_path):
+        """Missing files must surface at load(), never at construction."""
+        RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
+
+    def test_missing_file_raises_at_load(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
+            RevMD17Dataset(tmp_path, molecule="aspirin", download=False).load()
 
     def test_zero_byte_file_counts_as_absent(self, tmp_path):
         """A truncated transfer leaves a 0-byte file; treating it as present is
         how such a failure becomes permanent."""
         (tmp_path / "rmd17_aspirin.npz").write_bytes(b"")
         with pytest.raises(FileNotFoundError):
-            RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
+            RevMD17Dataset(tmp_path, molecule="aspirin", download=False).load()
 
     def test_offline_error_points_at_the_coordinate(self, tmp_path):
         with pytest.raises(FileNotFoundError, match=COORDINATE):
-            RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
+            RevMD17Dataset(tmp_path, molecule="aspirin", download=False).load()
 
     def test_missing_required_key_raises(self, tmp_path):
         _write_npz(tmp_path, drop_key="forces")
         with pytest.raises(KeyError, match="forces"):
-            RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
+            RevMD17Dataset(tmp_path, molecule="aspirin", download=False).load()
+
+    def test_indexing_before_load_raises(self, npz_root):
+        with pytest.raises(RuntimeError, match="load"):
+            len(RevMD17Dataset(npz_root, molecule="aspirin", download=False))
 
     def test_filepath_points_at_canonical_name(self, npz_root):
-        src = RevMD17Dataset(npz_root, molecule="aspirin", download=False)
+        src = RevMD17Dataset(npz_root, molecule="aspirin", download=False).load()
         assert src.filename == "rmd17_aspirin.npz"
         assert src.filepath == npz_root / "rmd17_aspirin.npz"
 
@@ -134,81 +120,93 @@ class TestRevMD17DatasetDownload:
         assert isinstance(hub, ArtifactHub)
 
     def test_download_fetches_through_the_hub(self, tmp_path, hub):
-        src = RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub)
+        src = RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub).load()
         assert len(src) == _N_FRAMES
 
     def test_download_uses_the_pinned_coordinate(self, tmp_path, hub):
-        RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub)
+        RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub).load()
         assert hub.calls[0][0] == COORDINATE
 
     def test_download_requests_only_this_molecules_role(self, tmp_path, hub):
         """A whole-manifest fetch would pull all ten molecules — over a gigabyte."""
-        RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub)
+        RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub).load()
         assert hub.calls[0][1] == ["aspirin"]
 
     def test_download_is_the_default(self, tmp_path, hub):
-        RevMD17Dataset(tmp_path, molecule="aspirin", hub=hub)
+        RevMD17Dataset(tmp_path, molecule="aspirin", hub=hub).load()
         assert len(hub.calls) == 1
+
+    def test_construction_alone_fetches_nothing(self, tmp_path, hub):
+        """load() is the IO boundary: constructing must not cost a download."""
+        RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub)
+        assert hub.calls == []
 
     def test_download_ignores_root(self, tmp_path, hub):
         """Fetched bytes land in the shared cache, not in *root*."""
-        src = RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub)
+        src = RevMD17Dataset(tmp_path, molecule="aspirin", download=True, hub=hub).load()
         assert src.filepath == hub.paths["aspirin"]
         assert list(tmp_path.iterdir()) == [tmp_path / "served"]
 
     def test_offline_never_touches_the_hub(self, npz_root, hub):
-        RevMD17Dataset(npz_root, molecule="aspirin", download=False, hub=hub)
+        RevMD17Dataset(npz_root, molecule="aspirin", download=False, hub=hub).load()
         assert hub.calls == []
 
 
 class TestRevMD17DatasetAccess:
     def test_len_matches_frame_count(self, npz_root):
-        assert len(RevMD17Dataset(npz_root, download=False)) == _N_FRAMES
+        assert len(RevMD17Dataset(npz_root, download=False).load()) == _N_FRAMES
 
     def test_is_map_dataset(self, npz_root):
-        assert isinstance(RevMD17Dataset(npz_root, download=False), Dataset)
+        assert isinstance(RevMD17Dataset(npz_root, download=False).load(), Dataset)
+
+    def test_load_is_idempotent(self, npz_root):
+        src = RevMD17Dataset(npz_root, download=False).load()
+        first = src[0][0].meta["energy"]
+        assert src.load()[0][0].meta["energy"] == first
 
     def test_atoms_block_columns(self, npz_root):
-        frame = RevMD17Dataset(npz_root, download=False)[0]
+        frame = RevMD17Dataset(npz_root, download=False).load()[0][0]
         for column in ("element", "x", "y", "z", "number", "fx", "fy", "fz"):
             assert column in frame["atoms"].keys()
 
     def test_element_symbols_from_charges(self, npz_root):
-        frame = RevMD17Dataset(npz_root, download=False)[0]
+        frame = RevMD17Dataset(npz_root, download=False).load()[0][0]
         assert list(frame["atoms"]["element"]) == ["C", "H", "O"]
 
-    def test_unmapped_charge_becomes_question_mark(self, tmp_path):
-        _write_npz(tmp_path, charges=[6, 15])  # phosphorus is not in the table
-        frame = RevMD17Dataset(tmp_path, download=False)[0]
-        assert list(frame["atoms"]["element"]) == ["C", "?"]
+    def test_any_element_resolves_through_molpy(self, tmp_path):
+        """The old hand-written H/C/N/O table turned phosphorus into '?';
+        molpy's periodic table knows every element."""
+        _write_npz(tmp_path, charges=[6, 15])
+        frame = RevMD17Dataset(tmp_path, download=False).load()[0][0]
+        assert list(frame["atoms"]["element"]) == ["C", "P"]
 
     def test_atomic_numbers_preserved(self, npz_root):
-        frame = RevMD17Dataset(npz_root, download=False)[0]
+        frame = RevMD17Dataset(npz_root, download=False).load()[0][0]
         assert list(frame["atoms"]["number"]) == _CHARGES
 
     def test_coordinates_are_split_into_columns(self, npz_root):
-        frame = RevMD17Dataset(npz_root, download=False)[0]
+        frame = RevMD17Dataset(npz_root, download=False).load()[0][0]
         # coords[0] is [[0,1,2],[3,4,5],[6,7,8]]
         assert list(frame["atoms"]["x"]) == pytest.approx([0.0, 3.0, 6.0])
         assert list(frame["atoms"]["y"]) == pytest.approx([1.0, 4.0, 7.0])
         assert list(frame["atoms"]["z"]) == pytest.approx([2.0, 5.0, 8.0])
 
     def test_forces_are_split_into_columns(self, npz_root):
-        frame = RevMD17Dataset(npz_root, download=False)[0]
+        frame = RevMD17Dataset(npz_root, download=False).load()[0][0]
         assert list(frame["atoms"]["fx"]) == pytest.approx([0.5, 0.5, 0.5])
 
     def test_energy_lands_in_frame_meta(self, npz_root):
-        src = RevMD17Dataset(npz_root, download=False)
-        assert src[0].meta["energy"] == pytest.approx(-10.0)
-        assert src[2].meta["energy"] == pytest.approx(-12.0)
+        src = RevMD17Dataset(npz_root, download=False).load()
+        assert src[0][0].meta["energy"] == pytest.approx(-10.0)
+        assert src[2][0].meta["energy"] == pytest.approx(-12.0)
 
     def test_energy_is_a_plain_float(self, npz_root):
-        src = RevMD17Dataset(npz_root, download=False)
-        assert isinstance(src[0].meta["energy"], float)
+        src = RevMD17Dataset(npz_root, download=False).load()
+        assert isinstance(src[0][0].meta["energy"], float)
 
     def test_frames_are_independent(self, npz_root):
-        src = RevMD17Dataset(npz_root, download=False)
-        assert src[0].meta["energy"] != src[1].meta["energy"]
+        src = RevMD17Dataset(npz_root, download=False).load()
+        assert src[0][0].meta["energy"] != src[1][0].meta["energy"]
 
 
 class TestRevMD17DatasetId:
@@ -222,8 +220,6 @@ class TestRevMD17DatasetId:
         assert Coordinate.parse(coordinate).canonical == COORDINATE
 
     def test_differs_per_molecule(self, tmp_path):
-        _write_npz(tmp_path, molecule="uracil")
-        _write_npz(tmp_path, molecule="aspirin")
         first = RevMD17Dataset(tmp_path, molecule="uracil", download=False)
         second = RevMD17Dataset(tmp_path, molecule="aspirin", download=False)
         assert first.source_id != second.source_id
@@ -244,16 +240,34 @@ class TestRevMD17TargetSchema:
         assert "forces" in RevMD17Dataset.TARGET_SCHEMA.atom_level
 
 
+class TestRevMD17Units:
+    """revMD17 records native kcal/mol labels verbatim and declares them."""
+
+    def test_declares_native_kcal_units(self):
+        assert RevMD17Dataset.manifest.units == {
+            "energy": "kcal/mol",
+            "forces": "kcal/mol/angstrom",
+        }
+
+    def test_every_unit_parses_through_the_molpy_registry(self):
+        registry = UnitSystem()
+        for unit in RevMD17Dataset.manifest.units.values():
+            registry.Unit(unit)
+
+
 class TestRevMD17Manifest:
     """The module's coordinate and its manifest must agree on the role names —
     nothing else in the tree checks that seam."""
 
     @pytest.fixture
     def manifest(self):
-        return Manifest.from_path(_MANIFEST_PATH)
+        return MANIFEST
 
-    def test_the_manifest_ships_at_the_coordinates_path(self):
-        assert _MANIFEST_PATH.is_file()
+    def test_the_manifest_is_the_module_catalog_entry(self):
+        assert MANIFEST.coordinate.canonical == COORDINATE
+
+    def test_the_class_declares_the_same_coordinate(self):
+        assert RevMD17Dataset.manifest.coordinate.canonical == COORDINATE
 
     def test_every_molecule_has_a_role(self, manifest):
         assert set(_MOLECULES) <= set(manifest.artifacts)
@@ -290,7 +304,7 @@ class TestRevMD17AgainstRealUpstream:
     def test_upstream_still_publishes_the_manifests_digests(self):
         from molhub.sources.drivers.figshare import FigshareSource
 
-        manifest = Manifest.from_path(_MANIFEST_PATH)
+        manifest = MANIFEST
         source = FigshareSource()
         for molecule in _MOLECULES:
             artifact = manifest.artifact(molecule)
@@ -302,5 +316,5 @@ class TestRevMD17AgainstRealUpstream:
         from molhub.molhub import Molhub
 
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(_MANIFEST_PATH.parents[3]).fetch(COORDINATE, roles=["readme"])
+        paths = Molhub().fetch(COORDINATE, roles=["readme"])
         assert paths["readme"].read_text(encoding="utf-8").startswith("THE REVISED MD17 dataset")

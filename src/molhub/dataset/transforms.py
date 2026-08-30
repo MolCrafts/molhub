@@ -53,12 +53,14 @@ value these transforms would never compute themselves."""
 
 
 def _read_targets(sample: Frame) -> dict[str, _MetaValue]:
-    """Graph-level targets of *sample*, as the plain values molpy hands back.
+    """Graph-level targets of *sample*, as plain Python values.
 
-    The result is detached from the frame: ``Frame.meta`` is a write-through
-    view, and a transform must not write back through the sample it reads.
+    The result is detached from the frame: ``Frame.meta`` hands back a copy,
+    and a transform must not write back through the sample it reads. molpy
+    ≥0.14 wraps each entry in a ``MetaValue``; unwrap here so every consumer
+    sees the plain scalar / sequence it computes with.
     """
-    return dict(sample.meta)
+    return {key: getattr(value, "value", value) for key, value in sample.meta.items()}
 
 
 def _require_number(targets: Mapping[str, _MetaValue], key: str, owner: str) -> float:

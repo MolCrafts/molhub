@@ -34,10 +34,9 @@ two files, the three-way split) mirror
 ``regressions/hf-facade-04-streaming-prepare.py``; nothing is imported from
 ``regressions/``, which is standalone-runnable by contract.
 
-Every value the fences assert on is a *declaration* — ``Feature('atomic_charge',
-'atom', 'e')`` comes from ``THEMolMBIS``'s own ``@dataset`` block,
-``describe_download_size == 0`` from ``TableBackedSplits``, ``take(1).limit``
-from ``BoundedStream`` — so the fixture supplies bytes and never an answer.
+Every value the fences assert on is on the record or the call shape —
+``frame["atoms"]["atomic_charge"]``, ``take(1).limit`` — so the fixture
+supplies bytes and never an answer.
 """
 
 from __future__ import annotations

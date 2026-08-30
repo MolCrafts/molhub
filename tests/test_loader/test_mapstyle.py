@@ -93,14 +93,15 @@ class TestSplitDataset:
 
     def test_the_first_row_is_the_first_train_record(self, train):
         record = train[0]
-        assert isinstance(record, Frame)
-        assert record.meta["source_record_id"] == "mbis-a"
+        assert len(record) == 1
+        assert isinstance(record[0], Frame)
+        assert record[0].meta["source_record_id"] == "mbis-a"
 
     def test_a_record_is_the_molpy_object_the_shard_reader_builds(self, train):
-        """02's ruling holds through the façade: no wrapper on top of ``Frame``."""
+        """The record is a FrameCollection; the chemistry lives on its frames."""
         record = train[0]
-        assert list(record["atoms"]["number"]) == [1, 8, 1]
-        assert record.meta["source_id"] == "dataset:themol/mbis@1#role=shard-000"
+        assert list(record[0]["atoms"]["number"]) == [1, 8, 1]
+        assert record[0].meta["source_id"] == "dataset:themol/mbis@1#role=shard-000"
 
     def test_reading_the_first_row_fetches_exactly_one_shard(self, train, hub):
         train[0]
@@ -110,16 +111,16 @@ class TestSplitDataset:
     def test_a_second_row_in_the_same_shard_fetches_nothing_new(self, train, hub):
         """Sequential access pays once per shard, not once per row."""
         train[0]
-        assert train[1].meta["source_record_id"] == "mbis-c"
+        assert train[1][0].meta["source_record_id"] == "mbis-c"
         assert hub.fetch_count == 1
 
     def test_a_row_in_a_later_shard_walks_the_shards_in_order(self, train, hub):
         """The cost the info states out loud: earlier shards get indexed too."""
-        assert train[2].meta["source_record_id"] == "mbis-d"
+        assert train[2][0].meta["source_record_id"] == "mbis-d"
         assert hub.roles_fetched == ("shard-000", "shard-001")
 
     def test_the_rows_are_the_split_in_shard_order(self, train):
-        assert tuple(train[i].meta["source_record_id"] for i in range(len(train))) == TRAIN_KEYS
+        assert tuple(train[i][0].meta["source_record_id"] for i in range(len(train))) == TRAIN_KEYS
 
     def test_an_index_past_the_end_raises_index_error(self, train):
         with pytest.raises(IndexError):

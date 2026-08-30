@@ -74,7 +74,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import molhub  # noqa: E402
-from molhub.loader import AmbiguousRevision  # noqa: E402
+from molhub.loader.builder import DatasetBuilder  # noqa: E402
+from molhub.loader.naming import AmbiguousRevision  # noqa: E402
 from molhub.registry import Registry  # noqa: E402
 
 assert "torch" not in sys.modules, "importing molhub pulled torch into sys.modules"
@@ -291,7 +292,7 @@ class CountingHub:
 
 def check_info_describes_content(registry: Registry, hub: CountingHub) -> None:
     """ac-001 + ac-002: one pinned coordinate, and content with no role in it."""
-    builder = molhub.load_dataset_builder("themol/mbis", registry=registry, hub=hub)
+    builder = DatasetBuilder("themol/mbis", registry=registry, hub=hub)
     info = builder.info
 
     assert info.coordinate.canonical == COORDINATE, info.coordinate
@@ -321,28 +322,25 @@ def check_info_describes_content(registry: Registry, hub: CountingHub) -> None:
     assert hub.roles_fetched == [], hub.roles_fetched
 
 
-def check_split_is_a_required_keyword(registry: Registry, hub: CountingHub) -> None:
-    """ac-003: no dict-of-splits, no default split — a missing argument."""
-    try:
-        molhub.load_dataset("themol/mbis")  # type: ignore[call-arg]
-    except TypeError:
-        pass
-    else:  # pragma: no cover - the failure branch of a regression script
-        raise AssertionError("load_dataset accepted a call with no split")
+def check_split_is_not_on_load_dataset(registry: Registry, hub: CountingHub) -> None:
+    """Splitting is SubsetDataset. load_dataset opens the whole artifact."""
+    import inspect
 
+    assert "split" not in inspect.signature(molhub.load).parameters
     try:
-        molhub.load_dataset("themol/mbis", "train", registry=registry, hub=hub)  # type: ignore[misc]
+        molhub.load("themol/mbis", "train", registry=registry, hub=hub)  # type: ignore[misc]
     except TypeError:
         pass
     else:  # pragma: no cover
-        raise AssertionError("load_dataset accepted split as a positional argument")
+        raise AssertionError("load_dataset accepted a positional extra argument")
 
     assert not hasattr(molhub.loader, "DatasetDict")
 
 
 def check_rows_are_the_split_in_shard_order(registry: Registry, hub: CountingHub) -> None:
     """ac-004 + ac-005: length is free, rows fetch the shard that owns them."""
-    train = molhub.load_dataset("themol/mbis", split="train", registry=registry, hub=hub)
+    ds = molhub.load("themol/mbis", registry=registry, hub=hub)
+    train = molhub.SubsetDataset(ds, molhub.assignment(ds)["train"])
 
     assert len(train) == SPLIT_COUNTS["train"] == 3, len(train)
     assert hub.roles_fetched == [], hub.roles_fetched
@@ -365,7 +363,7 @@ def check_rows_are_the_split_in_shard_order(registry: Registry, hub: CountingHub
     walked = tuple(train[i].meta["source_record_id"] for i in range(len(train)))
     assert walked == TRAIN_KEYS, walked
 
-    other = molhub.load_dataset("themol/mbis", split="val", registry=registry, hub=hub)
+    other = molhub.SubsetDataset(ds, molhub.assignment(ds)["val"])
     assert len(other) == SPLIT_COUNTS["val"] == 2, len(other)
 
 
@@ -373,14 +371,14 @@ def check_unorderable_versions_are_refused(root: Path, hub: CountingHub) -> None
     """ac-001: a silently picked version is not a pinned one."""
     registry = write_registry(root, versions=("v2", "beta"))
     try:
-        molhub.load_dataset_builder("themol/mbis", registry=registry, hub=hub).info
+        DatasetBuilder("themol/mbis", registry=registry, hub=hub).info
     except AmbiguousRevision as error:
         message = str(error)
         assert "v2" in message and "beta" in message, message
     else:  # pragma: no cover
         raise AssertionError("an unorderable version set resolved to something")
 
-    pinned = molhub.load_dataset_builder("themol/mbis", revision="beta", registry=registry, hub=hub)
+    pinned = DatasetBuilder("themol/mbis", revision="beta", registry=registry, hub=hub)
     assert pinned.info.coordinate.canonical == "dataset:themol/mbis@beta"
 
 
@@ -400,7 +398,7 @@ def main() -> None:
         os.environ["MOLHUB_HOME"] = str(home)
         try:
             check_info_describes_content(registry, CountingHub(shards))
-            check_split_is_a_required_keyword(registry, CountingHub(shards))
+            check_split_is_not_on_load_dataset(registry, CountingHub(shards))
             check_rows_are_the_split_in_shard_order(registry, CountingHub(shards))
             check_unorderable_versions_are_refused(root / "versions", CountingHub(shards))
         finally:

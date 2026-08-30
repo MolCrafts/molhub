@@ -3,30 +3,16 @@
 from __future__ import annotations
 
 import json
-import re
 import zipfile
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 import molhub
-from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, PhalkethohMMDataset
-from molhub.dataset.phalkethoh_mm import COORDINATE
-from molhub.manifest import Manifest
-
-_MANIFEST_BUNDLED = (
-    Path(molhub.__file__).parent / "registry_data" / Coordinate.parse(COORDINATE).relative_path()
-)
-_MANIFEST_REGISTRY = (
-    Path(__file__).resolve().parents[2]
-    / ".."
-    / "molhub-registry"
-    / "artifacts"
-    / Coordinate.parse(COORDINATE).relative_path()
-).resolve()
+from molhub.dataset.phalkethoh_mm import COORDINATE, MANIFEST
+from tests.test_dataset.conftest import FakeHub
 
 
 def write_fixture(root: Path, *, with_forces: bool = True) -> Path:
@@ -98,34 +84,19 @@ def write_fixture(root: Path, *, with_forces: bool = True) -> Path:
     return root
 
 
-@dataclass
-class FakeHub:
-    paths: dict[str, Path] = field(default_factory=dict)
-    calls: list[tuple[str, list[str] | None]] = field(default_factory=list)
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self.paths) if roles is None else roles
-        return {role: self.paths[role] for role in wanted}
-
-
 @pytest.fixture
 def fixture_root(tmp_path: Path) -> Path:
     return write_fixture(tmp_path / "pha")
 
 
 class TestPhalkethohManifest:
-    def test_dual_write(self):
-        assert _MANIFEST_BUNDLED.is_file()
-        assert _MANIFEST_REGISTRY.is_file()
-        assert _MANIFEST_BUNDLED.read_text() == _MANIFEST_REGISTRY.read_text()
-        Manifest.from_path(_MANIFEST_BUNDLED)
-        text = _MANIFEST_BUNDLED.read_text()
-        assert "namespace: espaloma" in text
-        assert "name: phalkethoh-mm-small" in text
-        assert "mm_energy" in text
-        assert "digest:" in text
-        assert "locators:" in text
+    def test_catalog_manifest(self):
+        assert MANIFEST.coordinate.canonical == COORDINATE
+        assert MANIFEST.coordinate.namespace == "espaloma"
+        assert MANIFEST.coordinate.name == "phalkethoh-mm-small"
+        assert "mm_energy" in MANIFEST.targets.graph_level
+        assert MANIFEST.artifact("main").digest is not None
+        assert MANIFEST.artifact("main").locators
 
 
 class TestPhalkethohMMDataset:
@@ -133,6 +104,10 @@ class TestPhalkethohMMDataset:
         assert COORDINATE == "dataset:espaloma/phalkethoh-mm-small@1"
         assert PhalkethohMMDataset.TARGET_SCHEMA.graph_level == frozenset({"mm_energy"})
         assert PhalkethohMMDataset.TARGET_SCHEMA.atom_level == frozenset({"forces"})
+
+    def test_max_frames_stops_early(self, fixture_root: Path):
+        ds = PhalkethohMMDataset(fixture_root, download=False, split=None, max_frames=1)
+        assert len(ds) == 1
 
     # -- what those two numbers mean -----------------------------------------
     #
@@ -146,8 +121,8 @@ class TestPhalkethohMMDataset:
     #       "Boundary units match the published Espaloma toy experiment
     #        exactly: coordinates — Å; ``mm_energy`` — kcal/mol; forces
     #        (optional) — kcal/(mol·Å)"
-    #   src/molhub/registry_data/dataset/espaloma/phalkethoh-mm-small/1.yaml
-    #       (description) "Reference MM energies stored as graph-level u_ref in
+    #   src/molhub/dataset/phalkethoh_mm.py (MANIFEST.description)
+    #       "Reference MM energies stored as graph-level u_ref in
     #        Hartree in the native DGL payload; after conversion they are
     #        mm_energy in kcal/mol (×627.5094740631). Coordinates in Å."
     #
@@ -183,9 +158,13 @@ class TestPhalkethohMMDataset:
         """One identity: the manifest on the class names the artifact it reads."""
         assert PhalkethohMMDataset.manifest.canonical == COORDINATE
 
-    def test_no_url_literals(self):
-        src = Path(molhub.__file__).parent / "dataset" / "phalkethoh_mm.py"
-        assert re.search(r"https?://|figshare://|zenodo://|hf://", src.read_text()) is None
+    def test_locators_live_on_the_catalog_entry(self):
+        locator = MANIFEST.artifact("main").locators[0]
+        assert str(locator).startswith("https://")
+        assert (
+            "BASE_URL"
+            not in Path(molhub.__file__).parent.joinpath("dataset", "phalkethoh_mm.py").read_text()
+        )
 
     def test_full_dataset(self, fixture_root: Path):
         ds = PhalkethohMMDataset(fixture_root, download=False, split=None)
@@ -197,7 +176,7 @@ class TestPhalkethohMMDataset:
         ds = PhalkethohMMDataset(fixture_root, download=False, split="train")
         assert len(ds) == 2
         assert ds.source_id == f"{COORDINATE}#split=train"
-        f0, f1 = ds[0], ds[1]
+        f0, f1 = ds[0][0], ds[1][0]
         assert f0.meta["molecule_id"] == "molA"
         assert f1.meta["molecule_id"] == "molA"
         assert f0.meta["mm_energy"] == pytest.approx(-1.0)
@@ -217,9 +196,9 @@ class TestPhalkethohMMDataset:
     def test_split_keeps_all_confs(self, fixture_root: Path):
         val = PhalkethohMMDataset(fixture_root, download=False, split="val")
         assert len(val) == 2
-        ids = {val[i].meta["molecule_id"] for i in range(len(val))}
+        ids = {val[i][0].meta["molecule_id"] for i in range(len(val))}
         assert ids == {"molB"}
-        energies = [val[i].meta["mm_energy"] for i in range(len(val))]
+        energies = [val[i][0].meta["mm_energy"] for i in range(len(val))]
         assert energies == pytest.approx([-2.0, -2.5])
 
     def test_download_zip_via_hub(self, tmp_path: Path):

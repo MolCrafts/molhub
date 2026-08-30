@@ -32,15 +32,50 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import TargetSchema
+from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
+from molhub.sources import Locator
 
 COORDINATE = "dataset:molcrafts/3bpa@v1"
-"""Where 3BPA lives in the registry. Its manifest carries the locators, pinned to
-the commit the benchmark was published at; this module holds no upstream URL of
-its own."""
+"""Where 3BPA lives in the catalog. Locators live on :data:`MANIFEST`."""
+
+_BOTNET_COMMIT = "29e6d467317e4b5967b7ea5cbee54de953fa0d45"
+_BOTNET_DIR = (
+    f"https://raw.githubusercontent.com/davkovacs/BOTNet-datasets/{_BOTNET_COMMIT}/dataset_3BPA"
+)
+
+MANIFEST = Manifest(
+    coordinate=Coordinate.parse(COORDINATE),
+    title="3BPA — temperature-transferability benchmark for machine-learned potentials",
+    description=(
+        "DFT energies and forces for 3-(benzyloxy)pyridin-2-amine (C13H14N2O), a large "
+        "flexible drug-like molecule. 500 training geometries sampled from 300 K "
+        "molecular dynamics, plus held-out sets sampled at 300 K, 600 K and 1200 K, so "
+        "a potential fitted in-domain can be scored well out of it. Distances in "
+        "angstrom, energies in eV, forces in eV/angstrom."
+    ),
+    license="MIT",
+    doi="10.1021/acs.jctc.1c00647",
+    artifacts={
+        role: Artifact(
+            role=role,
+            filename=f"{role}.xyz",
+            locators=(Locator.parse(f"{_BOTNET_DIR}/{role}.xyz"),),
+            size=size,
+        )
+        for role, size in (
+            ("train_300K", 1_504_880),
+            ("test_300K", 5_023_260),
+            ("test_600K", 6_434_399),
+            ("test_1200K", 6_437_539),
+        )
+    },
+    targets=TargetDeclaration(graph_level=("energy",), atom_level=("forces",)),
+)
 
 # The manifest declares one role per benchmark file, and a source's tag selects
 # among them. Keeping the two spelled identically is what lets `tag` double as
@@ -193,5 +228,5 @@ class ThreeBPADataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> Frame:
-        return self._frames[idx]
+    def __getitem__(self, idx: int) -> FrameCollection:
+        return (self._frames[idx],)

@@ -35,7 +35,7 @@ Shapes picked here, because a test cannot call them otherwise:
 
 * ``molhub.prepare(name, split=..., output_dir=..., registry=..., hub=...)`` —
   the entry ac-004 names, with the same ``registry=`` / ``hub=`` seams
-  ``load_dataset`` takes.
+  ``load`` takes.
 * ``writer_factory=`` injects the block writer (default: molnex's, per ac-005),
   and ``provenance=`` injects the provenance mapping ``molix.block/1`` requires
   (default: one this layer builds, which a test below checks is complete).
@@ -229,7 +229,6 @@ def prepared(verified_torsion_registry, torsion_hub, factory, output_dir: Path) 
     """The train split of the torsion fixture, materialized through a fake writer."""
     return molhub.prepare(
         "themol/torsion-scan",
-        split="train",
         output_dir=output_dir,
         registry=verified_torsion_registry,
         hub=torsion_hub,
@@ -258,7 +257,6 @@ class TestPrepareReadsUserFirst:
     #: signature would agree with any order at all.
     PARAMETERS: tuple[str, ...] = (
         "name",
-        "split",
         "output_dir",
         "revision",
         "disk_budget",
@@ -302,9 +300,8 @@ class TestBlockExport:
         """``prepare`` is a thin delegation — the export itself is a class, not a script."""
         assert isinstance(BlockExport, type)
 
-    def test_it_seals_one_root(self, prepared: PreparedBlocks) -> None:
-        """One split, one production-sized ceiling: one block, no size fan-out."""
-        assert len(prepared.blocks) == 1
+    def test_it_seals_one_root_per_assignment(self, prepared: PreparedBlocks) -> None:
+        assert {block.split for block in prepared.blocks} == {"train", "val", "test"}
 
     def test_the_sealed_root_exists_on_disk(self, prepared: PreparedBlocks) -> None:
         assert prepared.blocks[0].root.is_dir()
@@ -314,27 +311,30 @@ class TestBlockExport:
     ) -> None:
         assert prepared.blocks[0].root.parent == output_dir
 
-    def test_every_sealed_block_is_the_requested_split(self, prepared: PreparedBlocks) -> None:
-        assert {block.split for block in prepared.blocks} == {"train"}
+    def test_every_published_assignment_gets_a_root(self, prepared: PreparedBlocks) -> None:
+        assert {block.split for block in prepared.blocks} == {"train", "val", "test"}
 
     def test_no_other_splits_root_is_created(
         self, prepared: PreparedBlocks, output_dir: Path
     ) -> None:
-        """The shards are split-mixed; only the filtered walk keeps val and test out."""
-        assert [path.name for path in output_dir.iterdir()] == [prepared.blocks[0].root.name]
+        assert {path.name for path in output_dir.iterdir()} == {
+            block.root.name for block in prepared.blocks
+        }
 
-    def test_no_writer_is_opened_for_another_split(
+    def test_a_writer_is_opened_for_each_assignment(
         self, prepared: PreparedBlocks, factory: RecordingWriterFactory
     ) -> None:
-        assert factory.splits == ("train",)
+        assert set(factory.splits) == {"train", "val", "test"}
 
     def test_the_unit_count_is_the_train_scans(self, prepared: PreparedBlocks) -> None:
         """One whole scan is one unit, whatever it holds."""
-        assert prepared.blocks[0].unit_count == TRAIN_UNITS == 3
+        train = next(block for block in prepared.blocks if block.split == "train")
+        assert train.unit_count == TRAIN_UNITS == 3
 
     def test_the_frame_count_is_every_constrained_geometry(self, prepared: PreparedBlocks) -> None:
         """2 + 3 + 2: a unit count would say 3 here, so the two cannot be confused."""
-        assert prepared.blocks[0].frame_count == TRAIN_FRAMES == 7
+        train = next(block for block in prepared.blocks if block.split == "train")
+        assert train.frame_count == TRAIN_FRAMES == 7
 
     def test_the_frame_count_is_the_sum_the_fixture_declares(self) -> None:
         """The literal above, re-derived from the fixture it was read off."""
@@ -344,20 +344,21 @@ class TestBlockExport:
         self, prepared: PreparedBlocks, factory: RecordingWriterFactory
     ) -> None:
         """In walk order: two scans out of the first shard, one out of the second."""
-        assert factory.writers[0].keys == TORSION_TRAIN_KEYS
+        train = next(writer for writer in factory.writers if writer.split == "train")
+        assert train.keys == TORSION_TRAIN_KEYS
 
     def test_every_unit_carries_the_train_molecules_identity(
         self, prepared: PreparedBlocks, factory: RecordingWriterFactory
     ) -> None:
         """HSSH is the train species of the fixture; HOOH is val and HSOH is test."""
-        assert factory.writers[0].identities == (HSSH_IDENTITY,) * TRAIN_UNITS
+        train = next(writer for writer in factory.writers if writer.split == "train")
+        assert train.identities == (HSSH_IDENTITY,) * TRAIN_UNITS
 
-    def test_no_other_species_reaches_a_block(
+    def test_every_species_reaches_a_block(
         self, prepared: PreparedBlocks, factory: RecordingWriterFactory
     ) -> None:
-        """The val and test molecules are in the same shards, one record apart."""
         landed = {identity for writer in factory.writers for identity in writer.identities}
-        assert HOOH_IDENTITY not in landed and HSOH_IDENTITY not in landed
+        assert landed == {HSSH_IDENTITY, HOOH_IDENTITY, HSOH_IDENTITY}
 
     def test_the_sealed_names_carry_no_conveyor_vocabulary(self, prepared: PreparedBlocks) -> None:
         """ac-003 for ``prepare``'s return value: a root name is a user-facing string."""
@@ -376,7 +377,6 @@ class TestBlockExport:
         """A caller who passes none still gets the four keys ``molix.block/1`` needs."""
         molhub.prepare(
             "themol/torsion-scan",
-            split="train",
             output_dir=output_dir,
             registry=verified_torsion_registry,
             hub=torsion_hub,
@@ -397,7 +397,6 @@ class TestBlockExport:
         with pytest.raises(IncompleteProvenanceError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -416,7 +415,6 @@ class TestBlockExport:
         with pytest.raises(IncompleteProvenanceError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -448,7 +446,6 @@ class TestBlockExport:
         with pytest.raises(UnroutableUnitError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -467,7 +464,6 @@ class TestBlockExport:
         with pytest.raises(ImportError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -481,7 +477,6 @@ class TestBlockExport:
         with pytest.raises(ImportError) as raised:
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -496,7 +491,6 @@ class TestBlockExport:
         with pytest.raises(ImportError) as raised:
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -511,7 +505,6 @@ class TestBlockExport:
         with pytest.raises(ImportError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -543,7 +536,6 @@ class TestPrepareRefusesUnroutableTargets:
         with pytest.raises(UnsupportedRecordError) as raised:
             molhub.prepare(
                 UNROUTABLE_DATASET,
-                split="train",
                 output_dir=output_dir,
                 registry=registry,
                 hub=hub,
@@ -746,7 +738,6 @@ class TestCheapRefusalsPrecedeTheSplitTable:
         with pytest.raises(UnsupportedRecordError):
             molhub.prepare(
                 UNROUTABLE_DATASET,
-                split="train",
                 output_dir=output_dir,
                 registry=verified_registry,
                 hub=landing_hub,
@@ -768,7 +759,6 @@ class TestCheapRefusalsPrecedeTheSplitTable:
         with pytest.raises(ImportError):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -825,7 +815,6 @@ class TestMolnexSourceOverride:
         with pytest.raises(Exception) as raised:
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -844,7 +833,6 @@ class TestMolnexSourceOverride:
         with pytest.raises(Exception):
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,
@@ -865,7 +853,6 @@ class TestMolnexSourceOverride:
         with pytest.raises(ImportError) as raised:
             molhub.prepare(
                 "themol/torsion-scan",
-                split="train",
                 output_dir=output_dir,
                 registry=verified_torsion_registry,
                 hub=torsion_hub,

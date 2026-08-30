@@ -239,8 +239,8 @@ class TestFeature:
 
     # 3BPA, the same way: what `molhub info molcrafts/3bpa` prints for the two
     # targets every structure carries. It printed an empty unit column for both,
-    # while `README.md:309` and the description in
-    # `src/molhub/registry_data/dataset/molcrafts/3bpa/v1.yaml` both say the
+    # while `README.md:309` and `ThreeBPADataset` / `MANIFEST.description`
+    # both say the
     # benchmark is distributed in eV and eV/angstrom. The spelling rationale for
     # `eV/angstrom` over the prose `eV/Å` is with the declaration pins in
     # `tests/test_dataset/test_threebpa.py`.

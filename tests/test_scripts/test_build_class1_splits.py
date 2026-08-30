@@ -29,7 +29,7 @@ staged legs serve bytes from ``tmp_path``, and the refusal leg is a refusal.
 ``load_dataset("themol/mbis", split=...)`` over the synthetic shards from
 ``tests/test_loader/conftest.py`` — reading the very table the generator just
 wrote. A generator whose output the loader cannot consume is not a fix for
-anything, and only a run that ends in ``load_dataset`` can tell.
+anything, and only a run that ends in ``load`` can tell.
 """
 
 from __future__ import annotations
@@ -480,10 +480,9 @@ class TestGeneratedDerivation:
             role: write_shard(tmp_path / "shards" / f"{role}.h5", keys)
             for role, keys in SHARD_KEYS.items()
         }
-        view = molhub.load_dataset(
-            "themol/mbis", split="train", registry=registry, hub=FakeHub(shards)
-        )
-        keys = tuple(view[index].meta["source_record_id"] for index in range(len(view)))
+        ds = molhub.load("themol/mbis", registry=registry, hub=FakeHub(shards))
+        view = molhub.SubsetDataset(ds, molhub.assignment(ds)["train"])
+        keys = tuple(view[index][0].meta["source_record_id"] for index in range(len(view)))
         assert keys == GOLDEN_TRAIN_KEYS
 
     def test_load_dataset_opens_the_other_split_too(self, built: Path, registry, tmp_path: Path):
@@ -492,10 +491,9 @@ class TestGeneratedDerivation:
             role: write_shard(tmp_path / "shards" / f"{role}.h5", keys)
             for role, keys in SHARD_KEYS.items()
         }
-        view = molhub.load_dataset(
-            "themol/mbis", split="val", registry=registry, hub=FakeHub(shards)
-        )
-        keys = tuple(view[index].meta["source_record_id"] for index in range(len(view)))
+        ds = molhub.load("themol/mbis", registry=registry, hub=FakeHub(shards))
+        view = molhub.SubsetDataset(ds, molhub.assignment(ds)["val"])
+        keys = tuple(view[index][0].meta["source_record_id"] for index in range(len(view)))
         assert keys == GOLDEN_VAL_KEYS
 
     def test_the_builder_counts_what_this_run_assigned(self, built: Path, registry, tmp_path: Path):
@@ -505,6 +503,8 @@ class TestGeneratedDerivation:
             for role, keys in SHARD_KEYS.items()
         }
         hub = FakeHub(shards)
-        info = molhub.load_dataset_builder("themol/mbis", registry=registry, hub=hub).info
+        from molhub.loader.builder import DatasetBuilder
+
+        info = DatasetBuilder("themol/mbis", registry=registry, hub=hub).info
         assert {split.name: split.num_examples for split in info.splits} == dict(GOLDEN_COUNTS)
         assert hub.fetch_count == 0

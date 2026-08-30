@@ -204,8 +204,7 @@ class PrepareJob:
     Args:
         records: The shard's records, in shard order — typically a
             ``THEMolShardDataset``, whose ``__getitem__`` already returns one
-            complete sampling unit per index: a :class:`molpy.Frame` for one
-            geometry, a :class:`molpy.Trajectory` for a relaxation or a scan.
+            complete sampling unit per index: a :data:`~molpy.FrameCollection`.
         encoder: The per-shard encoder; its ``task`` labels every unit.
         split_of: Molecular identity -> ``"train"`` / ``"val"`` / ``"test"``.
             A plain mapping, so this class needs no file to be tested; the
@@ -285,8 +284,7 @@ class PrepareJob:
                 ``split_of``.
             BlockFormatError: A sealed block's manifest does not witness what
                 molhub would report.
-            UnsupportedRecordError: A record that is neither a molpy ``Frame``
-                nor a molpy ``Trajectory``.
+            UnsupportedRecordError: A record that is not a FrameCollection.
             IncompleteRecordError: A record that cannot be encoded whole.
         """
         if self._ran:

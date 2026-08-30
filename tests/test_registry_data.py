@@ -13,61 +13,58 @@ from pathlib import Path
 import pytest
 import yaml
 
-import molhub
-from molhub import Molhub
+from molhub import Molhub, snapshot
 from molhub.manifest import Manifest
-from molhub.registry import Registry, RegistrySource
+from molhub.registry import Registry
 from molhub.sources import Drivers, Locator
 
-BUNDLED = Path(molhub.__file__).parent / "registry_data"
-SCHEMA = Path(molhub.__file__).parent / "schema" / "manifest.schema.yaml"
+SCHEMA = Path(__file__).resolve().parents[1] / "src" / "molhub" / "schema" / "manifest.schema.yaml"
 
 GITHUB_RAW_HOST = "raw.githubusercontent.com"
 COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}")
 
 
 def bundled_locators():
-    """Yield ``(coordinate, role, locator)`` for every locator in the bundled registry."""
-    for path in RegistrySource(BUNDLED).manifest_paths():
-        manifest = Manifest.from_path(path)
+    """Yield ``(coordinate, role, locator)`` for every locator in the Python catalog."""
+    for manifest in Registry.builtin():
         for role, artifact in manifest.artifacts.items():
             for locator in artifact.locators:
                 yield manifest.coordinate.canonical, role, locator
 
 
 class TestBundledRegistryIsUsable:
-    def test_it_ships(self):
-        assert BUNDLED.is_dir()
-
-    def test_every_manifest_parses(self):
-        for path in RegistrySource(BUNDLED).manifest_paths():
-            Manifest.from_path(path)
-
     def test_it_is_not_empty(self):
-        assert len(Registry.load(BUNDLED)) >= 1
+        assert len(Registry.builtin()) >= 1
 
     def test_a_fresh_hub_finds_it_without_configuration(self, monkeypatch):
         monkeypatch.delenv("MOLHUB_REGISTRY", raising=False)
         assert len(Molhub()) >= 1
 
-    def test_manifest_paths_match_their_coordinates(self):
-        """A misfiled manifest resolves under a name nobody will guess."""
-        for path in RegistrySource(BUNDLED).manifest_paths():
-            manifest = Manifest.from_path(path)
-            assert path.relative_to(BUNDLED).as_posix() == manifest.coordinate.relative_path()
+    def test_snapshot_lists_every_catalog_entry(self):
+        registry = Registry.builtin()
+        document = snapshot()
+        assert document["schema_version"] == 1
+        assert len(document["entries"]) == len(registry)
+
+    def test_artifacts_api_returns_the_python_catalog(self):
+        import molhub
+
+        files = molhub.artifacts("qm9@v2")
+        assert set(files) == {"main", "exclude"}
+        assert str(files["main"].locators[0]).startswith("figshare://")
 
     def test_every_manifest_validates_against_the_shipped_schema(self):
         jsonschema = pytest.importorskip("jsonschema")
         schema = yaml.safe_load(SCHEMA.read_text(encoding="utf-8"))
         validator = jsonschema.Draft202012Validator(schema)
-        for path in RegistrySource(BUNDLED).manifest_paths():
-            validator.validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        for manifest in Registry.builtin():
+            validator.validate(manifest.to_mapping())
 
 
 class TestPolymerTgEntry:
     @pytest.fixture
     def manifest(self):
-        return Molhub(BUNDLED).resolve("dataset:molcrafts/polymer-tg@1")
+        return Molhub().resolve("dataset:molcrafts/polymer-tg@1")
 
     def test_resolves(self, manifest):
         assert manifest.title.startswith("LAMALAB")
@@ -144,7 +141,7 @@ class TestTHEMolMbisEntry:
 
     @pytest.fixture
     def manifest(self) -> Manifest:
-        return Molhub(BUNDLED).resolve("dataset:themol/mbis@1")
+        return Molhub().resolve("dataset:themol/mbis@1")
 
     def test_atom_level_targets_are_the_fourteen_real_column_names(
         self, manifest: Manifest
@@ -201,7 +198,7 @@ class TestAgainstRealUpstream:
         Run with ``pytest -m network``.
         """
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/polymer-tg@1")
+        paths = Molhub().fetch("dataset:molcrafts/polymer-tg@1")
         assert paths["main"].stat().st_size == 6024335
         assert paths["main"].read_text(encoding="utf-8").startswith("PSMILES")
 
@@ -212,7 +209,7 @@ class TestQM9AgainstRealUpstream:
 
     def test_fetch_verifies_both_artifacts(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/qm9@v2")
+        paths = Molhub().fetch("dataset:molcrafts/qm9@v2")
         assert paths["main"].stat().st_size == 86144227
         assert paths["exclude"].stat().st_size == 486752
 
@@ -221,15 +218,15 @@ class TestQM9AgainstRealUpstream:
         from molhub.dataset.qm9 import _load_exclusion_list
 
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/qm9@v2", roles=["exclude"])
+        paths = Molhub().fetch("dataset:molcrafts/qm9@v2", roles=["exclude"])
         assert len(_load_exclusion_list(paths["exclude"])) == 3054
 
     def test_source_loads_the_documented_sample_count(self, tmp_path, monkeypatch):
         """133,885 raw minus 3,054 uncharacterized is the 130,831 README promises."""
-        from molhub.dataset import QM9Dataset
+        from molhub.dataset import QM9
 
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        assert len(QM9Dataset(tmp_path / "unused", hub=Molhub(BUNDLED))) == 130831
+        assert len(QM9(tmp_path / "unused", hub=Molhub()).load()) == 130831
 
 
 class TestLocatorsPinAVersion:
@@ -319,9 +316,7 @@ class TestLocatorsPinAVersion:
 
     def test_every_bundled_manifest_records_a_doi(self):
         missing = [
-            Manifest.from_path(p).coordinate.canonical
-            for p in RegistrySource(BUNDLED).manifest_paths()
-            if Manifest.from_path(p).doi is None
+            manifest.coordinate.canonical for manifest in Registry.builtin() if manifest.doi is None
         ]
         assert missing == [], f"manifests without a DOI: {missing}"
 

@@ -10,7 +10,7 @@ them without picking one:
 
 * :class:`~molhub.loader.naming.DatasetName` takes the revision as a keyword —
   ``DatasetName("themol/mbis", revision="1")`` — matching the ``revision=``
-  keyword the builder and ``load_dataset`` take, and ``resolve(registry)``
+  keyword the builder and ``load`` take, and ``resolve(registry)``
   returns a :class:`~molhub.coordinate.Coordinate` rather than its string form,
   since ``DatasetInfo.coordinate`` echoes the resolved object.
 * The ambiguous-ordering refusal is ``AmbiguousRevision``. The spec states the

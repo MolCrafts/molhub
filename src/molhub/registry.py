@@ -1,19 +1,11 @@
 """Registry — the registry of manifests a client resolves coordinates against.
 
-Static files, no service. A directory of YAML manifests is a complete, usable
-registry; the published CDN bundle is the same content aggregated for convenience.
-That is what keeps early operating cost near zero and what makes offline use —
-common on compute clusters — work without a special mode.
+The built-in catalog is Python: each dataset module declares a ``MANIFEST``
+and :meth:`Registry.builtin` collects them. A fresh install therefore
+resolves the built-in datasets with no config file and no network.
 
-Sources are tried in order:
-
-1. ``$MOLHUB_REGISTRY`` — a local directory. Offline work, development, and the
-   test suite all use this.
-2. The bundled snapshot shipped inside the package, so a fresh install can
-   resolve the built-in datasets with no network at all.
-
-A remote CDN source belongs here too and is deliberately absent until there is
-a published registry to point at; adding it is one more entry in this list.
+``$MOLHUB_REGISTRY`` still names an optional directory of extra YAML
+manifests (tests and a local overlay). The project itself ships none.
 """
 
 from __future__ import annotations
@@ -28,7 +20,6 @@ from molhub.manifest import Manifest
 __all__ = ["RegistrySource", "Registry", "UnknownArtifact"]
 
 ENV_VAR = "MOLHUB_REGISTRY"
-_BUNDLED = Path(__file__).parent / "registry_data"
 
 
 class UnknownArtifact(KeyError):
@@ -54,12 +45,19 @@ class RegistrySource:
 
     @classmethod
     def resolve(cls, root: str | Path | None = None) -> "RegistrySource":
-        """Pick a registry source: explicit path, then ``$MOLHUB_REGISTRY``, then bundled."""
+        """Pick a YAML overlay: explicit path, then ``$MOLHUB_REGISTRY``.
+
+        There is no bundled YAML directory. The package catalog is
+        :meth:`Registry.builtin`.
+        """
         if root is not None:
             return cls(root)
         if configured := os.environ.get(ENV_VAR):
             return cls(configured)
-        return cls(_BUNDLED)
+        raise FileNotFoundError(
+            f"{ENV_VAR} is unset. The package catalog is Registry.builtin(); "
+            "a directory path is only needed for a local YAML overlay."
+        )
 
     @property
     def root(self) -> Path:
@@ -91,21 +89,45 @@ class Registry:
         self._by_coordinate: dict[str, Manifest] = dict(manifests or {})
 
     @classmethod
-    def load(cls, source: RegistrySource | str | Path | None = None) -> "Registry":
-        """Load every manifest from *source*.
+    def builtin(cls) -> "Registry":
+        """The package catalog: every ``MANIFEST`` declared in Python."""
+        from molhub.catalog import builtin_manifests
+
+        return cls({manifest.coordinate.canonical: manifest for manifest in builtin_manifests()})
+
+    def snapshot(self) -> dict[str, object]:
+        """JSON-serialisable aggregate for the frontend and other non-Python clients.
+
+        Built from :meth:`Manifest.to_entry`. The Web build calls this through
+        the Python package — it does not walk a directory of YAML.
+        """
+        return {
+            "schema_version": 1,
+            "entries": [manifest.to_entry() for manifest in self.search()],
+        }
+
+    @classmethod
+    def load(cls, source: Registry | RegistrySource | str | Path | None = None) -> "Registry":
+        """Load a registry.
 
         Args:
-            source: An :class:`RegistrySource`, a directory path, or ``None`` to
-                use :meth:`RegistrySource.resolve`.
+            source: An already-built :class:`Registry` (returned as-is), an
+                :class:`RegistrySource`, a directory of extra YAML manifests,
+                or ``None``. ``None`` uses ``$MOLHUB_REGISTRY`` when set,
+                otherwise :meth:`builtin`.
 
         Returns:
-            The loaded registry; empty when the source directory is absent.
+            The loaded registry; empty when a given source directory is absent.
 
         Raises:
-            InvalidManifest: If any manifest in the source is malformed. A bad
-                entry fails loudly rather than being skipped — a silently
-                dropped dataset is worse than a broken registry.
+            InvalidManifest: If any YAML overlay in *source* is malformed.
         """
+        if isinstance(source, Registry):
+            return source
+        if source is None:
+            if not os.environ.get(ENV_VAR):
+                return cls.builtin()
+            source = RegistrySource.resolve()
         if not isinstance(source, RegistrySource):
             source = RegistrySource.resolve(source)
         manifests = {}

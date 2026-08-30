@@ -122,15 +122,20 @@ Python 与 TypeScript 两套客户端**必然漂移**，且靠 code review 兜�
 - 缓存磁盘布局写入规格，两端同机共享 `$MOLHUB_HOME` 互相命中
 - `schema_version` 版本化
 
-## 产品 monorepo + data-only registry
+## 产品 monorepo + Python catalog（取代 YAML registry）
 
-manifest 放在独立的 `molhub-registry` 仓，不放客户端仓。理由：外部贡献者提
-manifest 不应需要客户端仓写权限，也不应触发库发版。硬编码上游 URL 的形态已经
-消灭——四个数据源现在都只持有一个 `COORDINATE` 常量。
+**2026-08-18 改。** 制品参数写在 Python 里：每个数据集模块声明 ``MANIFEST``
+（locator / digest / size / targets），``Registry.builtin()`` 收集它们。
+``molhub.artifacts()`` / ``molhub.snapshot()`` 是给前端和其它客户端的 API。
+本仓不手写 YAML manifest，也不再捆绑 ``registry_data/**/*.yaml``。
 
-`molhub-registry` 只拥有 `artifacts/**/*.yaml`。Schema、validator、snapshot builder、
-Python/TypeScript SDK、Web 和 REST API 全在 `molhub`。Registry CI checkout 主仓工具链
-后验证数据；数据库 PR 不安装自己的 npm 工程，也不构建前端。
+Web 构建调用 Python 包 ``Registry.builtin().snapshot()`` 写出
+``apps/web/.generated/registry.json``，不扫 `molhub-registry/artifacts`。
+
+``$MOLHUB_REGISTRY`` 仍可指向一份本地 YAML overlay（测试或私有加料），
+项目本身没有这份配置文件。
+
+``spec/manifest.schema.yaml`` 仍是语言中立的 JSON Schema 契约（不是制品配置）。
 
 ### schema 的所有权与生成副本
 
@@ -221,33 +226,56 @@ schema 用 `anyOf: [{required: [digest]}, {required: [size]}]` 表达，Python �
 （`$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>`）。
 
 
-## [2026-08-15] User-facing API = HuggingFace datasets, records = Frame/Trajectory (operator override)
+## [2026-08-16] User-facing API = dataset class + name verbs
 
 <!-- mol:note:topic:hf-style-api -->
 
-**Rule (binding, operator-directed).** molhub's user surface copies HF
-`datasets` spelling: `molhub.load_dataset(name, split=..., streaming=...,
-revision=...)` / `load_dataset_builder(...).info` / `prepare(...)` (the
-save_to_disk-shaped materialization) / molnex `BlockDataset.load_from_disk`.
-`split` is an argument (PyTorch/HF idiom) — split tables are internal. Shard
-roles never appear on the user path; `info` describes content (features,
-splits, counts), not roles. The conveyor is invisible plumbing behind
-`streaming=True` and `prepare(...)`; the cross-repo seam is a block directory
-on disk.
+**Rule (binding, operator-directed).** A dataset is a class::
 
-**Records ARE molpy objects.** One geometry = `Frame` (per-atom supervision as
-`atoms` columns, e.g. `atomic_charge`; matrices as named COO blocks, e.g.
-`hessian{row,col,value}`; index tuples as valence-style blocks; scalars in
-`frame.meta` — the 0.13 write-through mapping). Multi-frame sampling unit =
-`Trajectory`. `Targets`/`MetaCodec` and the record dataclasses
-(HessianRecord/EnergyForceTrajectory/TorsionProfile/MBISRecord) are deleted —
-no wrapper objects on top of Frame, per the operator's explicit instruction.
+    from molhub.dataset import QM9
+    ds = QM9()
 
-**Why.** 「shard-000 语义不清 / 删除 Targets 都基于 Frame / SplitTable 和
-pytorch 对齐 / conveyor 参考 huggingface / 跨仓 API 直接抄 huggingface」
-(2026-08-15). This is the scoped operator override of the no-façade default
-(CLAUDE.md § Design preferences escape hatch): the FAÇADE is sanctioned for
-the loader surface only; internal layers (sources/, conveyor/) keep primitive
-single-responsibility types and the loader composes them.
+There is no `load_dataset` factory. Package verbs are name-only::
 
-**Status.** Redesign spec chain `hf-facade` in flight 2026-08-15.
+    import molhub as mh
+    mh.fetch("qm9")
+    mh.load("themol/mbis")
+    mh.search(query="themol")
+
+`load` / `fetch` / `search` do not encode the kind in the verb. The
+coordinate does. Splitting is `SubsetDataset(ds, indices)`. Published
+index lists come from `assignment(ds)`. Records are molpy `Frame` /
+`Trajectory`.
+
+**Supersedes.** `load_dataset` (with or without `split=`),
+`load_dataset_builder`.
+
+**Why.** 「移除load_dataset工厂函数 / from molhub.dataset import QM9 /
+mh.fetch/load 只靠名字区分」(2026-08-16).
+
+## [2026-08-20] Datasets record native units; molhub never converts
+
+<!-- mol:note:topic:native-units -->
+
+**Rule (binding, operator-directed).** Every dataset yields its source's
+labels in the source's *native* units, recorded verbatim, and declares
+them (`@dataset(units=…)` / `CollectionRole.units`). Unit conversion is
+the consumer's job — `molhub.dataset.transforms.UnitConvert` in-tree, or
+the consumer's own registry (molnex uses `molix.units`). No dataset class
+may bake a conversion factor into its read path.
+
+**Rule (binding, operator-directed).** All datasets share one shape —
+`@dataset` declaration, `load()` as the IO boundary, map-style
+`__len__`/`__getitem__` yielding molpy `Frame`/`Trajectory`, `COORDINATE`,
+`TARGET_SCHEMA`, `source_id`. molhub is a dataset/model *loader*: no
+per-dataset converter types, view wrappers, or training-side helpers.
+Extending molhub with a new dataset must require nothing beyond that shape.
+
+**Supersedes.** The eV→kcal/mol conversion inside `OMol25Small` (and the
+spec sentence "实现侧继续走已有 OMol25Small 的 molpy UnitSystem 换算" in
+`universal-class-i-01`); the short-lived `OMol25KcalConverter` /
+`OMol25KcalView` (2026-08-20, removed same day).
+
+**Why.** 「molhub不应该处理单位转换的问题，而是如实记录，转换是用户的事情；
+所有的dataset都应该有相同的架构 … 我们这个只是数据集、模型的加载器」
+(2026-08-20).

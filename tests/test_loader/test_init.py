@@ -1,11 +1,7 @@
-"""Tests for the two sanctioned free functions.
+"""Tests for the sanctioned free functions.
 
-Mirrors ``src/molhub/loader/__init__.py``. ``load_dataset`` and
-``load_dataset_builder`` are the whole of the façade's function surface and the
-only free functions the scoped operator override permits anywhere in molhub;
-they are thin delegations to :class:`~molhub.loader.builder.DatasetBuilder`, so
-what is pinned here is the *call shape*, not a second copy of the builder's
-behaviour.
+Mirrors ``src/molhub/loader/__init__.py``. ``load`` is the one read
+entry; ``prepare`` writes blocks. There is no builder on the public surface.
 
 ac-003 is complaint (3) made mechanical: ``split`` is a required keyword, as in
 PyTorch and as in ``datasets``' own idiom for a single split, and there is no
@@ -20,12 +16,10 @@ dict-of-splits container to return when it is omitted — omitting it is a
   ``except Exception``, which catches the bugs too. The list is checked
   mechanically, off the docstrings themselves, so a new ``Raises:`` entry for an
   unexported type fails here rather than in a user's traceback.
-* *The refusal for a missing ``split`` says where the names are.* The type is
-  unchanged (ac-003: a :class:`TypeError`), but "missing 1 required keyword-only
-  argument" is Python's sentence, not molhub's: it says what is absent and not
-  what to type next. Naming ``load_dataset_builder(name).info.splits`` costs a
-  sentinel default and one manual raise.
-* *``load_dataset`` is overloaded on ``streaming``.* One function returns two
+* *The refusal for a missing ``split`` names the argument.* The type is
+  unchanged (ac-003: a :class:`TypeError`). Discovery is ``molhub info`` or
+  ``UnknownSplit``, not a second Python type.
+* *``load`` is overloaded on ``streaming``.* One function returns two
   genuinely different things — a map-style dataset and a walk — and the runtime
   already knows which. :func:`typing.get_overloads` is what makes "an editor can
   tell them apart" a property of this repo rather than of a reader's IDE.
@@ -47,12 +41,9 @@ import pytest
 import molhub
 import molhub.loader
 from molhub.conveyor.errors import UnroutableUnitError, UnsupportedRecordError
-from molhub.conveyor.prepare import PreparedBlocks
 from molhub.conveyor.splits import SplitProvenanceMismatch
 from molhub.dataset.protocol import Dataset
-from molhub.loader.builder import DatasetBuilder
 from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
-from molhub.loader.info import Feature, SplitInfo
 from molhub.loader.mapstyle import UnknownRecordKey
 from molhub.loader.naming import AmbiguousRevision
 from molhub.loader.streaming import StreamingSplitDataset
@@ -68,7 +59,7 @@ from molhub.sources.errors import AllLocatorsFailed
 #: new ones mattered.
 #:
 #: ``AllLocatorsFailed`` joins them (re-evaluation, ruling 6): it is what
-#: ``load_dataset`` raises when every mirror of a published file is down, which
+#: ``load`` raises when every mirror of a published file is down, which
 #: is the one failure on this path that is nobody's bug and that a script has a
 #: real reason to catch — to retry, to fall back, to report. Reaching it means
 #: importing ``molhub.sources.errors``, a transport-layer module this façade
@@ -77,9 +68,6 @@ from molhub.sources.errors import AllLocatorsFailed
 RE_EXPORTED: Mapping[str, object] = {
     "AllLocatorsFailed": AllLocatorsFailed,
     "AmbiguousRevision": AmbiguousRevision,
-    "Feature": Feature,
-    "PreparedBlocks": PreparedBlocks,
-    "SplitInfo": SplitInfo,
     "SplitProvenanceMismatch": SplitProvenanceMismatch,
     "SplitTableUnavailable": SplitTableUnavailable,
     "UnknownRecordKey": UnknownRecordKey,
@@ -88,23 +76,18 @@ RE_EXPORTED: Mapping[str, object] = {
     "UnsupportedRecordError": UnsupportedRecordError,
 }
 
-#: The parameters of ``load_dataset``, in the order a reader meets them: what
+#: The parameters of ``load``, in the order a reader meets them: what
 #: names the data first, what selects it second, and the two injection seams
 #: last. Hard-coded, because "user-first" is a decision about order and an
 #: assertion derived from the signature would agree with any order at all.
 LOAD_DATASET_PARAMETERS: tuple[str, ...] = (
     "name",
-    "split",
     "revision",
     "streaming",
     "disk_budget",
     "registry",
     "hub",
 )
-
-#: The same, for the describing half. It takes no ``split``, no ``streaming``
-#: and no budget: it opens nothing.
-LOAD_DATASET_BUILDER_PARAMETERS: tuple[str, ...] = ("name", "revision", "registry", "hub")
 
 
 def raises_names(function: Callable[..., object]) -> tuple[str, ...]:
@@ -151,79 +134,60 @@ def catchable(name: str) -> object | None:
 
 
 class TestLoadDataset:
-    """One name, one split, one map-style dataset."""
+    """One name, the whole artifact, no split argument."""
 
     def test_it_is_reachable_from_the_package_root(self):
-        assert callable(molhub.load_dataset)
+        assert callable(molhub.load)
 
-    def test_omitting_split_is_a_type_error(self):
-        """Not a dict of splits, not a default of ``"train"`` — a missing argument."""
-        with pytest.raises(TypeError):
-            molhub.load_dataset("themol/mbis")
+    def test_the_primitive_is_the_dataset_class(self):
+        from molhub.dataset import QM9
 
-    def test_the_missing_split_refusal_names_the_argument(self):
-        """Whatever raises it, the word a reader greps for has to be in it."""
-        with pytest.raises(TypeError) as raised:
-            molhub.load_dataset("themol/mbis")
-        assert "split" in str(raised.value)
+        assert QM9.__name__ == "QM9"
 
-    def test_the_missing_split_refusal_names_the_discovery_call(self):
-        """Python's own sentence says what is absent and nothing about what to
-        type instead. The names are one call away, and this is the moment the
-        reader wants them — so the refusal hands over ``load_dataset_builder``
-        rather than making them go and find the docs."""
-        with pytest.raises(TypeError) as raised:
-            molhub.load_dataset("themol/mbis")
-        assert "load_dataset_builder" in str(raised.value)
+    def test_package_verbs_are_name_only(self):
+        assert callable(molhub.fetch)
+        assert callable(molhub.search)
+        assert callable(molhub.load)
 
-    def test_the_missing_split_refusal_names_the_attribute_that_lists_them(self):
-        """``.info.splits`` is the whole answer; naming the builder alone leaves
-        the reader one guess short."""
-        with pytest.raises(TypeError) as raised:
-            molhub.load_dataset("themol/mbis")
-        assert "info.splits" in str(raised.value)
-
-    def test_the_missing_split_refusal_is_raised_before_any_registry_is_read(self):
-        """No ``registry=``, no ``$MOLHUB_REGISTRY``, no home: a call with a
-        missing argument must not resolve a coordinate to find that out."""
-        with pytest.raises(TypeError):
-            molhub.load_dataset("themol/definitely-not-published")
-
-    def test_split_is_keyword_only(self, registry, hub, molhub_home):
-        """``load_dataset(name, "train")`` would make position 2 a second syntax."""
-        with pytest.raises(TypeError):
-            molhub.load_dataset("themol/mbis", "train", registry=registry, hub=hub)
+    def test_it_does_not_take_split(self):
+        assert "split" not in inspect.signature(molhub.load).parameters
 
     def test_it_returns_a_map_style_dataset(self, registry, hub, molhub_home):
-        dataset = molhub.load_dataset("themol/mbis", split="train", registry=registry, hub=hub)
+        dataset = molhub.load("themol/mbis", registry=registry, hub=hub)
         assert isinstance(dataset, Dataset)
 
-    def test_it_returns_the_split_that_was_asked_for(self, registry, hub, molhub_home):
-        dataset = molhub.load_dataset("themol/mbis", split="val", registry=registry, hub=hub)
-        assert len(dataset) == 2
+    def test_it_returns_the_whole_artifact(self, registry, hub, molhub_home):
+        dataset = molhub.load("themol/mbis", registry=registry, hub=hub)
+        assert len(dataset) == 6
 
-    def test_it_takes_the_revision_the_builder_takes(self, registry, hub, molhub_home):
-        dataset = molhub.load_dataset(
-            "themol/mbis", split="train", revision="1", registry=registry, hub=hub
-        )
-        assert len(dataset) == 3
+    def test_subset_is_how_you_split(self, registry, hub, molhub_home):
+        dataset = molhub.load("themol/mbis", registry=registry, hub=hub)
+        train = molhub.SubsetDataset(dataset, molhub.assignment(dataset)["train"])
+        assert len(train) == 3
+
+    def test_it_takes_revision(self, registry, hub, molhub_home):
+        dataset = molhub.load("themol/mbis", revision="1", registry=registry, hub=hub)
+        assert len(dataset) == 6
 
 
-class TestLoadDatasetBuilder:
-    """The discovery half: describe the dataset, download nothing."""
+class TestNoDatasetBuilderOnThePublicSurface:
+    """Discovery is ``molhub info`` / ``UnknownSplit``, not a second type."""
 
-    def test_it_is_reachable_from_the_package_root(self):
-        assert callable(molhub.load_dataset_builder)
+    def test_the_package_root_does_not_export_a_builder(self):
+        assert "load_dataset_builder" not in molhub.__all__
+        assert "load_dataset" not in molhub.__all__
+        assert "DatasetBuilder" not in molhub.__all__
+        assert not hasattr(molhub, "load_dataset_builder")
+        assert not hasattr(molhub, "load_dataset")
 
-    def test_it_returns_a_builder(self, registry, hub, molhub_home):
-        builder = molhub.load_dataset_builder("themol/mbis", registry=registry, hub=hub)
-        assert isinstance(builder, DatasetBuilder)
+    def test_the_loader_package_does_not_export_a_builder(self):
+        assert "load_dataset_builder" not in molhub.loader.__all__
+        assert "DatasetBuilder" not in molhub.loader.__all__
 
-    def test_the_builder_it_returns_describes_the_resolved_artifact(
-        self, registry, hub, molhub_home
-    ):
-        builder = molhub.load_dataset_builder("themol/mbis", registry=registry, hub=hub)
-        assert builder.info.coordinate.canonical == "dataset:themol/mbis@1"
+    def test_the_package_root_does_not_export_invented_record_types(self):
+        for name in ("Feature", "SplitInfo", "DatasetInfo", "PreparedBlocks"):
+            assert name not in molhub.__all__
+            assert not hasattr(molhub, name)
 
 
 class TestNoDatasetDictLikeContainer:
@@ -237,8 +201,8 @@ class TestNoDatasetDictLikeContainer:
         offenders = [name for name in molhub.loader.__all__ if "Dict" in name]
         assert offenders == []
 
-    def test_the_package_exports_the_two_free_functions(self):
-        assert {"load_dataset", "load_dataset_builder"} <= set(molhub.loader.__all__)
+    def test_the_package_exports_the_read_entry(self):
+        assert "load" in molhub.loader.__all__
 
 
 class TestRefusalExports:
@@ -255,7 +219,7 @@ class TestRefusalExports:
     Both are things a script legitimately catches — one to run the generator, the
     other to print the declared names — so both have to be importable from the
     same two places every other loader type is: :mod:`molhub.loader`, and the
-    package root beside ``load_dataset`` itself. An exception you can only catch
+    package root beside ``load`` itself. An exception you can only catch
     by importing a private module is one callers catch as ``Exception``.
     """
 
@@ -279,23 +243,15 @@ class TestRefusalExports:
         assert molhub.UnknownSplit is molhub.loader.UnknownSplit
 
     def test_an_unknown_split_is_still_a_key_error(self):
-        """``load_dataset``'s documented failure narrows; it does not change."""
+        """``load``'s documented failure narrows; it does not change."""
         assert issubclass(molhub.loader.UnknownSplit, KeyError)
 
 
 class TestReExportedNames:
-    """Everything a caller of the façade has to be able to *name*, at the root.
+    """Catchable refusals live on the package root. Record types do not.
 
-    Two kinds of name are in :data:`RE_EXPORTED` and both are here for the same
-    reason. The refusals (``AmbiguousRevision``, ``UnknownRecordKey``,
-    ``UnsupportedRecordError``, ``SplitProvenanceMismatch``,
-    ``UnroutableUnitError``) are written in ``except`` clauses; the records
-    (``PreparedBlocks``, ``Feature``, ``SplitInfo``) are written in type
-    annotations and ``isinstance`` checks by anyone who stores what ``prepare``
-    or ``.info`` handed back. Both spellings force the reader to import the
-    module that *defines* the thing — ``molhub.conveyor.prepare``,
-    ``molhub.loader.mapstyle`` — which is a private layering detail this façade
-    exists to hide, and which will move.
+    A caller writes ``except molhub.UnknownSplit``. They do not name
+    ``Feature``, ``PreparedBlocks``, or ``DatasetInfo``.
     """
 
     @pytest.mark.parametrize("name", sorted(RE_EXPORTED))
@@ -329,11 +285,9 @@ class TestDocumentedFailuresAreCatchable:
     ``NameError``.
     """
 
-    #: The three functions the operator override sanctions — the whole public
-    #: function surface, and therefore the whole of what has to be catchable.
+    #: The sanctioned public functions — the whole of what has to be catchable.
     FUNCTIONS: Mapping[str, Callable[..., object]] = {
-        "load_dataset": molhub.load_dataset,
-        "load_dataset_builder": molhub.load_dataset_builder,
+        "load": molhub.load,
         "prepare": molhub.prepare,
     }
 
@@ -359,7 +313,7 @@ class TestDocumentedFailuresAreCatchable:
 
     def test_the_reading_function_documents_its_failures_at_all(self):
         """Guards the two tests above from passing over an empty list."""
-        assert len(raises_names(molhub.load_dataset)) >= 4
+        assert len(raises_names(molhub.load)) >= 4
 
 
 class TestLoadDatasetOverloads:
@@ -378,17 +332,17 @@ class TestLoadDatasetOverloads:
     """
 
     def test_it_declares_overloads(self):
-        assert len(get_overloads(molhub.loader.load_dataset)) >= 2
+        assert len(get_overloads(molhub.loader.load)) >= 2
 
     def test_the_root_export_carries_the_same_overloads(self):
         """The re-export is the same object, so the registry lookup finds them."""
-        assert get_overloads(molhub.load_dataset) == get_overloads(molhub.loader.load_dataset)
+        assert get_overloads(molhub.load) == get_overloads(molhub.loader.load)
 
     def test_the_overloads_discriminate_on_the_streaming_literal(self):
         """Both literals appear, or the overloads do not distinguish anything."""
         declared = [
             str(overload.__annotations__.get("streaming", ""))
-            for overload in get_overloads(molhub.loader.load_dataset)
+            for overload in get_overloads(molhub.loader.load)
         ]
         assert any("True" in annotation for annotation in declared), declared
         assert any("False" in annotation for annotation in declared), declared
@@ -396,14 +350,14 @@ class TestLoadDatasetOverloads:
     def test_one_overload_returns_the_walk(self):
         returned = [
             str(overload.__annotations__.get("return", ""))
-            for overload in get_overloads(molhub.loader.load_dataset)
+            for overload in get_overloads(molhub.loader.load)
         ]
         assert any("StreamingSplitDataset" in annotation for annotation in returned), returned
 
     def test_another_overload_returns_the_map_style_dataset(self):
         returned = [
             str(overload.__annotations__.get("return", ""))
-            for overload in get_overloads(molhub.loader.load_dataset)
+            for overload in get_overloads(molhub.loader.load)
         ]
         assert any(
             "Dataset" in annotation and "StreamingSplitDataset" not in annotation
@@ -412,17 +366,14 @@ class TestLoadDatasetOverloads:
 
     def test_the_runtime_behaviour_is_unchanged_without_streaming(self, registry, hub, molhub_home):
         """An overload is a type-level statement; the call it describes still runs."""
-        dataset = molhub.load_dataset(
-            "themol/mbis", split="train", streaming=False, registry=registry, hub=hub
-        )
+        dataset = molhub.load("themol/mbis", streaming=False, registry=registry, hub=hub)
         assert isinstance(dataset, Dataset)
 
     def test_the_runtime_behaviour_is_unchanged_with_streaming(
         self, verified_registry, landing_hub
     ):
-        walk = molhub.load_dataset(
+        walk = molhub.load(
             "themol/mbis",
-            split="train",
             streaming=True,
             registry=verified_registry,
             hub=landing_hub,
@@ -444,10 +395,10 @@ class TestUserFirstSignatures:
     """
 
     def test_load_dataset_reads_user_first(self):
-        assert tuple(inspect.signature(molhub.load_dataset).parameters) == LOAD_DATASET_PARAMETERS
+        assert tuple(inspect.signature(molhub.load).parameters) == LOAD_DATASET_PARAMETERS
 
     def test_load_dataset_takes_the_name_positionally_and_nothing_else(self):
-        parameters = inspect.signature(molhub.load_dataset).parameters
+        parameters = inspect.signature(molhub.load).parameters
         assert parameters["name"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
         assert all(
             parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
@@ -457,15 +408,5 @@ class TestUserFirstSignatures:
     def test_load_dataset_puts_the_seams_last(self):
         """The claim in isolation, so a reordering that only moves ``streaming``
         still reports the part it did not fix."""
-        ordered = tuple(inspect.signature(molhub.load_dataset).parameters)
-        assert ordered[-2:] == ("registry", "hub")
-
-    def test_load_dataset_builder_reads_user_first(self):
-        assert (
-            tuple(inspect.signature(molhub.load_dataset_builder).parameters)
-            == LOAD_DATASET_BUILDER_PARAMETERS
-        )
-
-    def test_load_dataset_builder_puts_the_seams_last(self):
-        ordered = tuple(inspect.signature(molhub.load_dataset_builder).parameters)
+        ordered = tuple(inspect.signature(molhub.load).parameters)
         assert ordered[-2:] == ("registry", "hub")

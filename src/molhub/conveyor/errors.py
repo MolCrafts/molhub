@@ -44,9 +44,9 @@ class UnsupportedRecordError(PrepareError):
 
     Raised at *construction* for ``THEMolUnitEncoder(task="mbis")`` — whose
     atom-level electrostatics targets need column routes ``molix.block/1`` does
-    not define — and at ``encode`` for anything that is neither a
-    :class:`molpy.Frame` nor a :class:`molpy.Trajectory`. Encoding either "as far
-    as it goes" would produce a unit that silently lost its targets.
+    not define — and at ``encode`` for anything that is not a
+    :data:`~molpy.FrameCollection`. Encoding either "as far as it goes" would
+    produce a unit that silently lost its targets.
 
     The MBIS refusal is keyed on the task rather than on the record because a
     record is a molpy object: after ``hf-facade-02-frame-records`` an MBIS frame

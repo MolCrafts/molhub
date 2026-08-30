@@ -43,7 +43,7 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pytest
-from molpy import Block, Frame, Trajectory
+from molpy import Block, Frame
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder
 from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
@@ -257,30 +257,28 @@ def _bondless_frame() -> Frame:
     )
 
 
-def _relax_trajectory() -> Trajectory:
+def _relax_frames() -> tuple[Frame, ...]:
     """One molecule's whole relaxation — two frames, no scan block."""
-    return Trajectory(
-        [
-            _water_frame(
-                WATER_EQ_POS,
-                molecule_id="water-relax",
-                forces=WATER_EQ_FORCES,
-                targets={"energy": WATER_ENERGIES[0]},
-            ),
-            _water_frame(
-                WATER_STEP_POS,
-                molecule_id="water-relax",
-                forces=WATER_STEP_FORCES,
-                targets={"energy": WATER_ENERGIES[1]},
-            ),
-        ]
+    return (
+        _water_frame(
+            WATER_EQ_POS,
+            molecule_id="water-relax",
+            forces=WATER_EQ_FORCES,
+            targets={"energy": WATER_ENERGIES[0]},
+        ),
+        _water_frame(
+            WATER_STEP_POS,
+            molecule_id="water-relax",
+            forces=WATER_STEP_FORCES,
+            targets={"energy": WATER_ENERGIES[1]},
+        ),
     )
 
 
-def _torsion_trajectory(*, scan_on_frame_zero: bool = True) -> Trajectory:
+def _torsion_frames(*, scan_on_frame_zero: bool = True) -> tuple[Frame, ...]:
     """One whole scan; every frame carries the scan block, unless asked otherwise.
 
-    ``scan_on_frame_zero=False`` builds the pathological trajectory whose first
+    ``scan_on_frame_zero=False`` builds the pathological collection whose first
     frame has no ``scan`` block and whose second does — the encoder inspects
     frame 0, so this must encode as a plain multi-frame unit.
     """
@@ -289,22 +287,22 @@ def _torsion_trajectory(*, scan_on_frame_zero: bool = True) -> Trajectory:
     if scan_on_frame_zero:
         _with_scan_block(first)
     _with_scan_block(second)
-    return Trajectory([first, second])
+    return (first, second)
 
 
 @pytest.fixture
 def frame_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="hessian").encode(_hessian_frame())
+    return THEMolUnitEncoder(task="hessian").encode((_hessian_frame(),))
 
 
 @pytest.fixture
 def relax_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="hessian-relax").encode(_relax_trajectory())
+    return THEMolUnitEncoder(task="hessian-relax").encode(_relax_frames())
 
 
 @pytest.fixture
 def scan_unit() -> RawUnit:
-    return THEMolUnitEncoder(task="torsion-scan").encode(_torsion_trajectory())
+    return THEMolUnitEncoder(task="torsion-scan").encode(_torsion_frames())
 
 
 class TestTHEMolUnitEncoder:
@@ -356,7 +354,7 @@ class TestTHEMolUnitEncoder:
         assert pos.tolist() == [list(row) for row in HOOH_CIS_POS + HOOH_TRANS_POS]
 
     def test_a_bondless_molecule_still_carries_its_atoms(self) -> None:
-        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_frame())
+        unit = THEMolUnitEncoder(task="hessian").encode((_bondless_frame(),))
         assert unit.topology["Z"].tolist() == [10]
         assert (unit.n_atoms, unit.n_frames) == (1, 1)
 
@@ -368,7 +366,7 @@ class TestTHEMolUnitEncoder:
             bonds={"atomi": WATER_BOND_ATOMI, "atomj": WATER_BOND_ATOMJ},
         )
         with pytest.raises(IncompleteRecordError):
-            THEMolUnitEncoder(task="hessian").encode(record)
+            THEMolUnitEncoder(task="hessian").encode((record,))
 
     def test_an_integer_bond_type_serves_as_the_order_fallback(self) -> None:
         """``bond_number`` first, then ``bond_type`` — the reader writes either.
@@ -385,7 +383,7 @@ class TestTHEMolUnitEncoder:
             molecule_id="water-typed",
             bonds=_water_bonds(order_column="bond_type"),
         )
-        unit = THEMolUnitEncoder(task="hessian").encode(record)
+        unit = THEMolUnitEncoder(task="hessian").encode((record,))
         assert unit.topology["bond_type"].dtype.str == "<i4"
         assert unit.topology["bond_type"].tolist() == [1, 1]
 
@@ -492,14 +490,14 @@ class TestTHEMolUnitEncoder:
     def test_the_scan_block_is_inspected_on_frame_zero(self) -> None:
         """Frame 0 decides the schema; a block that appears later is not a scan."""
         unit = THEMolUnitEncoder(task="torsion-scan").encode(
-            _torsion_trajectory(scan_on_frame_zero=False)
+            _torsion_frames(scan_on_frame_zero=False)
         )
         assert "torsion_atoms" not in unit.topology
         assert "torsion_angle" not in unit.frames
 
     def test_a_bondless_frame_yields_empty_bond_columns(self) -> None:
         """Empty, not missing: the block freezes its schema on the first unit."""
-        unit = THEMolUnitEncoder(task="hessian").encode(_bondless_frame())
+        unit = THEMolUnitEncoder(task="hessian").encode((_bondless_frame(),))
         assert set(unit.topology) == set(HESSIAN_TOPOLOGY_COLUMNS)
         for name in ("bond_atomi", "bond_atomj", "bond_type"):
             assert unit.topology[name].shape == (0,)
@@ -508,16 +506,14 @@ class TestTHEMolUnitEncoder:
 
     def test_a_ragged_trajectory_of_frames_is_rejected(self) -> None:
         """``k * N`` is what makes the two-level layout valid; a stack would lie."""
-        record = Trajectory(
-            [
-                _water_frame(
-                    WATER_EQ_POS,
-                    molecule_id="water-ragged",
-                    forces=WATER_EQ_FORCES,
-                    targets={"energy": WATER_ENERGIES[0]},
-                ),
-                _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0]),
-            ]
+        record = (
+            _water_frame(
+                WATER_EQ_POS,
+                molecule_id="water-ragged",
+                forces=WATER_EQ_FORCES,
+                targets={"energy": WATER_ENERGIES[0]},
+            ),
+            _hooh_frame(HOOH_CIS_POS, energy=HOOH_ENERGIES[0], angle=HOOH_ANGLES[0]),
         )
         with pytest.raises(IncompleteRecordError):
             THEMolUnitEncoder(task="hessian-relax").encode(record)
@@ -559,4 +555,4 @@ class TestRawUnit:
             self._unit().key = "somewhere-else"  # type: ignore[misc]
 
     def test_the_encoder_returns_a_raw_unit(self) -> None:
-        assert isinstance(THEMolUnitEncoder(task="hessian").encode(_hessian_frame()), RawUnit)
+        assert isinstance(THEMolUnitEncoder(task="hessian").encode((_hessian_frame(),)), RawUnit)

@@ -25,7 +25,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from molpy import Block, Box, Frame, MolRec, Trajectory
+from molpy import Block, Box, Frame, Trajectory
+
+try:  # molpy >= 0.14 renamed MolRec -> Record
+    from molpy import Record as MolRec
+except ImportError:  # molpy 0.13 still spells it MolRec
+    from molpy import MolRec
 
 from molhub.dataset import Dataset
 from molhub.dataset.molrec import MolRecDataset
@@ -190,77 +195,78 @@ class TestMolRecRecordToSample:
 
     def test_sample_is_a_molpy_frame(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        assert isinstance(frames[0], Frame)
+        assert len(frames[0]) == 1
+        assert isinstance(frames[0][0], Frame)
 
     def test_atoms_block_columns(self, conformer_record):
-        atoms = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]["atoms"]
+        atoms = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]["atoms"]
         for column in ("element", "x", "y", "z", "number"):
             assert column in atoms
 
     def test_heterogeneous_atom_counts_are_preserved(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        assert [frames[i]["atoms"].nrows for i in range(len(frames))] == [5, 3, 4]
+        assert [frames[i][0]["atoms"].nrows for i in range(len(frames))] == [5, 3, 4]
 
     def test_atomic_numbers_are_mapped_from_symbols(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        assert list(frames[0]["atoms"]["number"]) == _CH4_Z
-        assert list(frames[1]["atoms"]["number"]) == _H2O_Z
-        assert list(frames[2]["atoms"]["number"]) == _NH3_Z
+        assert list(frames[0][0]["atoms"]["number"]) == _CH4_Z
+        assert list(frames[1][0]["atoms"]["number"]) == _H2O_Z
+        assert list(frames[2][0]["atoms"]["number"]) == _NH3_Z
 
     def test_positions_round_trip_losslessly(self, conformer_record):
         """Position tolerance 1e-12; the write→read path must not perturb them."""
-        atoms = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[1]["atoms"]
+        atoms = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[1][0]["atoms"]
         assert np.allclose(np.asarray(atoms["x"]), _H2O_POS[:, 0], atol=1e-12)
         assert np.allclose(np.asarray(atoms["y"]), _H2O_POS[:, 1], atol=1e-12)
         assert np.allclose(np.asarray(atoms["z"]), _H2O_POS[:, 2], atol=1e-12)
 
     def test_box_is_carried_onto_the_frame(self, conformer_record):
-        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]
+        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]
         assert np.allclose(np.asarray(frame.box.matrix), np.eye(3) * _BOX_EDGE, atol=1e-12)
 
     def test_scalar_observables_become_graph_level_targets(self, conformer_record):
-        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]
+        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]
         assert set(frame.meta) == {"U0", "gap"}
 
     def test_target_names_strip_the_teacher_prefix(self, conformer_record):
-        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]
+        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]
         assert not any(key.startswith("teacherA.") for key in frame.meta)
 
     def test_scalar_target_values_are_per_frame(self, conformer_record):
         """Energy tolerance 1e-10 — the write→read path is expected to be exact."""
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i].meta["U0"]) for i in range(len(frames))]
+        got = [float(frames[i][0].meta["U0"]) for i in range(len(frames))]
         for value, want in zip(got, _U0):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_second_scalar_target_is_not_mixed_with_the_first(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i].meta["gap"]) for i in range(len(frames))]
+        got = [float(frames[i][0].meta["gap"]) for i in range(len(frames))]
         for value, want in zip(got, _GAP):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_scalar_target_is_a_plain_float(self, conformer_record):
-        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0]
+        frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]
         assert isinstance(frame.meta["U0"], float)
 
     def test_repeated_topology_atomic_numbers(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
-        assert list(frames[0]["atoms"]["number"]) == _DIMER_Z
+        assert list(frames[0][0]["atoms"]["number"]) == _DIMER_Z
 
     def test_vector_observable_becomes_atom_level_columns(self, force_record):
-        atoms = MolRecDataset(force_record.path, teacher_id="teacherA").load()[0]["atoms"]
+        atoms = MolRecDataset(force_record.path, teacher_id="teacherA").load()[0][0]["atoms"]
         for column in ("fx", "fy", "fz"):
             assert column in atoms
 
     def test_force_columns_have_one_row_per_atom(self, force_record):
-        atoms = MolRecDataset(force_record.path, teacher_id="teacherA").load()[0]["atoms"]
+        atoms = MolRecDataset(force_record.path, teacher_id="teacherA").load()[0][0]["atoms"]
         assert np.asarray(atoms["fx"]).shape == (3,)
 
     def test_force_values_round_trip_losslessly(self, force_record):
         """Force tolerance 1e-8; the fixture values are binary-exact."""
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
         for i in range(len(frames)):
-            atoms = frames[i]["atoms"]
+            atoms = frames[i][0]["atoms"]
             assert np.allclose(np.asarray(atoms["fx"]), _FORCES_A[i, :, 0], atol=1e-8)
             assert np.allclose(np.asarray(atoms["fy"]), _FORCES_A[i, :, 1], atol=1e-8)
             assert np.allclose(np.asarray(atoms["fz"]), _FORCES_A[i, :, 2], atol=1e-8)
@@ -309,18 +315,18 @@ class TestMolRecTargetSchema:
 
 class TestMolRecTeacherIsolation:
     def test_a_teacher_view_sees_only_its_own_targets(self, force_record):
-        frame = MolRecDataset(force_record.path, teacher_id="teacherB").load()[0]
+        frame = MolRecDataset(force_record.path, teacher_id="teacherB").load()[0][0]
         assert set(frame.meta) == {"energy"}
 
     def test_teacher_a_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i].meta["energy"]) for i in range(len(frames))]
+        got = [float(frames[i][0].meta["energy"]) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_A):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_teacher_b_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherB").load()
-        got = [float(frames[i].meta["energy"]) for i in range(len(frames))]
+        got = [float(frames[i][0].meta["energy"]) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_B):
             assert value == pytest.approx(want, abs=1e-10)
 
@@ -364,7 +370,7 @@ class TestMolRecSubset:
 
     def test_total_keeps_the_leading_frames(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA", total=2).load()
-        assert [frames[i]["atoms"].nrows for i in range(len(frames))] == [5, 3]
+        assert [frames[i][0]["atoms"].nrows for i in range(len(frames))] == [5, 3]
 
     def test_total_larger_than_the_record_is_a_no_op(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA", total=99).load()

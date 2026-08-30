@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -14,21 +12,9 @@ import molhub
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, ZincTypingDataset
 from molhub.dataset.definition import DatasetManifest
-from molhub.dataset.zinc_typing import COORDINATE
+from molhub.dataset.zinc_typing import COORDINATE, MANIFEST
 from molhub.loader.info import Feature
-from molhub.manifest import Manifest
-
-_MANIFEST_BUNDLED = (
-    Path(molhub.__file__).parent / "registry_data" / Coordinate.parse(COORDINATE).relative_path()
-)
-# tests/test_dataset/ → parents[2] is the molhub repo root.
-_MANIFEST_REGISTRY = (
-    Path(__file__).resolve().parents[2]
-    / ".."
-    / "molhub-registry"
-    / "artifacts"
-    / Coordinate.parse(COORDINATE).relative_path()
-).resolve()
+from tests.test_dataset.conftest import FakeHub
 
 
 def _write_molecule(
@@ -76,44 +62,19 @@ def write_fixture(root: Path) -> Path:
     return root
 
 
-@dataclass
-class FakeHub:
-    paths: dict[str, Path] = field(default_factory=dict)
-    calls: list[tuple[str, list[str] | None]] = field(default_factory=list)
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self.paths) if roles is None else roles
-        return {role: self.paths[role] for role in wanted}
-
-
 @pytest.fixture
 def fixture_root(tmp_path: Path) -> Path:
     return write_fixture(tmp_path / "zinc")
 
 
 class TestZincTypingManifest:
-    def test_bundled_manifest_loads(self):
-        m = Manifest.from_path(_MANIFEST_BUNDLED)
-        assert m is not None
-
-    def test_registry_manifest_loads(self):
-        assert _MANIFEST_REGISTRY.is_file(), _MANIFEST_REGISTRY
-        m = Manifest.from_path(_MANIFEST_REGISTRY)
-        assert m is not None
-
-    def test_dual_write_content_identical(self):
-        a = _MANIFEST_BUNDLED.read_text()
-        b = _MANIFEST_REGISTRY.read_text()
-        assert a == b
-
-    def test_manifest_identity_fields(self):
-        text = _MANIFEST_BUNDLED.read_text()
-        assert "namespace: espaloma" in text
-        assert "name: zinc-typing" in text
-        assert 'version: "1"' in text or "version: 1" in text
-        assert "digest:" in text
-        assert "locators:" in text
+    def test_catalog_manifest_identity(self):
+        assert MANIFEST.coordinate.canonical == COORDINATE
+        assert MANIFEST.coordinate.namespace == "espaloma"
+        assert MANIFEST.coordinate.name == "zinc-typing"
+        assert MANIFEST.coordinate.version == "1"
+        assert MANIFEST.artifact("main").digest is not None
+        assert MANIFEST.artifact("main").locators
 
 
 class TestZincTypingDataset:
@@ -121,10 +82,13 @@ class TestZincTypingDataset:
         assert COORDINATE == "dataset:espaloma/zinc-typing@1"
         assert ZincTypingDataset.COORDINATE == COORDINATE
 
-    def test_no_url_literals_in_adapter(self):
-        src = Path(molhub.__file__).parent / "dataset" / "zinc_typing.py"
-        text = src.read_text()
-        assert re.search(r"https?://|figshare://|zenodo://|hf://", text) is None
+    def test_locators_live_on_the_catalog_entry(self):
+        locator = MANIFEST.artifact("main").locators[0]
+        assert str(locator).startswith("https://")
+        assert (
+            "BASE_URL"
+            not in Path(molhub.__file__).parent.joinpath("dataset", "zinc_typing.py").read_text()
+        )
 
     def test_offline_len_and_source_id(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
@@ -170,7 +134,7 @@ class TestZincTypingDataset:
 
     def test_frame_contract(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
-        frame = ds[0]
+        frame = ds[0][0]
         assert frame.meta["molecule_id"] == "m00"
         atoms = frame["atoms"]
         n = len(atoms["number"])
@@ -185,7 +149,7 @@ class TestZincTypingDataset:
     def test_source_order_preserved(self, fixture_root: Path):
         ds = ZincTypingDataset(fixture_root, split="train", download=False)
         assert ds.molecule_ids == ["m00", "m01", "m02"]
-        assert [ds[i].meta["molecule_id"] for i in range(len(ds))] == [
+        assert [ds[i][0].meta["molecule_id"] for i in range(len(ds))] == [
             "m00",
             "m01",
             "m02",
@@ -214,7 +178,7 @@ class TestZincTypingDataset:
         ds = ZincTypingDataset(tmp_path / "empty", split="val", download=True, hub=hub)
         assert hub.calls == [(COORDINATE, ["main"])]
         assert len(ds) == 1
-        assert ds[0].meta["molecule_id"] == "m03"
+        assert ds[0][0].meta["molecule_id"] == "m03"
 
     def test_unknown_split_raises(self, fixture_root: Path):
         with pytest.raises(ValueError, match="split"):

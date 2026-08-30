@@ -1,55 +1,52 @@
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { RegistryBuilder } from "@molcrafts/molhub-registry-tools";
 
 const webRoot = path.resolve(import.meta.dirname, "..");
-const localRegistryArtifacts = path.resolve(webRoot, "../../../molhub-registry/artifacts");
-const configuredSnapshot = process.env.MOLHUB_REGISTRY_JSON;
+const repoRoot = path.resolve(webRoot, "../..");
 const destinationDirectory = path.resolve(webRoot, ".generated");
 const destination = path.resolve(destinationDirectory, "registry.json");
 
-await mkdir(destinationDirectory, { recursive: true });
-const source = configuredSnapshot ? path.resolve(process.cwd(), configuredSnapshot) : destination;
+const python = process.env.MOLHUB_PYTHON ?? "uv";
+const pythonArgs =
+  python === "uv"
+    ? [
+        "run",
+        "python",
+        "-c",
+        "from molhub.registry import Registry; import json; print(json.dumps(Registry.builtin().snapshot(), indent=2))",
+      ]
+    : [
+        "-c",
+        "from molhub.registry import Registry; import json; print(json.dumps(Registry.builtin().snapshot(), indent=2))",
+      ];
 
-if (configuredSnapshot) {
-  await copyFile(source, destination);
-} else {
-  try {
-    new RegistryBuilder().build(localRegistryArtifacts, destinationDirectory);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      [
-        `Could not build the MolHub registry from ${localRegistryArtifacts}.`,
-        "Keep molhub-registry beside molhub, or set MOLHUB_REGISTRY_JSON to a generated snapshot.",
-        detail,
-      ].join("\n"),
-    );
-  }
-}
-
-let raw: string;
-try {
-  raw = await readFile(destination, "utf8");
-} catch (error) {
-  const detail = error instanceof Error ? error.message : String(error);
+const result = spawnSync(python, pythonArgs, {
+  cwd: repoRoot,
+  encoding: "utf8",
+});
+if (result.status !== 0) {
   throw new Error(
-    [`Could not read the MolHub registry snapshot at ${destination}.`, detail].join("\n"),
+    [
+      "Could not load artifacts from the molhub Python package.",
+      "The Web catalog is Registry.builtin().snapshot() — there is no YAML registry to walk.",
+      result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}`,
+    ].join("\n"),
   );
 }
 
+const raw = result.stdout;
 const snapshot: unknown = JSON.parse(raw);
 if (!isRegistrySnapshot(snapshot)) {
   throw new Error(
-    `${source} is not a supported MolHub registry snapshot (expected schema_version 1 and an entries array).`,
+    "Python Registry.builtin().snapshot() is not a supported MolHub registry snapshot (expected schema_version 1 and an entries array).",
   );
 }
 
-console.log(
-  configuredSnapshot
-    ? `Synced ${snapshot.entries.length} registry entries from ${source}.`
-    : `Built ${snapshot.entries.length} registry entries from ${localRegistryArtifacts}.`,
-);
+await mkdir(destinationDirectory, { recursive: true });
+await writeFile(destination, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+
+console.log(`Synced ${snapshot.entries.length} registry entries from molhub.Registry.builtin().`);
 
 function isRegistrySnapshot(value: unknown): value is { schema_version: 1; entries: unknown[] } {
   if (typeof value !== "object" || value === null) return false;

@@ -16,6 +16,7 @@ import pytest
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, ThreeBPADataset
 from molhub.dataset.threebpa import COORDINATE
+from tests.test_dataset.conftest import FakeHub
 
 # Two structures in the shape the real files use: seven columns per atom
 # (species, x, y, z, fx, fy, fz) and an ``energy=`` token in a comment line
@@ -38,23 +39,6 @@ H -0.629 0.631 -0.629 0.00 0.00 -0.01
 """
 
 
-class FakeHub:
-    """An :class:`~molhub.dataset.hub.ArtifactHub` serving files already on disk.
-
-    Records what was asked for, so the retrieval path can be exercised with no
-    registry, no driver, and no network.
-    """
-
-    def __init__(self, paths: dict[str, Path]) -> None:
-        self._paths = paths
-        self.calls: list[tuple[str, list[str] | None]] = []
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self._paths) if roles is None else roles
-        return {role: self._paths[role] for role in wanted}
-
-
 @pytest.fixture
 def sample_xyz_path(tmp_path) -> Path:
     """A local 3BPA-shaped file, as a user who downloaded one would have."""
@@ -73,46 +57,46 @@ class TestThreeBPADataset:
         assert isinstance(ThreeBPADataset(sample_xyz_path, tag="train_300K"), Dataset)
 
     def test_atoms_block(self, sample_xyz_path):
-        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]
+        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]
         for column in ("element", "x", "y", "z", "number", "fx", "fy", "fz"):
             assert column in atoms
 
     def test_natoms(self, sample_xyz_path):
         src = ThreeBPADataset(sample_xyz_path, tag="train_300K")
-        assert src[0]["atoms"].nrows == 5
-        assert src[1]["atoms"].nrows == 5
+        assert src[0][0]["atoms"].nrows == 5
+        assert src[1][0]["atoms"].nrows == 5
 
     def test_element_dtype(self, sample_xyz_path):
-        elem = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]["element"]
+        elem = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]["element"]
         assert elem.dtype.kind == "U"
 
     def test_atomic_numbers(self, sample_xyz_path):
-        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]
+        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]
         assert list(atoms["number"]) == [6, 1, 1, 1, 1]
 
     def test_number_dtype(self, sample_xyz_path):
-        num = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]["number"]
+        num = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]["number"]
         assert np.issubdtype(num.dtype, np.integer)
 
     def test_coord_dtype(self, sample_xyz_path):
-        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]
+        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]
         assert atoms["x"].dtype == np.float64
         assert atoms["y"].dtype == np.float64
         assert atoms["z"].dtype == np.float64
 
     def test_energy_in_metadata(self, sample_xyz_path):
         src = ThreeBPADataset(sample_xyz_path, tag="train_300K")
-        assert src[0].meta["energy"] == pytest.approx(-40.50)
-        assert src[1].meta["energy"] == pytest.approx(-40.45)
+        assert src[0][0].meta["energy"] == pytest.approx(-40.50)
+        assert src[1][0].meta["energy"] == pytest.approx(-40.45)
 
     def test_lattice_token_is_not_mistaken_for_the_energy(self, sample_xyz_path):
         """``Lattice="…"`` splits into bare numeric tokens; only ``energy=`` counts."""
-        frame = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]
+        frame = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]
         assert set(frame.meta) == {"energy"}
         assert frame.meta["energy"] == pytest.approx(-40.50)
 
     def test_forces_shape(self, sample_xyz_path):
-        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0]["atoms"]
+        atoms = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]
         assert atoms["fx"].shape == (5,)
         assert atoms["fy"].shape == (5,)
         assert atoms["fz"].shape == (5,)
@@ -135,7 +119,7 @@ class TestThreeBPADataset:
     #
     #   README.md:309
     #       "Energies are in eV and forces in eV/Å, as distributed."
-    #   src/molhub/registry_data/dataset/molcrafts/3bpa/v1.yaml:39 (description)
+    #   src/molhub/dataset/threebpa.py (MANIFEST.description)
     #       "Distances in angstrom, energies in eV, forces in eV/angstrom."
     #
     # The pinned spelling is the registry entry's ASCII ``eV/angstrom``, not the

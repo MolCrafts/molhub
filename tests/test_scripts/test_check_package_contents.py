@@ -58,7 +58,9 @@ ALREADY_REQUIRED: frozenset[str] = frozenset(
     {
         "molhub/cli.py",
         "molhub/schema/manifest.schema.yaml",
-        "molhub/registry_data/dataset/molcrafts/qm9/v2.yaml",
+        "molhub/catalog.py",
+        "molhub/dataset/qm9.py",
+        "molhub/dataset/themol_files.py",
     }
 )
 

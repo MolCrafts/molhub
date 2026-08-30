@@ -136,7 +136,7 @@ UNTABLED_THEMOL: list[str] = ["themol/hessian-relax", "themol/torsion-relax"]
 #: What ``DatasetInfo.record_type`` says for a dataset the table does not reach:
 #: the builder gets there through the declaration entry, so with no entry there
 #: is no class to read a parameterized record type off.
-UNDECLARED_RECORD_TYPE = "Frame | Trajectory"
+UNDECLARED_RECORD_TYPE = "FrameCollection"
 
 #: Two 3BPA structures' worth of extended XYZ, energy tag and forces included —
 #: the shape ``ThreeBPADataset`` parses. Distinct per-file structure counts (see
@@ -346,7 +346,7 @@ class TestDatasetBuilder:
         assert len(view) == 3
 
     def test_split_view_reads_the_records_of_that_split(self, builder):
-        assert builder.split_view("train")[0].meta["source_record_id"] == "mbis-a"
+        assert builder.split_view("train")[0][0].meta["source_record_id"] == "mbis-a"
 
     # -- what a builder says when it is echoed -----------------------------
     #
@@ -490,8 +490,8 @@ class TestThreeBPASplits:
     **These tests are RED against the code as landed.**
     ``src/molhub/loader/builder.py:314`` declares
     ``NAMES = ("train", "test_300K", "test_600K", "test_1200K")``, but the
-    published training file — the manifest role at
-    ``src/molhub/registry_data/dataset/molcrafts/3bpa/v1.yaml`` and the tag
+    published training file — the manifest role on
+    ``src/molhub/dataset/threebpa.py`` ``MANIFEST`` and the tag
     ``ThreeBPADataset.SPLITS`` accepts — is ``train_300K``. ``view()`` fetches
     ``roles=[split]``, so the name ``"train"`` addresses a role no 3BPA manifest
     has. Because ``.info`` counts *every* declared name, that also takes down
@@ -556,7 +556,7 @@ class TestThreeBPASplits:
         assert isinstance(view, ThreeBPADataset)
         assert view.tag == "test_600K"
         assert len(view) == 1
-        assert view[0].meta["energy"] == -1.5
+        assert view[0][0].meta["energy"] == -1.5
 
     # -- reachability, ruling 3: the name is checked before the bytes ------
     #
@@ -583,7 +583,7 @@ class TestThreeBPASplits:
         assert all(name in message for name in ThreeBPASplits.NAMES)
 
     def test_the_unknown_split_error_is_still_a_key_error(self, builder: DatasetBuilder):
-        """``load_dataset`` has always documented ``KeyError``; the type narrows it."""
+        """``load`` has always documented ``KeyError``; the type narrows it."""
         assert issubclass(loader_error("UnknownSplit"), KeyError)
         with pytest.raises(KeyError):
             builder.split_view("typo")
@@ -880,7 +880,7 @@ class TestWholeViewFallback:
 
     The rule has one precondition, and it is the whole of why ``revmd17`` is not
     here: the dataset class has to be constructible **from a coordinate and a
-    hub alone**. ``QM9Dataset(root, download=True, hub=hub)`` is — ``root`` is
+    hub alone**. ``QM9(root, download=True, hub=hub)`` is — ``root`` is
     ignored once the hub serves the two published roles — and so is
     ``CSVDataset(path)`` over the one file ``polymer-tg`` publishes.
 
@@ -909,7 +909,7 @@ class TestWholeViewFallback:
     def test_the_provenance_names_the_class_that_counted_it(self, builder: DatasetBuilder):
         """A count with no provenance is a number nobody can re-derive, and here
         the answer is "the dataset class read it", not "a table said so"."""
-        assert "QM9Dataset" in builder.info.splits[0].provenance
+        assert "QM9" in builder.info.splits[0].provenance
 
     def test_the_provenance_says_the_split_is_the_whole_content(self, builder: DatasetBuilder):
         """``train`` usually means "the training portion". Here it means all of
@@ -921,24 +921,18 @@ class TestWholeViewFallback:
         assert builder.describe_download_size == QM9_DOWNLOAD_SIZE == 3145728
 
     def test_load_dataset_returns_a_map_style_dataset(self, qm9_registry, qm9_hub: FakeHub):
-        view = molhub.loader.load_dataset(
-            "qm9", split=WHOLE_VIEW_SPLIT, registry=qm9_registry, hub=qm9_hub
-        )
+        view = molhub.loader.load("qm9", registry=qm9_registry, hub=qm9_hub)
         assert isinstance(view, Dataset)
 
     def test_the_view_holds_every_record(self, qm9_registry, qm9_hub: FakeHub):
-        view = molhub.loader.load_dataset(
-            "qm9", split=WHOLE_VIEW_SPLIT, registry=qm9_registry, hub=qm9_hub
-        )
+        view = molhub.loader.load("qm9", registry=qm9_registry, hub=qm9_hub)
         assert len(view) == QM9_RECORD_COUNT
 
     def test_the_view_reads_the_records_the_payload_holds(self, qm9_registry, qm9_hub: FakeHub):
         """``U0`` is ``-index`` in the fixture, so this is the three molecules
         the exclusion list left, in file order."""
-        view = molhub.loader.load_dataset(
-            "qm9", split=WHOLE_VIEW_SPLIT, registry=qm9_registry, hub=qm9_hub
-        )
-        assert [view[i].meta["U0"] for i in range(len(view))] == [-1.0, -3.0, -5.0]
+        view = molhub.loader.load("qm9", registry=qm9_registry, hub=qm9_hub)
+        assert [view[i][0].meta["U0"] for i in range(len(view))] == [-1.0, -3.0, -5.0]
 
     def test_a_split_it_does_not_declare_is_refused(self, builder: DatasetBuilder):
         """One view is not four: ``test`` has no meaning for a whole-content view."""
@@ -990,19 +984,15 @@ class TestPolymerTgWholeView:
     ):
         """The column name carries a dot and a parenthesised unit; it is read
         verbatim, because that is what the manifest declares as the target."""
-        view = molhub.loader.load_dataset(
-            "polymer-tg", split=WHOLE_VIEW_SPLIT, registry=polymer_tg_registry, hub=polymer_tg_hub
-        )
-        assert view[0].meta[POLYMER_TG_TARGET] == pytest.approx(POLYMER_TG_ROWS[0][1])
+        view = molhub.loader.load("polymer-tg", registry=polymer_tg_registry, hub=polymer_tg_hub)
+        assert view[0][0].meta[POLYMER_TG_TARGET] == pytest.approx(POLYMER_TG_ROWS[0][1])
 
     def test_opening_it_fetches_the_published_file(
         self, polymer_tg_registry, polymer_tg_hub: FakeHub
     ):
         """Through the hub and by role — not from the upstream URL, which has no
         manifest behind it and so no digest to check."""
-        molhub.loader.load_dataset(
-            "polymer-tg", split=WHOLE_VIEW_SPLIT, registry=polymer_tg_registry, hub=polymer_tg_hub
-        )
+        molhub.loader.load("polymer-tg", registry=polymer_tg_registry, hub=polymer_tg_hub)
         assert polymer_tg_hub.roles_fetched == ("main",)
 
     def test_a_split_it_does_not_declare_is_refused(self, builder: DatasetBuilder):

@@ -210,3 +210,62 @@ def test_definition_module_has_no_io_imports() -> None:
     assert "molhub.sources" not in text
     assert "molhub.registry" not in text
     assert inspect.getsource(dataset)
+
+
+# ---------------------------------------------------------------------------
+# Uniform dataset shape — the 2026-08-20 operator rule, made executable
+# ---------------------------------------------------------------------------
+
+
+#: Every @dataset-decorated class must present one shape, so the author of the
+#: next dataset has exactly one template to copy: the manifest with declared
+#: native units, a COORDINATE class attribute, a TARGET_SCHEMA, a no-IO
+#: constructor with load() as the IO boundary, map-style access, and a
+#: source_id. Datasets not yet migrated join this list as they land.
+def _uniform_shape_classes() -> list[type]:
+    from molhub.dataset.omol25 import OMol25, OMol25Small
+    from molhub.dataset.qm9 import QM9
+    from molhub.dataset.revmd17 import RevMD17Dataset
+    from molhub.dataset.water_les import WaterLESDataset
+
+    return [QM9, RevMD17Dataset, WaterLESDataset, OMol25, OMol25Small]
+
+
+@pytest.mark.parametrize("cls", _uniform_shape_classes(), ids=lambda cls: cls.__name__)
+class TestUniformDatasetShape:
+    def test_carries_a_dataset_manifest(self, cls):
+        assert isinstance(cls.manifest, DatasetManifest)
+
+    def test_declares_units_for_every_target(self, cls):
+        schema = cls.TARGET_SCHEMA
+        targets = set(schema.graph_level) | set(schema.atom_level)
+        missing = targets - set(cls.manifest.units)
+        assert not missing, f"{cls.__name__} declares no unit for {sorted(missing)}"
+
+    def test_declared_units_parse_through_the_molpy_registry(self, cls):
+        from molpy import UnitsError, UnitSystem
+
+        registry = UnitSystem()
+        try:
+            registry.Unit("GHz")
+        except UnitsError:
+            pytest.skip(
+                "this molpy's unit registry predates GHz (added in 0.14; QM9 "
+                "declares rotational constants in it) — drop this skip when "
+                "the molcrafts-molpy pin reaches 0.14"
+            )
+        for unit in cls.manifest.units.values():
+            registry.Unit(unit)
+
+    def test_coordinate_class_attribute_matches_the_manifest(self, cls):
+        assert cls.COORDINATE == cls.manifest.coordinate.canonical
+
+    def test_load_is_the_io_boundary(self, cls):
+        assert callable(getattr(cls, "load", None))
+
+    def test_is_map_style(self, cls):
+        assert callable(getattr(cls, "__len__", None))
+        assert callable(getattr(cls, "__getitem__", None))
+
+    def test_exposes_a_source_id(self, cls):
+        assert isinstance(getattr(cls, "source_id", None), property)

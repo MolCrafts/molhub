@@ -63,7 +63,7 @@ from types import MappingProxyType
 from molhub.conveyor import DerivedLayout, THEMolUnitEncoder
 from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
-from molhub.loader import ByteSize
+from molhub.loader.info import ByteSize
 from molhub.molhub import Molhub
 from molhub.registry import Registry
 from molhub.sources import BlobStore, Fetcher

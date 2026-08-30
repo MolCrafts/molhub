@@ -11,12 +11,13 @@ interface Arguments {
   readonly registry: string | undefined;
   readonly kind: ArtifactKind | undefined;
   readonly into: string | undefined;
+  readonly files: boolean;
 }
 
 const USAGE = [
   "Usage:",
   "  molhub-js search [query] [--kind dataset|model|plugin] [--registry snapshot.json]",
-  "  molhub-js info <coordinate> [--registry snapshot.json]",
+  "  molhub-js info <coordinate> [--files] [--registry snapshot.json]",
   "  molhub-js fetch <coordinate> [--into path] [--registry snapshot.json]",
 ].join("\n");
 
@@ -43,7 +44,9 @@ try {
     field("doi", entry.doi);
     field("graph", entry.targets.graph_level.join(", "));
     field("atom", entry.targets.atom_level.join(", "));
-    for (const artifact of entry.artifacts) {
+    // File-level detail stays behind --files, mirroring the Python CLI: what
+    // a dataset IS leads; which shards carry it is plumbing on request.
+    for (const artifact of args.files ? entry.artifacts : []) {
       const size = artifact.size ? `  ${artifact.size} B` : "";
       process.stdout.write(`  [${artifact.role}] ${artifact.filename}${size}\n`);
       if (artifact.format) process.stdout.write(`    format: ${artifact.format}\n`);
@@ -90,12 +93,17 @@ function parseArguments(argv: readonly string[]): Arguments {
   let registry: string | undefined;
   let kind: ArtifactKind | undefined;
   let into: string | undefined;
+  let files = false;
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token) continue;
     if (!token.startsWith("--")) {
       if (value) throw new Error(`Unexpected argument ${JSON.stringify(token)}.`);
       value = token;
+      continue;
+    }
+    if (token === "--files" && command === "info") {
+      files = true;
       continue;
     }
     const next = argv[index + 1];
@@ -110,5 +118,5 @@ function parseArguments(argv: readonly string[]): Arguments {
     } else if (token === "--into" && command === "fetch") into = next;
     else throw new Error(`Unknown option ${token} for ${command}.`);
   }
-  return { command, value, registry, kind, into };
+  return { command, value, registry, kind, into, files };
 }

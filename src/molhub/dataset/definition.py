@@ -138,7 +138,9 @@ def dataset(
             name=name,
             version=version,
         )
-        cls.manifest = DatasetManifest(
+        # Installed dynamically onto an arbitrary class — that is the
+        # decorator's contract, so spell it as the dynamic write it is.
+        manifest = DatasetManifest(
             coordinate=coordinate,
             description=description,
             license=license,
@@ -148,6 +150,7 @@ def dataset(
             units=units or {},
             blocks=tuple(blocks),
         )
+        setattr(cls, "manifest", manifest)
         return cls
 
     return decorate

@@ -1,4 +1,4 @@
-"""Tests for the QM9 source — parsing, caching, and download guards.
+"""Tests for the QM9 dataset — parsing, caching, and download guards.
 
 Every test here is offline: network helpers are exercised through fakes so the
 suite never touches Figshare.
@@ -7,40 +7,20 @@ suite never touches Figshare.
 from __future__ import annotations
 
 import io
-import re
 from pathlib import Path
-from types import ModuleType
 
 import pytest
-from molpy import Frame
+from molpy import Frame, UnitsError, UnitSystem
 
 from molhub.dataset import ArtifactHub, qm9
 from molhub.dataset.qm9 import (
     COORDINATE,
-    QM9Dataset,
-    _filter_targets,
+    QM9,
     _is_cached,
     _load_exclusion_list,
     _parse_xyz,
 )
-
-
-class FakeHub:
-    """An :class:`~molhub.dataset.hub.ArtifactHub` serving files already on disk.
-
-    Records what was asked for, so the download path can be exercised with no
-    registry, no driver, and no network.
-    """
-
-    def __init__(self, paths: dict[str, Path]) -> None:
-        self._paths = paths
-        self.calls: list[tuple[str, list[str] | None]] = []
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self._paths) if roles is None else roles
-        return {role: self._paths[role] for role in wanted}
-
+from tests.test_dataset.conftest import FakeHub, dissolved_wrapper_names
 
 # One real-shaped QM9 record: 5 atoms, tag + index + 15 scalar properties.
 # The coordinate lines carry a trailing Mulliken charge column, which the
@@ -80,7 +60,7 @@ class TestParseXyz:
 
     def test_all_fifteen_targets_present(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert set(frame.meta) == set(QM9Dataset.ALL_TARGETS)
+        assert set(frame.meta) == set(QM9.ALL_TARGETS)
 
     def test_tag_and_index_are_not_targets(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
@@ -96,51 +76,6 @@ class TestParseXyz:
 
     def test_star_caret_exponent_is_rewritten(self):
         assert _parse_xyz(_STARCARET_XYZ).meta["A"] == pytest.approx(1e-3)
-
-
-class TestFilterTargets:
-    def test_keeps_only_requested(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        _filter_targets(frame, frozenset({"U0", "gap"}))
-        assert set(frame.meta) == {"U0", "gap"}
-
-    def test_kept_values_survive(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        _filter_targets(frame, frozenset({"U0"}))
-        assert frame.meta["U0"] == pytest.approx(-40.47893)
-
-    def test_empty_keep_set_drops_everything(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        _filter_targets(frame, frozenset())
-        assert frame.meta == {}
-
-    def test_atoms_block_untouched(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        _filter_targets(frame, frozenset({"U0"}))
-        assert list(frame["atoms"]["number"]) == [6, 1, 1, 1, 1]
-
-    def test_a_meta_key_the_parser_never_wrote_is_dropped_too(self):
-        """The filter *replaces* the frame's meta; it does not merge into it.
-
-        A merge (``frame.meta.update(kept)``) would leave every unfiltered key
-        standing, which is the whole failure this filter exists to prevent.
-        """
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        frame.meta["custom_scalar"] = 1.5
-        _filter_targets(frame, frozenset({"U0"}))
-        assert "custom_scalar" not in frame.meta
-
-    def test_surviving_key_set_is_exactly_the_kept_set(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        frame.meta["custom_scalar"] = 1.5
-        _filter_targets(frame, frozenset({"U0"}))
-        assert set(frame.meta) == {"U0"}
-
-    def test_the_kept_value_is_read_straight_off_frame_meta(self):
-        frame = _parse_xyz(_SAMPLE_XYZ)
-        frame.meta["custom_scalar"] = 1.5
-        _filter_targets(frame, frozenset({"U0"}))
-        assert float(frame.meta["U0"]) == pytest.approx(-40.47893, abs=1e-10)
 
 
 class TestLoadExclusionList:
@@ -174,51 +109,40 @@ class TestIsCached:
         assert _is_cached(p) is True
 
 
-class TestQM9DatasetConstruction:
-    def test_offline_missing_tarball_raises(self, tmp_path):
+class TestQM9Construction:
+    def test_construction_does_no_io(self, tmp_path):
+        """Missing raw files must surface at load(), never at construction."""
+        QM9(tmp_path, download=False)
+
+    def test_offline_missing_tarball_raises_at_load(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="tarball not found"):
-            QM9Dataset(tmp_path, download=False)
+            QM9(tmp_path, download=False).load()
 
     def test_offline_zero_byte_tarball_is_rejected(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"")
         with pytest.raises(FileNotFoundError, match="tarball not found"):
-            QM9Dataset(tmp_path, download=False)
+            QM9(tmp_path, download=False).load()
 
     def test_offline_missing_exclusion_list_raises(self, tmp_path):
         (tmp_path / "qm9.tar.bz2").write_bytes(b"not really a tarball")
         with pytest.raises(FileNotFoundError, match="exclusion list"):
-            QM9Dataset(tmp_path, download=False)
+            QM9(tmp_path, download=False).load()
 
-    def test_unknown_target_raises(self, tmp_path):
-        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
-        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        with pytest.raises(ValueError, match="Unknown QM9 targets"):
-            QM9Dataset(tmp_path, targets=["U0", "not_a_property"], download=False)
+    def test_indexing_before_load_raises(self, tmp_path):
+        with pytest.raises(RuntimeError, match="load"):
+            len(QM9(tmp_path, download=False))
 
-    def test_source_id_is_stable_and_descriptive(self, tmp_path):
-        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
-        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        src = QM9Dataset(tmp_path, total=100, targets=["U0", "gap"], download=False)
-        assert src.source_id == "dataset:molcrafts/qm9@v2#total=100,targets=U0+gap"
+    def test_source_id_is_the_coordinate(self, tmp_path):
+        assert QM9(tmp_path, download=False).source_id == "dataset:molcrafts/qm9@v2"
 
-    def test_source_id_without_options(self, tmp_path):
-        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
-        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        assert QM9Dataset(tmp_path, download=False).source_id == "dataset:molcrafts/qm9@v2"
-
-    def test_unmodified_source_id_parses_as_a_coordinate(self, tmp_path):
+    def test_source_id_parses_as_a_coordinate(self, tmp_path):
         from molhub.coordinate import Coordinate
 
-        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
-        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        source_id = QM9Dataset(tmp_path, download=False).source_id
+        source_id = QM9(tmp_path, download=False).source_id
         assert Coordinate.parse(source_id).canonical == source_id
 
-    def test_root_is_expanded_to_absolute(self, tmp_path):
-        (tmp_path / "qm9.tar.bz2").write_bytes(b"x")
-        (tmp_path / "qm9_exclude.txt").write_bytes(b"x")
-        src = QM9Dataset(tmp_path, download=False)
-        assert src.root.is_absolute()
+    def test_root_is_expanded(self, tmp_path):
+        src = QM9(tmp_path, download=False)
         assert isinstance(src.root, Path)
 
 
@@ -258,68 +182,59 @@ def _build_qm9_root(root: Path, indices: list[int], excluded: list[int] | None =
     (root / "qm9_exclude.txt").write_text(f"{header}\n{body}\ntrailer\n")
 
 
-class TestQM9EndToEnd:
+class TestQM9Pipeline:
     """Exercises the full index -> filter -> parse pipeline from a real tarball."""
 
     def test_loads_every_molecule(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4])
-        assert len(QM9Dataset(tmp_path, download=False)) == 4
+        assert len(QM9(tmp_path, download=False).load()) == 4
 
     def test_excluded_molecules_are_dropped(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4], excluded=[2, 4])
-        src = QM9Dataset(tmp_path, download=False)
+        src = QM9(tmp_path, download=False).load()
         assert len(src) == 2
-        assert sorted(src[i].meta["U0"] for i in range(len(src))) == [-3.0, -1.0]
+        assert sorted(src[i][0].meta["U0"] for i in range(len(src))) == [-3.0, -1.0]
 
     def test_empty_exclusion_list_keeps_everything(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3], excluded=[])
-        assert len(QM9Dataset(tmp_path, download=False)) == 3
+        assert len(QM9(tmp_path, download=False).load()) == 3
 
     def test_non_xyz_members_are_skipped(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2])
-        assert len(QM9Dataset(tmp_path, download=False)) == 2
+        assert len(QM9(tmp_path, download=False).load()) == 2
+
+    def test_frames_come_back_in_index_order(self, tmp_path):
+        _build_qm9_root(tmp_path, indices=[3, 1, 2])
+        src = QM9(tmp_path, download=False).load()
+        assert [src[i][0].meta["U0"] for i in range(len(src))] == [-1.0, -2.0, -3.0]
 
     def test_getitem_returns_a_frame_with_atoms(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
-        frame = QM9Dataset(tmp_path, download=False)[0]
-        assert isinstance(frame, Frame)
-        assert list(frame["atoms"]["element"]) == ["C"]
+        frames = QM9(tmp_path, download=False).load()[0]
+        assert len(frames) == 1
+        assert isinstance(frames[0], Frame)
+        assert list(frames[0]["atoms"]["element"]) == ["C"]
 
-    def test_total_subsamples_reproducibly(self, tmp_path):
-        _build_qm9_root(tmp_path, indices=list(range(1, 21)))
-
-        def _sample() -> list[float]:
-            src = QM9Dataset(tmp_path, total=5, download=False)
-            return [src[i].meta["U0"] for i in range(len(src))]
-
-        first, second = _sample(), _sample()
-        assert len(first) == 5
-        assert first == second
-
-    def test_total_larger_than_corpus_is_a_no_op(self, tmp_path):
-        _build_qm9_root(tmp_path, indices=[1, 2])
-        assert len(QM9Dataset(tmp_path, total=999, download=False)) == 2
-
-    def test_targets_filter_applies_to_every_sample(self, tmp_path):
-        _build_qm9_root(tmp_path, indices=[1, 2])
-        src = QM9Dataset(tmp_path, targets=["U0"], download=False)
-        for i in range(len(src)):
-            assert set(src[i].meta) == {"U0"}
+    def test_load_is_idempotent(self, tmp_path):
+        _build_qm9_root(tmp_path, indices=[1])
+        src = QM9(tmp_path, download=False).load()
+        first = src[0][0]
+        assert src.load()[0][0] is first
 
     def test_is_map_dataset(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
         from molhub.dataset import Dataset
 
-        assert isinstance(QM9Dataset(tmp_path, download=False), Dataset)
+        assert isinstance(QM9(tmp_path, download=False).load(), Dataset)
 
     def test_index_out_of_range(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])
         with pytest.raises(IndexError):
-            QM9Dataset(tmp_path, download=False)[5]
+            QM9(tmp_path, download=False).load()[5]
 
 
-class TestQM9DatasetDownload:
-    """The ``download=True`` path, exercised through the source's one seam."""
+class TestQM9Download:
+    """The ``download=True`` path, exercised through the dataset's one seam."""
 
     @pytest.fixture
     def hub(self, tmp_path) -> FakeHub:
@@ -333,60 +248,69 @@ class TestQM9DatasetDownload:
         assert isinstance(hub, ArtifactHub)
 
     def test_download_reads_what_the_hub_served(self, tmp_path, hub):
-        assert len(QM9Dataset(tmp_path / "empty", download=True, hub=hub)) == 3
+        assert len(QM9(tmp_path / "empty", download=True, hub=hub).load()) == 3
 
     def test_download_asks_for_the_pinned_coordinate(self, tmp_path, hub):
-        QM9Dataset(tmp_path / "empty", download=True, hub=hub)[0]
+        QM9(tmp_path / "empty", download=True, hub=hub).load()[0]
         assert hub.calls == [(COORDINATE, None)]
 
     def test_construction_alone_fetches_nothing(self, tmp_path, hub):
-        """Loading is lazy: constructing must not cost a download."""
-        QM9Dataset(tmp_path / "empty", download=True, hub=hub)
+        """load() is the IO boundary: constructing must not cost a download."""
+        QM9(tmp_path / "empty", download=True, hub=hub)
         assert hub.calls == []
 
     def test_download_ignores_root(self, tmp_path, hub):
         """Fetched bytes land in the shared cache, not in *root*."""
         root = tmp_path / "empty"
-        len(QM9Dataset(root, download=True, hub=hub))
+        len(QM9(root, download=True, hub=hub).load())
         assert not root.exists()
-
-    def test_classmethod_returns_the_directory_holding_the_files(self, tmp_path, hub):
-        assert QM9Dataset.download(hub=hub) == (tmp_path / "served")
 
     def test_offline_never_touches_the_hub(self, tmp_path, hub):
         _build_qm9_root(tmp_path, indices=[1])
-        assert len(QM9Dataset(tmp_path, download=False, hub=hub)) == 1
+        assert len(QM9(tmp_path, download=False, hub=hub).load()) == 1
         assert hub.calls == []
 
 
 class TestQM9TargetSchema:
     def test_all_targets_are_graph_level(self):
-        assert QM9Dataset.TARGET_SCHEMA.graph_level == QM9Dataset.ALL_TARGETS
+        assert QM9.TARGET_SCHEMA.graph_level == QM9.ALL_TARGETS
 
     def test_no_atom_level_targets(self):
-        assert QM9Dataset.TARGET_SCHEMA.atom_level == frozenset()
+        assert QM9.TARGET_SCHEMA.atom_level == frozenset()
 
 
-# ---------------------------------------------------------------------------
-# Graph-level meta lives on the frame, not behind a molhub wrapper
-# ---------------------------------------------------------------------------
+class TestQM9Units:
+    """QM9 records native units verbatim and declares them on the manifest."""
 
-#: The wrapper identifiers ``hf-facade-01-meta-dissolution`` deletes. Boundary
-#: aware on purpose: ``write_metadata`` (DerivedLayout's unrelated conveyor API)
-#: and ``TargetSchema`` / ``TargetDeclaration`` must never match.
-_DISSOLVED_WRAPPERS = re.compile(r"\bTargets\b|\bMetaCodec\b|\bwrite_meta\b(?!data)")
+    def test_every_target_declares_a_unit(self):
+        assert set(QM9.manifest.units) == set(QM9.ALL_TARGETS)
 
+    def test_energies_are_hartree_as_published(self):
+        for key in ("homo", "lumo", "gap", "zpve", "U0", "U", "H", "G"):
+            assert QM9.manifest.units[key] == "hartree"
 
-def _dissolved_wrapper_names(module: ModuleType) -> list[str]:
-    """Deleted meta-wrapper identifiers still named in *module*'s source."""
-    path = module.__file__
-    assert path is not None
-    source = Path(path).read_text(encoding="utf-8")
-    return sorted({match.group() for match in _DISSOLVED_WRAPPERS.finditer(source)})
+    def test_rotational_constants_are_ghz(self):
+        """Published in GHz (Ramakrishnan 2014, Table 3)."""
+        for key in ("A", "B", "C"):
+            assert QM9.manifest.units[key] == "GHz"
+
+    def test_every_unit_parses_through_the_molpy_registry(self):
+        """UnitConvert reads these strings back; a typo must fail here."""
+        registry = UnitSystem()
+        try:
+            registry.Unit("GHz")
+        except UnitsError:
+            pytest.skip(
+                "this molpy's unit registry predates GHz (added in 0.14; QM9 "
+                "declares rotational constants in it) — drop this skip when "
+                "the molcrafts-molpy pin reaches 0.14"
+            )
+        for unit in QM9.manifest.units.values():
+            registry.Unit(unit)
 
 
 class TestQM9MetaSurface:
-    """QM9 writes and filters targets through ``frame.meta`` directly."""
+    """QM9 writes targets through ``frame.meta`` directly."""
 
     def test_parsed_target_is_read_straight_off_frame_meta(self):
         assert float(_parse_xyz(_SAMPLE_XYZ).meta["U0"]) == pytest.approx(-40.47893, abs=1e-10)
@@ -395,4 +319,4 @@ class TestQM9MetaSurface:
         assert [name for name in ("Targets", "MetaCodec", "write_meta") if hasattr(qm9, name)] == []
 
     def test_module_source_names_no_deleted_meta_wrapper(self):
-        assert _dissolved_wrapper_names(qm9) == []
+        assert dissolved_wrapper_names(qm9) == []

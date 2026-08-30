@@ -35,13 +35,48 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import TargetSchema
+from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
+from molhub.sources import Digest, Locator
 
 COORDINATE = "dataset:espaloma/phalkethoh-mm-small@1"
-"""Sole registry handle. Locators live only in the manifest."""
+"""Sole catalog handle. Locators live on :data:`MANIFEST`."""
+
+MANIFEST = Manifest(
+    coordinate=Coordinate.parse(COORDINATE),
+    title="PhAlkEthOH MM-small multi-conformer MM energies",
+    description=(
+        "Espaloma subsampled PhAlkEthOH MM-fitting set: 173 C/H/O molecules with 100 "
+        "conformers each (17 300 frames). Reference MM energies stored as graph-level "
+        "u_ref in Hartree in the native DGL payload; after conversion they are "
+        "mm_energy in kcal/mol (×627.5094740631). Coordinates in Å. Molecule-level "
+        "80:10:10 split with Espaloma notebook seed 2666 (espaloma-original). "
+        "Official bytes: choderalab/espaloma release 0.2.1 asset small_phalkethoh_mm.zip."
+    ),
+    license="MIT",
+    doi="10.1039/D2SC02739A",
+    artifacts={
+        "main": Artifact(
+            role="main",
+            filename="small_phalkethoh_mm.zip",
+            locators=(
+                Locator.parse(
+                    "https://github.com/choderalab/espaloma/releases/download/"
+                    "0.2.1/small_phalkethoh_mm.zip"
+                ),
+            ),
+            digest=Digest.parse(
+                "sha256:61371668970c9f7a55911bb82f5b0f1a5fbecb4b64aa080b402733eee3429a9a"
+            ),
+            size=280_619_984,
+        )
+    },
+    targets=TargetDeclaration(graph_level=("mm_energy",), atom_level=("forces",)),
+)
 
 _SPLITS: frozenset[str] = frozenset({"train", "val", "test"})
 
@@ -215,6 +250,7 @@ class PhalkethohMMDataset:
         download: Fetch role ``main`` when the offline tree is missing.
         hub: :class:`~molhub.dataset.hub.ArtifactHub` implementation.
         split: ``None`` for the full conformer list, or ``train``/``val``/``test``.
+        max_frames: Stop after this many conformers. Smoke uses a small cap.
 
     Class attributes:
         TARGET_SCHEMA: graph ``mm_energy``, atom ``forces``.
@@ -236,6 +272,7 @@ class PhalkethohMMDataset:
         download: bool = True,
         hub: ArtifactHub | None = None,
         split: str | None = None,
+        max_frames: int | None = None,
     ) -> None:
         if split is not None and split not in _SPLITS:
             raise ValueError(f"Unknown phalkethoh split {split!r}. Available: {sorted(_SPLITS)}")
@@ -264,8 +301,12 @@ class PhalkethohMMDataset:
         self._molecule_ids = list(mol_ids)
         self._frames: list[Frame] = []
         mols_dir = self._data_root / "mols"
+        cap = None if max_frames is None else int(max_frames)
         for mid in mol_ids:
-            self._frames.extend(_load_molecule_confs(mols_dir / mid, mid))
+            for frame in _load_molecule_confs(mols_dir / mid, mid):
+                self._frames.append(frame)
+                if cap is not None and len(self._frames) >= cap:
+                    return
 
     def _locate(self, download: bool, hub: ArtifactHub | None) -> Path:
         if _is_tree(self.root):
@@ -300,5 +341,5 @@ class PhalkethohMMDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> Frame:
-        return self._frames[idx]
+    def __getitem__(self, idx: int) -> FrameCollection:
+        return (self._frames[idx],)

@@ -19,10 +19,11 @@ class TestRegistrySourceResolution:
         monkeypatch.setenv("MOLHUB_REGISTRY", str(tmp_path / "env"))
         assert RegistrySource.resolve().root == tmp_path / "env"
 
-    def test_falls_back_to_the_bundled_snapshot(self, monkeypatch):
-        """A fresh install resolves the built-ins with no network and no config."""
+    def test_unset_env_has_no_yaml_directory(self, monkeypatch):
+        """The package catalog is Python; there is no bundled YAML tree."""
         monkeypatch.delenv("MOLHUB_REGISTRY", raising=False)
-        assert RegistrySource.resolve().root.name == "registry_data"
+        with pytest.raises(FileNotFoundError, match="Registry.builtin"):
+            RegistrySource.resolve()
 
     def test_tilde_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_REGISTRY", "~/idx")
@@ -62,6 +63,12 @@ class TestRegistryLoading:
     def test_load_uses_the_env_var_when_given_nothing(self, registry_dir, monkeypatch):
         monkeypatch.setenv("MOLHUB_REGISTRY", str(registry_dir))
         assert len(Registry.load()) == 1
+
+    def test_load_without_env_uses_the_python_catalog(self, monkeypatch):
+        monkeypatch.delenv("MOLHUB_REGISTRY", raising=False)
+        registry = Registry.load()
+        assert "dataset:molcrafts/qm9@v2" in registry
+        assert len(registry) >= 1
 
 
 class TestRegistryLookup:

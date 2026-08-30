@@ -1,20 +1,19 @@
 """THEMol records to numpy sampling units — one record in, one whole unit out.
 
 This is the semantic half of the prepare stage: it maps the records
-:mod:`molhub.dataset.themol` already parses out of HDF5 — a :class:`molpy.Frame`
-for one geometry, a :class:`molpy.Trajectory` for one multi-frame sampling unit
-— onto the column names ``molix.block/1`` routes, and does nothing else. It
-opens no file, holds no writer, decides no split, and imports neither torch nor
-molix — so a shard can be encoded, inspected and unit-tested in an environment
-where molnex is not installed at all.
+:mod:`molhub.dataset.themol` already parses out of HDF5 — a
+:data:`~molpy.FrameCollection` (``Sequence[Frame]``) — onto the column names
+``molix.block/1`` routes, and does nothing else. It opens no file, holds no
+writer, decides no split, and imports neither torch nor molix — so a shard
+can be encoded, inspected and unit-tested in an environment where molnex is
+not installed at all.
 
 **A record is recognised by shape, not by name.**
 ``tests/test_conveyor/test_layering.py`` allows this module stdlib, ``molhub``
 and ``numpy`` and nothing else — ``molpy`` is on its forbidden list at *any*
 depth — so :meth:`THEMolUnitEncoder.encode` cannot name ``Frame`` or
-``Trajectory`` in an ``isinstance`` check. It branches on the two attributes
-those types differ by instead: a frame has ``meta``, a trajectory has
-``frames``. Anything with neither is refused by name.
+``FrameCollection`` in an ``isinstance`` check. It requires a sequence whose
+first item has ``meta``. A bare frame is not a collection.
 
 **Column names are molnex's route names, not molhub's.** They are rows of the
 closed ``_COLUMN_ROUTES`` registry in ``molnex:src/molix/store/block.py``, which
@@ -232,32 +231,26 @@ class THEMolUnitEncoder:
         """Encode one whole THEMol record as one whole :class:`RawUnit`.
 
         Args:
-            record: A :class:`molpy.Frame` (one equilibrium geometry) or a
-                :class:`molpy.Trajectory` (one molecule's whole relaxation, or
-                one whole torsion scan) — that is, exactly what
-                ``THEMolShardDataset.__getitem__`` returns. The two are told
-                apart by ``meta`` versus ``frames``; see the module docstring.
+            record: A :data:`~molpy.FrameCollection` — ``Sequence[Frame]`` —
+                exactly what ``THEMolShardDataset.__getitem__`` returns.
 
         Returns:
             The unit, with molecule-space and frame-space columns named as
             ``molix.block/1`` routes them.
 
         Raises:
-            UnsupportedRecordError: *record* is neither a frame nor a sequence
-                of frames.
+            UnsupportedRecordError: *record* is not a sequence of frames.
             IncompleteRecordError: *record* carries bonds without an integer
                 order, frames that disagree with its topology, a frame missing a
                 target its siblings declare, or no ``mapped_isomeric_smiles``.
         """
-        if hasattr(record, "meta"):
-            return self._unit((record,))
-        frames = getattr(record, "frames", None)
-        if isinstance(frames, Sequence):
-            return self._unit(tuple(frames))
+        if isinstance(record, Sequence) and not isinstance(record, (str, bytes)):
+            frames = tuple(record)
+            if frames and hasattr(frames[0], "meta"):
+                return self._unit(frames)
         raise UnsupportedRecordError(
-            f"{type(record).__name__} is not a THEMol sampling unit; encode() takes a molpy "
-            "Frame (one geometry) or a molpy Trajectory (one relaxation or scan), which is "
-            "what THEMolShardDataset.__getitem__ returns."
+            f"{type(record).__name__} is not a FrameCollection; encode() takes "
+            "Sequence[Frame], which is what THEMolShardDataset.__getitem__ returns."
         )
 
     # -- one record --------------------------------------------------------

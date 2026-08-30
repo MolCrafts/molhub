@@ -20,9 +20,7 @@ Reference:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from types import ModuleType
 
 import numpy as np
 import pytest
@@ -31,6 +29,7 @@ from molpy import Frame
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, water_les
 from molhub.dataset.water_les import COORDINATE, WaterLESDataset
+from tests.test_dataset.conftest import FakeHub, dissolved_wrapper_names
 
 # ---------------------------------------------------------------------------
 # Fixture writer — the molnex conftest, made RNG-free
@@ -112,25 +111,8 @@ def water_les_root(tmp_path) -> Path:
     return root
 
 
-class FakeHub:
-    """An :class:`~molhub.dataset.hub.ArtifactHub` serving files already on disk.
-
-    Records what was asked for, so the retrieval path can be exercised with no
-    registry, no driver, and no network.
-    """
-
-    def __init__(self, paths: dict[str, Path]) -> None:
-        self._paths = paths
-        self.calls: list[tuple[str, list[str] | None]] = []
-
-    def fetch(self, coordinate: str, *, roles: list[str] | None = None) -> dict[str, Path]:
-        self.calls.append((coordinate, roles))
-        wanted = list(self._paths) if roles is None else roles
-        return {role: self._paths[role] for role in wanted}
-
-
 def _energies(frames: Dataset) -> list[float]:
-    return [float(frames[i].meta["energy"]) for i in range(len(frames))]
+    return [float(frames[i][0].meta["energy"]) for i in range(len(frames))]
 
 
 # ---------------------------------------------------------------------------
@@ -143,55 +125,55 @@ class TestWaterLESParse:
         assert len(WaterLESDataset(water_les_root, split="test").load()) == 2
 
     def test_sample_is_a_molpy_frame(self, water_les_root):
-        assert isinstance(WaterLESDataset(water_les_root, split="test").load()[0], Frame)
+        assert isinstance(WaterLESDataset(water_les_root, split="test").load()[0][0], Frame)
 
     def test_loaded_collection_is_a_map_dataset(self, water_les_root):
         assert isinstance(WaterLESDataset(water_les_root, split="test").load(), Dataset)
 
     def test_atoms_block_columns(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         for column in ("element", "x", "y", "z", "number", "fx", "fy", "fz"):
             assert column in atoms
 
     def test_atom_count(self, water_les_root):
         """2 H2O = 6 atoms in the fixture-scaled configuration."""
-        assert WaterLESDataset(water_les_root, split="test").load()[0]["atoms"].nrows == 6
+        assert WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"].nrows == 6
 
     def test_atomic_numbers(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert list(atoms["number"]) == [8, 1, 1, 8, 1, 1]
 
     def test_element_column_is_unicode(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["element"].dtype.kind == "U"
 
     def test_coordinate_dtype_is_float64(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["x"].dtype == np.float64
         assert atoms["y"].dtype == np.float64
         assert atoms["z"].dtype == np.float64
 
     def test_first_oxygen_position(self, water_les_root):
         """First O sits at ``(4, 6, 6)`` Å — position tolerance 1e-12."""
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["x"][0] == pytest.approx(4.0, abs=1e-12)
         assert atoms["y"][0] == pytest.approx(6.0, abs=1e-12)
         assert atoms["z"][0] == pytest.approx(6.0, abs=1e-12)
 
     def test_first_hydrogen_position(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["x"][1] == pytest.approx(4.75, abs=1e-12)
         assert atoms["y"][1] == pytest.approx(6.5, abs=1e-12)
         assert atoms["z"][1] == pytest.approx(6.0, abs=1e-12)
 
     def test_energy_is_a_plain_float_target(self, water_les_root):
         """Graph-level energy lives in ``frame.meta`` as a Python float."""
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         assert isinstance(frame.meta["energy"], float)
 
     def test_energy_is_the_only_graph_level_target(self, water_les_root):
         """``Lattice="…"`` splits into bare numeric tokens; only ``energy=`` counts."""
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         assert set(frame.meta) == {"energy"}
 
 
@@ -202,7 +184,7 @@ class TestWaterLESParse:
 
 class TestWaterLESCell:
     def test_cell_is_carried_on_the_frame_box(self, water_les_root):
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         assert frame.box is not None
         assert np.asarray(frame.box.matrix).shape == (3, 3)
 
@@ -212,7 +194,7 @@ class TestWaterLESCell:
         A loader that silently dropped a Bohr→Å factor would land at ~6.3 Å;
         one that scaled Å→nm would land at 0.12.
         """
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         expected = np.eye(3) * 12.0
         assert np.allclose(np.asarray(frame.box.matrix), expected, atol=1e-12)
 
@@ -290,7 +272,7 @@ class TestWaterLESUnits:
         """
         frames = WaterLESDataset(water_les_root, split="test").load()
         for i in range(len(frames)):
-            frame = frames[i]
+            frame = frames[i][0]
             per_atom = float(frame.meta["energy"]) / frame["atoms"].nrows
             assert -20.0 < per_atom < -5.0
 
@@ -304,7 +286,7 @@ class TestWaterLESUnits:
 
     def test_forces_pass_through_unscaled(self, water_les_root):
         """First atom of the first frame carries ``(-0.5, -0.5, -0.5)`` eV·Å⁻¹."""
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["fx"][0] == pytest.approx(-0.5, abs=1e-8)
         assert atoms["fy"][0] == pytest.approx(-0.5, abs=1e-8)
         assert atoms["fz"][0] == pytest.approx(-0.5, abs=1e-8)
@@ -313,12 +295,12 @@ class TestWaterLESUnits:
         """A silent Hartree/Bohr→eV/Å rescale would inflate these by ~51×."""
         frames = WaterLESDataset(water_les_root, split="test").load()
         for i in range(len(frames)):
-            atoms = frames[i]["atoms"]
+            atoms = frames[i][0]["atoms"]
             for column in ("fx", "fy", "fz"):
                 assert float(np.abs(np.asarray(atoms[column])).max()) <= 1.0 + 1e-8
 
     def test_force_columns_are_float64(self, water_les_root):
-        atoms = WaterLESDataset(water_les_root, split="test").load()[0]["atoms"]
+        atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
         assert atoms["fx"].dtype == np.float64
 
     # -- and the declaration that says so ------------------------------------
@@ -409,6 +391,12 @@ class TestWaterLESIdentity:
         assert "size=" not in source_id
         assert "n=" not in source_id
 
+    def test_loaded_dataset_keeps_the_declared_source_id(self, water_les_root):
+        """load() used to hand back an InMemoryDataset that folded the frame
+        count into its id — the loaded view must keep the coordinate form."""
+        loaded = WaterLESDataset(water_les_root, split="train").load()
+        assert loaded.source_id == "dataset:molcrafts/water-les@1#split=train"
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -488,31 +476,18 @@ class TestWaterLESRetrieval:
 # Graph-level meta lives on the frame, not behind a molhub wrapper
 # ---------------------------------------------------------------------------
 
-#: The wrapper identifiers ``hf-facade-01-meta-dissolution`` deletes. Boundary
-#: aware on purpose: ``write_metadata`` (DerivedLayout's unrelated conveyor API)
-#: and ``TargetSchema`` / ``TargetDeclaration`` must never match.
-_DISSOLVED_WRAPPERS = re.compile(r"\bTargets\b|\bMetaCodec\b|\bwrite_meta\b(?!data)")
-
-
-def _dissolved_wrapper_names(module: ModuleType) -> list[str]:
-    """Deleted meta-wrapper identifiers still named in *module*'s source."""
-    path = module.__file__
-    assert path is not None
-    source = Path(path).read_text(encoding="utf-8")
-    return sorted({match.group() for match in _DISSOLVED_WRAPPERS.finditer(source)})
-
 
 class TestWaterLESMeta:
     """The loader's graph-level surface is ``frame.meta`` and nothing else."""
 
     def test_energy_is_read_straight_off_frame_meta(self, water_les_root):
         """First test frame carries ``E = -60.0`` eV, with no accessor between."""
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         assert float(frame.meta["energy"]) == pytest.approx(-60.0, abs=1e-6)
 
     def test_frame_meta_hands_back_a_plain_python_float(self, water_les_root):
         """molpy 0.13 unwraps on read, so nothing in molhub has to decode."""
-        frame = WaterLESDataset(water_les_root, split="test").load()[0]
+        frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
         assert isinstance(frame.meta["energy"], float)
 
     def test_module_namespace_holds_no_deleted_meta_wrapper(self):
@@ -521,4 +496,4 @@ class TestWaterLESMeta:
         ] == []
 
     def test_module_source_names_no_deleted_meta_wrapper(self):
-        assert _dissolved_wrapper_names(water_les) == []
+        assert dissolved_wrapper_names(water_les) == []

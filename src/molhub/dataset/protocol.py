@@ -5,40 +5,41 @@ Copied surface, no third-party dataset framework:
 * :class:`Dataset` — ``__len__`` and ``__getitem__``.
 * :class:`IterableDataset` — ``__iter__``.
 
-A sample is a :class:`molpy.Frame` (one geometry) or a
-:class:`molpy.Trajectory` (one multi-frame sampling unit). Graph-level fields
-live in ``frame.meta``. Concrete helpers may also expose ``source_id``.
+A sample is a :data:`~molpy.FrameCollection` — ``Sequence[Frame]``. Graph-level
+fields live in each frame's ``meta``. Concrete helpers may also expose
+``source_id``.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Iterator, Protocol, runtime_checkable
 
-from molpy import Frame, Trajectory
+from molpy import Frame
+
+type FrameCollection = Sequence[Frame]
+"""``Sequence[Frame]`` — one record of trajectory-like data.
+
+molpy ≥0.14 exports a plain alias of the same shape, but the PyPI 0.13 wheel
+does not, and molpy's lazy module ``__getattr__`` makes checkers resolve a
+missing name as ``ModuleType``. Declared locally as a PEP 695 alias it is
+checker-solid on both — and it keeps its ``__name__``, which is what
+``DatasetInfo.record_type`` reads off a definition's generic argument.
+"""
 
 # ---------------------------------------------------------------------------
-# Sample — a molpy Frame or Trajectory
+# Sample — one FrameCollection
 # ---------------------------------------------------------------------------
 
-Sample = Frame | Trajectory
-"""A sample is a :class:`molpy.Frame` or a :class:`molpy.Trajectory`.
+type Sample = FrameCollection
+"""A sample is a :data:`FrameCollection` (``Sequence[Frame]``).
 
-One geometry is a ``Frame``: per-atom data (including per-atom supervision such
-as ``atomic_charge``) lives in its ``atoms`` block, matrices in named COO blocks
-such as ``hessian{row,col,value}``, index tuples in valence-style blocks, and
-scalars in ``frame.meta``.
-
-A sampling unit that is inseparable but multi-frame — a relaxation trajectory, a
-complete torsion profile — is a ``Trajectory`` of such frames, each carrying its
-own scalars in its own ``meta``. There is no wrapper object on top of ``Frame``.
-
-Widened from ``Frame`` alone on 2026-08-15 by the operator note recorded in
-``.claude/notes/notes.md`` (``mol:note:topic:hf-style-api``, "Records ARE molpy
-objects") and implemented by the spec ``hf-facade-02-frame-records`` (D10). The
-matching CLAUDE.md "What must never change casually" bullet was amended in the
-same change.
+One geometry is a length-1 collection. A sampling unit that is inseparable but
+multi-frame — a relaxation, a complete torsion profile — is a longer collection.
+Every frame carries its own scalars in its own ``meta``. There is no second
+record type and no :class:`~molpy.Trajectory` on this surface.
 """
 
 
@@ -66,7 +67,7 @@ class TargetSchema:
     * ``qm`` — quantum-mechanical labels.
 
     Dataset source classes expose their schema as a class attribute
-    (e.g. :attr:`QM9Dataset.TARGET_SCHEMA`) so downstream batching logic
+    (e.g. :attr:`QM9.TARGET_SCHEMA`) so downstream batching logic
     knows how to collate each target key.
     """
 
@@ -103,14 +104,30 @@ class Dataset(Protocol):
         :class:`InMemoryDataset` and :class:`SubsetDataset` below — fail to
         satisfy this protocol statically while passing ``isinstance``. That
         divergence was invisible until ``hf-facade-03-builder-info`` made
-        ``load_dataset`` return a declared ``Dataset``.
+        ``load`` return a declared ``Dataset``.
 
         Returns:
-            A :class:`molpy.Frame` or :class:`molpy.Trajectory`.
+            A :data:`~molpy.FrameCollection` (``Sequence[Frame]``).
 
         Raises:
             IndexError: If *index* is out of range.
         """
+        ...
+
+
+@runtime_checkable
+class IdentifiedDataset(Dataset, Protocol):
+    """A :class:`Dataset` that also carries a stable ``source_id``.
+
+    ``source_id`` stays out of :class:`Dataset` on purpose (it is optional
+    there); consumers that *require* it — :class:`SubsetDataset` derives its
+    own id from the parent's — take this narrower protocol instead of reading
+    an attribute the wider one never promised.
+    """
+
+    @property
+    def source_id(self) -> str:
+        """Stable identifier folded into cache keys."""
         ...
 
 
@@ -130,8 +147,7 @@ class IterableDataset(Protocol):
         """Yield samples in streaming order.
 
         Returns:
-            An iterator over :class:`molpy.Frame` / :class:`molpy.Trajectory`
-            objects.
+            An iterator over :data:`~molpy.FrameCollection` records.
         """
         ...
 
@@ -152,6 +168,10 @@ class InMemoryDataset:
     def __init__(self, frames: list[Frame], *, name: str = "memory") -> None:
         self._frames = frames
         self._name = name
+        # Published named-view assignment, installed by loaders that build
+        # this dataset from named parts (molhub.loader.builder) and read
+        # back through split_assignment(); None when nothing was published.
+        self._assignment: dict[str, list[int]] | None = None
 
     @property
     def source_id(self) -> str:
@@ -160,8 +180,8 @@ class InMemoryDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> Frame:
-        return self._frames[idx]
+    def __getitem__(self, idx: int) -> FrameCollection:
+        return (self._frames[idx],)
 
 
 class SubsetDataset:
@@ -178,7 +198,7 @@ class SubsetDataset:
 
     def __init__(
         self,
-        source: Dataset,
+        source: IdentifiedDataset,
         indices: list[int],
         *,
         name: str | None = None,
@@ -209,16 +229,43 @@ class SubsetDataset:
     def __len__(self) -> int:
         return len(self._indices)
 
-    def __getitem__(self, idx: int) -> Sample:
-        """The parent's sample, whichever of the two kinds the parent yields."""
+    def __getitem__(self, idx: int) -> FrameCollection:
+        """The parent's collection at this view's *idx*."""
         return self._source[self._indices[idx]]
+
+
+def assignment(dataset: object) -> dict[str, list[int]]:
+    """Published name → indices into *dataset*.
+
+    PyTorch split: a list of integers, applied with :class:`SubsetDataset`.
+    ``load`` does not take a split name.
+
+    Raises:
+        TypeError: *dataset* has no published assignment.
+    """
+    from collections.abc import Mapping
+
+    method = getattr(dataset, "assignment", None)
+    if callable(method):
+        result = method()
+        if isinstance(result, Mapping):
+            return {str(name): list(index) for name, index in result.items()}
+    stored = getattr(dataset, "_assignment", None)
+    if isinstance(stored, Mapping):
+        return {str(name): list(index) for name, index in stored.items()}
+    raise TypeError(
+        f"{type(dataset).__name__} has no published assignment. "
+        "Build your own index list and wrap it with SubsetDataset."
+    )
 
 
 __all__ = [
     "Dataset",
+    "FrameCollection",
     "IterableDataset",
     "Sample",
     "TargetSchema",
     "InMemoryDataset",
     "SubsetDataset",
+    "assignment",
 ]

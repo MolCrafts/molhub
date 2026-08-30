@@ -63,7 +63,7 @@ run-specific configuration.
 
 | Position | Spec | Status | Outcome |
 |---:|---|---|---|
-| 01 | [Universal Class-I dataset composition](universal-class-i-01-dataset-composition.md) | approved | THEMol-first task collection, derived relaxation subset, hierarchical identity/splits, OMol25/OPoly26 evolution |
+| 01 | [Universal Class-I dataset composition](universal-class-i-01-dataset-composition.md) | approved | v0: OMol25-small train + PhAlkEthOH-MM validation; THEMol roles deferred, not a resolve gate |
 
 ## Feature coverage
 

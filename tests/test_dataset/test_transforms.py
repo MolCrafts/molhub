@@ -38,10 +38,6 @@ and the residual sum of squares is exactly ``d^2 / 2 = 0.08``, split as
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-from types import ModuleType
-
 import numpy as np
 import pytest
 from molpy import Block, Frame, UnitsError
@@ -54,6 +50,7 @@ from molhub.dataset.transforms import (
     UnitConvert,
     _with_targets,
 )
+from tests.test_dataset.conftest import dissolved_wrapper_names
 
 # ---------------------------------------------------------------------------
 # Hand-built samples
@@ -80,8 +77,15 @@ def _sample(numbers: list[int], targets: dict[str, float]) -> Frame:
     block = Block()
     block["number"] = np.array(numbers, dtype=np.int64)
     frame["atoms"] = block
-    frame.meta.update(targets)
+    # molpy 0.14: ``frame.meta`` returns a copy — item writes are lost; assign whole.
+    frame.meta = {**frame.meta, **targets}
     return frame
+
+
+def _meta(frame: Frame, key: str):
+    """Plain value of ``frame.meta[key]`` — molpy 0.14 wraps entries in MetaValue."""
+    value = frame.meta[key]
+    return getattr(value, "value", value)
 
 
 def _dress_samples() -> list[Frame]:
@@ -120,7 +124,7 @@ class TestAtomicDress:
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0", output_key="U0_dressed")
         samples = _dress_samples()
         dress.fit(samples)
-        got = [float(dressed.meta["U0_dressed"]) for dressed in map(dress.execute, samples)]
+        got = [float(_meta(dressed, "U0_dressed")) for dressed in map(dress.execute, samples)]
         for value, expected in zip(got, _RESIDUALS):
             assert value == pytest.approx(expected, abs=1e-10)
 
@@ -128,7 +132,7 @@ class TestAtomicDress:
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0", output_key="U0_dressed")
         samples = _dress_samples()
         dress.fit(samples)
-        residuals = [float(dressed.meta["U0_dressed"]) for dressed in map(dress.execute, samples)]
+        residuals = [float(_meta(dressed, "U0_dressed")) for dressed in map(dress.execute, samples)]
         assert sum(r * r for r in residuals) == pytest.approx(_RESIDUAL_SS, abs=1e-10)
 
     def test_exactly_determined_fit_dresses_to_zero(self):
@@ -136,20 +140,20 @@ class TestAtomicDress:
         samples = _exact_dress_samples()
         dress.fit(samples)
         for dressed in map(dress.execute, samples):
-            assert float(dressed.meta["U0_dressed"]) == pytest.approx(0.0, abs=1e-10)
+            assert float(_meta(dressed, "U0_dressed")) == pytest.approx(0.0, abs=1e-10)
 
     def test_output_key_defaults_to_the_target_key(self):
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0")
         samples = _dress_samples()
         dress.fit(samples)
-        assert float(dress.execute(samples[0]).meta["U0"]) == pytest.approx(-0.2, abs=1e-10)
+        assert float(_meta(dress.execute(samples[0]), "U0")) == pytest.approx(-0.2, abs=1e-10)
 
     def test_execute_leaves_the_input_sample_untouched(self):
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0")
         samples = _dress_samples()
         dress.fit(samples)
         dress.execute(samples[0])
-        assert float(samples[0].meta["U0"]) == pytest.approx(-9.0, abs=1e-10)
+        assert float(_meta(samples[0], "U0")) == pytest.approx(-9.0, abs=1e-10)
 
     def test_execute_keeps_the_atoms_block(self):
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0")
@@ -204,8 +208,8 @@ class TestAtomicDressState:
         restored = AtomicDress(elements=(1, 6, 8), target_key="U0", output_key="U0_dressed")
         restored.load_state_dict(fitted.state_dict())
         for sample in samples:
-            a = float(fitted.execute(sample).meta["U0_dressed"])
-            b = float(restored.execute(sample).meta["U0_dressed"])
+            a = float(_meta(fitted.execute(sample), "U0_dressed"))
+            b = float(_meta(restored.execute(sample), "U0_dressed"))
             assert a == pytest.approx(b, abs=1e-10)
 
     def test_a_restored_dress_no_longer_refuses_to_execute(self):
@@ -213,7 +217,7 @@ class TestAtomicDressState:
         fitted.fit(_dress_samples())
         restored = AtomicDress(elements=(1, 6, 8), target_key="U0")
         restored.load_state_dict(fitted.state_dict())
-        assert float(restored.execute(_dress_samples()[0]).meta["U0"]) == pytest.approx(
+        assert float(_meta(restored.execute(_dress_samples()[0]), "U0")) == pytest.approx(
             -0.2, abs=1e-10
         )
 
@@ -256,36 +260,37 @@ class TestUnitConvertApply:
     def test_scalar_target_is_rescaled(self):
         convert = UnitConvert({"U0": ("hartree", "eV")})
         out = convert.execute(_sample([1, 1], {"U0": 1.0}))
-        assert float(out.meta["U0"]) == pytest.approx(_HARTREE_TO_EV, rel=1e-6)
+        assert float(_meta(out, "U0")) == pytest.approx(_HARTREE_TO_EV, rel=1e-6)
 
     def test_conversion_is_linear_in_the_value(self):
         convert = UnitConvert({"U0": ("hartree", "eV")})
         out = convert.execute(_sample([1, 1], {"U0": 2.0}))
-        assert float(out.meta["U0"]) == pytest.approx(2 * _HARTREE_TO_EV, rel=1e-6)
+        assert float(_meta(out, "U0")) == pytest.approx(2 * _HARTREE_TO_EV, rel=1e-6)
 
     def test_every_configured_field_is_converted(self):
         convert = UnitConvert({"U0": ("hartree", "eV"), "U": ("hartree", "eV")})
         out = convert.execute(_sample([1], {"U0": 1.0, "U": 2.0}))
-        assert float(out.meta["U0"]) == pytest.approx(_HARTREE_TO_EV, rel=1e-6)
-        assert float(out.meta["U"]) == pytest.approx(2 * _HARTREE_TO_EV, rel=1e-6)
+        assert float(_meta(out, "U0")) == pytest.approx(_HARTREE_TO_EV, rel=1e-6)
+        assert float(_meta(out, "U")) == pytest.approx(2 * _HARTREE_TO_EV, rel=1e-6)
 
     def test_unconfigured_targets_pass_through(self):
         convert = UnitConvert({"U0": ("hartree", "eV")})
         out = convert.execute(_sample([1], {"U0": 1.0, "gap": 0.25}))
-        assert float(out.meta["gap"]) == pytest.approx(0.25, abs=1e-10)
+        assert float(_meta(out, "gap")) == pytest.approx(0.25, abs=1e-10)
 
     def test_input_sample_is_left_untouched(self):
         convert = UnitConvert({"U0": ("hartree", "eV")})
         sample = _sample([1, 1], {"U0": 1.0})
         convert.execute(sample)
-        assert float(sample.meta["U0"]) == pytest.approx(1.0, abs=1e-10)
+        assert float(_meta(sample, "U0")) == pytest.approx(1.0, abs=1e-10)
 
     def test_input_sample_meta_is_unchanged_as_a_whole(self):
         """Purity read off the frame: every key and value survives execute()."""
         convert = UnitConvert({"U0": ("hartree", "eV")})
         sample = _sample([1, 1], {"U0": 1.0, "gap": 0.25})
         convert.execute(sample)
-        assert dict(sample.meta) == pytest.approx({"U0": 1.0, "gap": 0.25}, abs=1e-10)
+        plain = {k: getattr(v, "value", v) for k, v in sample.meta.items()}
+        assert plain == pytest.approx({"U0": 1.0, "gap": 0.25}, abs=1e-10)
 
     def test_missing_target_raises(self):
         convert = UnitConvert({"U": ("hartree", "eV")})
@@ -325,22 +330,22 @@ class TestConstantLabel:
     def test_writes_the_constant_as_a_graph_level_target(self):
         label = ConstantLabel(key="total_charge", value=0.0)
         out = label.execute(_sample([1, 1, 8], {"energy": -9.0}))
-        assert float(out.meta["total_charge"]) == pytest.approx(0.0, abs=1e-10)
+        assert float(_meta(out, "total_charge")) == pytest.approx(0.0, abs=1e-10)
 
     def test_non_zero_constant(self):
         label = ConstantLabel(key="total_charge", value=-1.0)
         out = label.execute(_sample([1, 1, 8], {"energy": -9.0}))
-        assert float(out.meta["total_charge"]) == pytest.approx(-1.0, abs=1e-10)
+        assert float(_meta(out, "total_charge")) == pytest.approx(-1.0, abs=1e-10)
 
     def test_integer_value_is_stored_as_a_float(self):
         label = ConstantLabel(key="total_charge", value=0)
         out = label.execute(_sample([1], {"energy": -1.0}))
-        assert isinstance(out.meta["total_charge"], float)
+        assert isinstance(_meta(out, "total_charge"), float)
 
     def test_existing_targets_survive(self):
         label = ConstantLabel(key="total_charge", value=0.0)
         out = label.execute(_sample([1, 1, 8], {"energy": -9.0}))
-        assert float(out.meta["energy"]) == pytest.approx(-9.0, abs=1e-10)
+        assert float(_meta(out, "energy")) == pytest.approx(-9.0, abs=1e-10)
 
     def test_atoms_block_is_untouched(self):
         label = ConstantLabel(key="total_charge", value=0.0)
@@ -356,7 +361,7 @@ class TestConstantLabel:
     def test_existing_key_is_overwritten(self):
         label = ConstantLabel(key="total_charge", value=0.0)
         out = label.execute(_sample([1], {"total_charge": 3.0}))
-        assert float(out.meta["total_charge"]) == pytest.approx(0.0, abs=1e-10)
+        assert float(_meta(out, "total_charge")) == pytest.approx(0.0, abs=1e-10)
 
     def test_empty_key_raises(self):
         with pytest.raises(ValueError, match="key"):
@@ -367,19 +372,6 @@ class TestConstantLabel:
 # Graph-level meta lives on the frame, not behind a molhub wrapper
 # ---------------------------------------------------------------------------
 
-#: The wrapper identifiers ``hf-facade-01-meta-dissolution`` deletes. Boundary
-#: aware on purpose: ``write_metadata`` (DerivedLayout's unrelated conveyor API)
-#: and ``TargetSchema`` / ``TargetDeclaration`` must never match.
-_DISSOLVED_WRAPPERS = re.compile(r"\bTargets\b|\bMetaCodec\b|\bwrite_meta\b(?!data)")
-
-
-def _dissolved_wrapper_names(module: ModuleType) -> list[str]:
-    """Deleted meta-wrapper identifiers still named in *module*'s source."""
-    path = module.__file__
-    assert path is not None
-    source = Path(path).read_text(encoding="utf-8")
-    return sorted({match.group() for match in _DISSOLVED_WRAPPERS.finditer(source)})
-
 
 class TestTransformsMetaSurface:
     """The three transforms read and write ``frame.meta`` with nothing between."""
@@ -388,20 +380,28 @@ class TestTransformsMetaSurface:
         dress = AtomicDress(elements=(1, 6, 8), target_key="U0", output_key="U0_dressed")
         samples = _dress_samples()
         dress.fit(samples)
-        assert float(dress.execute(samples[0]).meta["U0_dressed"]) == pytest.approx(-0.2, abs=1e-10)
+        dressed = _meta(dress.execute(samples[0]), "U0_dressed")
+        assert float(dressed) == pytest.approx(-0.2, abs=1e-10)
 
     def test_meta_scalar_stays_the_documented_scalar_contract(self):
         """The deleted codec goes; the union naming what meta may hold does not."""
         assert MetaScalar == bool | int | float | str
 
-    def test_a_non_scalar_target_is_rejected_by_molpy(self):
-        """Rejection is the platform's job now, so its message is molpy's.
+    def test_a_non_scalar_target_is_the_platforms_call(self):
+        """The transforms delegate non-scalar handling to molpy, whichever it is.
 
-        molpy 0.13.1: ``metadata values must be bool, int, float, str, a
-        fixed-length sequence, or MetaValue, got NoneType``.
+        molpy 0.13 raises ``TypeError: metadata values must be …``; 0.14
+        widened meta to arbitrary JSON and round-trips ``None``. Either way
+        the transforms' scalar contract is enforced at read time by
+        ``_require_number``, so this pins only that the platform's behaviour
+        is one of the two known ones — never a silent third.
         """
-        with pytest.raises(TypeError, match="metadata values must be"):
-            _with_targets(_sample([1], {"U0": 1.0}), {"U0": None})
+        try:
+            out = _with_targets(_sample([1], {"U0": 1.0}), {"U0": None})
+        except TypeError as exc:  # molpy 0.13
+            assert "metadata values must be" in str(exc)
+        else:  # molpy >= 0.14
+            assert _meta(out, "U0") is None
 
     def test_module_namespace_holds_no_deleted_meta_wrapper(self):
         assert [
@@ -409,4 +409,4 @@ class TestTransformsMetaSurface:
         ] == []
 
     def test_module_source_names_no_deleted_meta_wrapper(self):
-        assert _dissolved_wrapper_names(transforms) == []
+        assert dissolved_wrapper_names(transforms) == []

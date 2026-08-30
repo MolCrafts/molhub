@@ -36,6 +36,7 @@ dependencies = [
   "h5py>=3.11",
   "pyyaml>=6.0",
   "typer>=0.12",
+  "lmdb>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +58,7 @@ dev = [
   "tox>=4.23",
 ]
 huggingface = ["huggingface_hub>=0.20"]
+omol = ["lmdb>=1.4"]
 # The conveyor's prepare stage writes molnex `molix.block/1` blocks through
 # `molhub.conveyor.prepare.MolnexBlockWriter`. molnex is **not published on
 # PyPI**, so this extra can only name the publishable half — torch. For the
@@ -88,7 +90,7 @@ Repository = "https://github.com/MolCrafts/molhub"
 where = ["src"]
 
 [tool.setuptools.package-data]
-molhub = ["schema/*.yaml", "registry_data/**/*.yaml"]
+molhub = ["schema/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

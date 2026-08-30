@@ -33,12 +33,43 @@ from pathlib import Path
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import TargetSchema
+from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
+from molhub.sources import Digest, Locator
 
 COORDINATE = "dataset:espaloma/zinc-typing@1"
-"""Sole registry handle. Upstream locators live only in the manifest."""
+"""Sole catalog handle. Locators live on :data:`MANIFEST`."""
+
+MANIFEST = Manifest(
+    coordinate=Coordinate.parse(COORDINATE),
+    title="ZINC (parm@Frosst) structures for GAFF typing recovery",
+    description=(
+        "~7535 ZINC molecules from the parm@Frosst distribution used by Espaloma's "
+        "atom-typing recovery experiment (~7529 after cleaning in some reports). "
+        "Archive: parm_at_Frosst.tgz (zinc.sdf + type tables). Molecule-level 80:10:10 "
+        "split seed 2666 for espaloma-original. GAFF 1.81 labels are not in the SDF; "
+        "assign offline with AmberTools/OpenBabel or consume pre-typed fixtures."
+    ),
+    license="unknown",
+    doi="10.1039/D2SC02739A",
+    artifacts={
+        "main": Artifact(
+            role="main",
+            filename="parm_at_Frosst.tgz",
+            locators=(
+                Locator.parse("https://www.ccl.net/cca/data/parm_at_Frosst/parm_at_Frosst.tgz"),
+            ),
+            digest=Digest.parse(
+                "sha256:e1c4a042c358dbe1f462139568c3c91b9d9dc471ca674fad06814ec322be4c9f"
+            ),
+            size=4_165_650,
+        )
+    },
+    targets=TargetDeclaration(graph_level=(), atom_level=("atom_type",)),
+)
 
 _SPLITS: frozenset[str] = frozenset({"train", "val", "test"})
 
@@ -247,5 +278,5 @@ class ZincTypingDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> Frame:
-        return self._frames[idx]
+    def __getitem__(self, idx: int) -> FrameCollection:
+        return (self._frames[idx],)

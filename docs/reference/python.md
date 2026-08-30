@@ -2,26 +2,18 @@
 
 ## Loading datasets
 
-The dataset front door, in HuggingFace spelling. `split` is a required keyword:
-`load_dataset` returns one dataset, never a container of splits — discovery is
-`load_dataset_builder(name).info.splits`. `revision` is molhub's `@version`, not
-a git sha; leaving it out takes the newest version the registry declares, and
-`info.coordinate` echoes the one that was resolved, so a run can record what it
-actually read.
+A dataset is a class. `load` / `fetch` / `search` are name verbs, not
+kind-specific factories. There is no `load_dataset`.
 
 <!-- test: fixture-home -->
 
 ```python
 import molhub
 
-info = molhub.load_dataset_builder("themol/mbis").info   # table-backed: content, no shard bytes
-assert info.coordinate.canonical.startswith("dataset:themol/mbis@")
-assert info.features[0] == molhub.Feature(name="atomic_charge", level="atom", units="e")
-assert [split.name for split in info.splits]             # names, from the split derivation
-
-train = molhub.load_dataset("themol/mbis", split="train")
-assert len(train)                                        # the split table's count
-frame = train[0]                                         # a molpy Frame
+ds = molhub.load("themol/mbis")
+train = molhub.SubsetDataset(ds, molhub.assignment(ds)["train"])
+record = train[0]                                        # FrameCollection
+frame = record[0]                                        # one geometry
 assert {"element", "x", "y", "z", "atomic_charge"} <= set(frame["atoms"].keys())
 assert "mbis_shells" in frame
 ```
@@ -34,16 +26,16 @@ once per file, random access to a late row pays for the walk — the same semant
 
 Opening a *declared* split downloads that split's file — `load_dataset("3bpa",
 split="test_600K")` fetches the 3BPA file carrying it — and both the map-style
-record path and `.info` announce what they are about to pull on stderr first,
+record path announce what they are about to pull on stderr first,
 staying silent for anything already cached. One honest gap remains: constructing
 the view itself for a declared or whole-content dataset (3BPA, qm9, polymer-tg)
 fetches inside the dataset's own constructor and is the one path that can still
 move bytes without a notice. A later spec closes it; until then, ask
-`load_dataset_builder(name).describe_download_size` first if the number matters.
+`molhub info <name>` first if the number matters.
 
 ### Which datasets this door serves
 
-`load_dataset` / `load_dataset_builder` / `prepare` dispatch off one table, and
+`load` / `prepare` dispatch off one table, and
 a dataset that is not in it is refused rather than half-served. Eight entries:
 
 | Dataset | Splits | Where they come from |
@@ -55,7 +47,7 @@ a dataset that is not in it is refused rather than half-served. Eight entries:
 
 Three more are addressable and describable but have no split to declare, and
 their refusal hands over the class API that opens them: `molcrafts/revmd17`
-(`RevMD17Dataset(root, molecule="aspirin")` — the molecule is a selector no
+(`RevMD17Dataset(root, molecule="aspirin").load()` — the molecule is a selector no
 coordinate carries), `themol/hessian-relax` and `themol/torsion-relax`
 (`THEMolHessianRelax(hub=hub).load(role="shard-000")` and its torsion sibling —
 published in parts, with no table saying which record is in which split).
@@ -64,11 +56,11 @@ Anything else in the registry is bytes molhub ships no reader for: fetch it with
 
 ### What you get back
 
-A record is a molpy object with no molhub wrapper on top of it. One geometry is a
-`molpy.Frame`; a multi-frame sampling unit that must not be broken apart — a
-torsion profile, a geometry optimization — is a `molpy.Trajectory` whose
-`.frames` are `Frame`s, each with its own `meta`. `info.record_type` says which
-of the two a dataset yields before you open it.
+A record is a `FrameCollection` (`Sequence[Frame]`) with no molhub wrapper
+on top of it. One geometry is a length-1 collection; a multi-frame sampling
+unit that must not be broken apart — a torsion profile, a geometry
+optimization — is a longer collection whose frames each carry their own
+`meta`. `info.record_type` is `FrameCollection` either way.
 
 Where a value sits on a record follows one rule:
 
@@ -78,8 +70,8 @@ Where a value sits on a record follows one rule:
   as a `forces` array: `forces` is the *declared target name*, and the columns
   are what the record holds.
 - **Scalars are `frame.meta` entries** — `frame.meta["energy"]`. On a
-  `Trajectory`, each frame carries its own, e.g.
-  `trajectory.frames[0].meta["torsion_angle"]`.
+  multi-frame record, each frame carries its own, e.g.
+  `record[0].meta["torsion_angle"]`.
 - **Anything whose row count is neither one nor the atom count is a named block
   of its own**: `frame["mbis_shells"]`, `frame["hessian"]`
   (`row`/`col`/`value`), `frame["scan"]` (the four scanned atom indices).
@@ -89,11 +81,9 @@ class: molpy re-exports its `Frame` and `Block` from molrs, the Rust core it is
 built on (`from molrs.frame import Block, Frame` in molpy's own `__init__`). The
 API to program against is molpy's, and molhub imports it as `molpy.Frame`.
 
-Which names a record carries, where each of them sits and what it is measured in
-is `info.features` — one `Feature(name, level, units)` per declared target, in
-name order. `level` is `"atom"` (an `atoms` column), `"meta"` (a `frame.meta`
-entry) or `"block"` (a named block); `units` is the unit string the dataset
-declares, and `""` when it declares none.
+Which names a record carries is on the `Frame` itself. `molhub info` prints
+the declared names, where each sits (`atom` column / `meta` / named block),
+and the unit string the dataset declares.
 
 For `themol/mbis` that resolves to fourteen per-atom columns and one block:
 
@@ -111,7 +101,7 @@ three, so it has more rows than the molecule has atoms and its rows do not line
 up with `atoms` at all. Its three columns are `atom` (the shell's atom index),
 `population` (in `e`) and `inverse_width` (in `angstrom^-1`). The two floats
 disagree on their unit, which is why the block declares no single `units` string
-and `Feature("mbis_shells", "block", "")` carries an empty one.
+and `molhub info` prints an empty unit for that block.
 
 `meta["source_record_id"]` and `meta["source_id"]` are THEMol provenance — the
 record's group key in the published file, and the coordinate-plus-role of the
@@ -121,12 +111,10 @@ else, with its forces in the `fx`/`fy`/`fz` columns.
 
 ### How much a dataset weighs
 
-`info.download_size` is every declared byte of the artifact — what a full
-download costs, in bytes, summed over the files the manifest declares. It is a
-per-dataset number, not a number for THEMol as a whole: `themol/mbis` declares
-`31041658614` bytes (28.9 GiB), while `themol/hessian-relax` declares
-`1048543472353` (976.5 GiB). `print(info)` renders the count in binary units and
-keeps the exact value on `download_size` for whatever greps it.
+`molhub info themol/mbis` prints every declared byte of the artifact — what a
+full download costs, summed over the files the manifest declares. It is a
+per-dataset number, not a number for THEMol as a whole: `themol/mbis` is
+28.9 GiB; `themol/hessian-relax` is 976.5 GiB.
 
 ### One file at a time
 
@@ -142,13 +130,13 @@ the file it stopped inside.
 ```python
 import molhub
 
-walk = molhub.load_dataset(
+walk = molhub.load(
     "themol/mbis",
-    split="train",
     streaming=True,
     disk_budget=8_000_000_000,   # bytes of fetched files resident at once
 )
-for frame in walk.take(1):
+for record in walk.take(1):
+    frame = record[0]
     print(frame.meta["source_record_id"], frame.meta["source_id"])
 ```
 
@@ -170,24 +158,20 @@ Nothing about the transfer, the bookkeeping or the byte accounting reaches the
 records: they are the same `molpy.Frame` objects the map-style view yields.
 
 A dataset published as one whole file has nothing to walk a piece at a time and
-says so; read it with `load_dataset(name, split=...)`.
+says so; read it with `load_dataset(name)`.
 
-### Materializing a split as blocks
+### Materializing as blocks
 
-`prepare` writes one split into a molnex block directory, reading it through the
-same bounded walk. Blocks are split-pure, so the split is required; what comes
-back says where every sealed root is and what it holds.
+`prepare` writes the dataset into a molnex block directory, reading it through
+the same bounded walk.
 
 <!-- test: skip writes molnex molix.block/1 blocks, which needs molnex importable -->
 
 ```python
 from molhub import prepare
 
-prepared = prepare("themol/torsion-scan", split="train", output_dir="blocks/")
-prepared.blocks[0].root          # blocks/themol-torsion-scan@1-train-000
-prepared.blocks[0].split         # 'train'
-prepared.blocks[0].unit_count    # units sealed into that root
-prepared.blocks[0].frame_count   # frames those units hold
+prepare("themol/torsion-scan", output_dir="blocks/")
+# molnex: BlockDataset.load_from_disk("blocks/")
 ```
 
 molnex reads the directory back with `BlockDataset.load_from_disk("blocks/")`.
@@ -237,7 +221,7 @@ table. `molcrafts/qm9` and `molcrafts/polymer-tg` are not in that group — thei
 whole content is served as `split="train"` — so what it covers is the three
 artifacts whose reader needs a selector a coordinate does not carry:
 `load_dataset("revmd17", split="train")` refuses by naming
-`RevMD17Dataset(root, molecule="aspirin")`, and the two THEMol relax artifacts
+`RevMD17Dataset(root, molecule="aspirin").load()`, and the two THEMol relax artifacts
 refuse by naming `THEMolHessianRelax(hub=hub).load(role="shard-000")` /
 `THEMolTorsionRelax(hub=hub).load(role="shard-000")`. For a registry artifact
 molhub ships no reader for, the refusal says so and points at
@@ -280,37 +264,16 @@ the archive with `molhub fetch dataset:espaloma/zinc-typing@1`, write the
 import molhub
 
 try:
-    molhub.load_dataset("themol/mbis", split="validation")
-except molhub.UnknownSplit as error:
-    print(error)          # names the splits this dataset does declare
-else:
-    raise AssertionError("expected UnknownSplit was not raised")
-
-try:
-    molhub.prepare("themol/mbis", split="train", output_dir="blocks/")
+    molhub.prepare("themol/mbis", output_dir="blocks/")
 except molhub.UnsupportedRecordError as error:
     print(error)          # nothing was fetched and nothing was created
 else:
     raise AssertionError("expected UnsupportedRecordError was not raised")
 ```
 
-::: molhub.load_dataset
-
-::: molhub.load_dataset_builder
+::: molhub.load
 
 ::: molhub.prepare
-
-::: molhub.DatasetBuilder
-
-::: molhub.DatasetInfo
-
-::: molhub.loader.info.Feature
-
-::: molhub.loader.info.SplitInfo
-
-::: molhub.loader.info.ByteSize
-
-::: molhub.loader.naming.DatasetName
 
 ::: molhub.loader.naming.AmbiguousRevision
 
@@ -320,13 +283,7 @@ else:
 
 ::: molhub.loader.mapstyle.SplitDataset
 
-::: molhub.loader.mapstyle.ShardIndex
-
 ::: molhub.loader.streaming.StreamingSplitDataset
-
-::: molhub.loader.streaming.BoundedStream
-
-::: molhub.loader.materialize.BlockExport
 
 ## Molhub
 
@@ -334,11 +291,11 @@ else:
 
 ## Coordinate
 
-::: molhub.Coordinate
+::: molhub.coordinate.Coordinate
 
 ## Manifest
 
-::: molhub.Manifest
+::: molhub.manifest.Manifest
 
 ## Sources
 

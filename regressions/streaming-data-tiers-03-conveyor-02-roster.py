@@ -6,8 +6,8 @@ Exercises the public surface of ``molhub.conveyor``
 directory this script creates, in the three scenarios the spec names:
 
 1. *Projection.* :class:`~molhub.conveyor.BlockRoster` over the **shipped**
-   ``src/molhub/registry_data/dataset/themol/mbis/1.yaml`` — parsed by direct
-   path, so no ``$MOLHUB_REGISTRY``, no ``$MOLHUB_HOME`` and no network — paired
+   ``THEMolMBIS`` catalog entry in ``molhub.dataset.themol_files`` — no
+   YAML, no ``$MOLHUB_REGISTRY``, no ``$MOLHUB_HOME`` and no network — paired
    with the ``electrostatic`` role of ``Class1Universal2026().load()``. Eight
    blocks, one hot role, 29.6 GB, and the shard-003 size and digest of the
    corruption incident, all as hard-coded literals; every block's ``id.split``
@@ -36,11 +36,11 @@ loud diff rather than a silent fork.
 Provenance of the goldens (no external oracle at any point):
 
 * Scenario 1's literals are transcribed from
-  ``src/molhub/registry_data/dataset/themol/mbis/1.yaml``, which
+  ``src/molhub/dataset/themol_files.py`` (``MBIS``), which
   ``scripts/generate_themol_manifests.py`` generates from the official
   ByteDance-Seed/THEMol ``sha256_ref.csv`` at HuggingFace commit
-  ``e029fa677b2638b29efa5930a1173d4e41abcab8``. That file is marked "do not edit
-  shard entries by hand"; regenerating it means updating these literals in the
+  ``e029fa677b2638b29efa5930a1173d4e41abcab8``. Do not edit shard rows by
+  hand; regenerating the catalog means updating these literals in the
   same commit.
 * Scenarios 2-3's fixture digests were taken once, offline, with stdlib
   ``hashlib`` over byte literals authored in this file — the case the repo rule
@@ -68,7 +68,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from molhub import Coordinate, Manifest  # noqa: E402
 from molhub.conveyor import (  # noqa: E402
     Backoff,
     BlockId,
@@ -78,13 +77,14 @@ from molhub.conveyor import (  # noqa: E402
     ShardTransfer,
     TransferLedger,
 )
+from molhub.coordinate import Coordinate  # noqa: E402
+from molhub.dataset.themol_files import MBIS  # noqa: E402
 from molhub.dataset.universal_class_i import Class1Universal2026  # noqa: E402
+from molhub.manifest import Manifest  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Scenario 1 goldens — transcribed from the shipped manifest
 # ---------------------------------------------------------------------------
-
-_MBIS_MANIFEST = ROOT / "src/molhub/registry_data/dataset/themol/mbis/1.yaml"
 
 _COORDINATE = "dataset:themol/mbis@1"
 _ROLE_NAME = "electrostatic"
@@ -348,7 +348,7 @@ def _fixture_roster(workdir: Path) -> BlockRoster:
 
 def check_projection() -> None:
     """The shipped ``themol/mbis@1`` manifest projects the eight literal blocks."""
-    manifest = Manifest.from_path(_MBIS_MANIFEST)
+    manifest = MBIS
     role = Class1Universal2026().load().role(_ROLE_NAME)
     roster = BlockRoster(manifest, role)
 

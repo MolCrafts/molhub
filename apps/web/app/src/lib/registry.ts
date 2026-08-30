@@ -14,8 +14,8 @@
  * It also changes *when* a missing registry is discovered. An import that cannot
  * be resolved stops the bundler with the path it looked for; a fetch that 404s
  * renders an empty registry that looks merely disappointing. `registry:sync`
- * materializes the explicit snapshot input before Rsbuild starts. The Web app
- * never walks `molhub-registry/artifacts` or owns registry compilation.
+ * calls the molhub Python package (`Registry.builtin().snapshot()`) before
+ * Rsbuild starts. The Web app never walks a YAML tree or owns compilation.
  */
 
 import {

@@ -5,7 +5,7 @@ A coordinate has the canonical form `kind:namespace/name@version`. The version i
 
 <!-- test: exec -->
 ```python
-from molhub import Coordinate
+from molhub.coordinate import Coordinate
 
 coordinate = Coordinate.parse("qm9@v2")
 assert coordinate.canonical == "dataset:molcrafts/qm9@v2"

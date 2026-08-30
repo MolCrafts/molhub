@@ -6,15 +6,10 @@ and hard to work around quietly. Two properties are guarded — ac-007's one-way
 edge (the loader sits *above* ``dataset/`` and ``conveyor/`` and imports both;
 neither may import it back) and the bound on the free-function sanction.
 
-**The sanction is three functions in two modules.** The 2026-08-15 operator
-override sanctions ``load_dataset``, ``load_dataset_builder`` and ``prepare``
-and nothing else. The first two read a dataset and live in
-``loader/__init__.py``; ``prepare`` writes one, and
-``.claude/specs/hf-facade-04-streaming-prepare.md`` puts it where the writing
-happens — "``materialize.py`` — ``BlockExport`` + the ``prepare`` entry" — beside
-the type it delegates to rather than one package up from it. ``molhub/__init__``
-re-exports it, so ``from molhub import prepare`` is unchanged; what is pinned
-here is that the *definition* is in one place and that place is named.
+**The sanction is two functions in two modules.** The user-facing façade is
+``load`` (read a named artifact) and ``prepare`` (write blocks). ``load`` lives
+in ``loader/__init__.py``; ``prepare`` is defined in ``materialize.py``. There
+is no ``load`` factory.
 
 The package is located by path rather than imported, so a module that has not
 landed shows up as a named failure in :class:`TestLoaderPackageIsPresent`
@@ -44,14 +39,13 @@ _BELOW_ROOTS = [
 ]
 _BELOW_FILES = sorted(path for root in _BELOW_ROOTS for path in root.rglob("*.py"))
 
-# The whole of the free-function sanction, spelled out where a reviewer can see
-# it: three names, and nothing else anywhere in the package.
-_SANCTIONED_FREE_FUNCTIONS = frozenset({"load_dataset", "load_dataset_builder", "prepare"})
+# The whole of the free-function sanction: two names, nothing else in the package.
+_SANCTIONED_FREE_FUNCTIONS = frozenset({"load", "prepare"})
 
 # Which module each sanctioned name is *defined* in. A module absent from this
 # table declares no free functions at all — its verbs are methods on its types.
 _SANCTIONED_BY_MODULE = {
-    "__init__.py": frozenset({"load_dataset", "load_dataset_builder"}),
+    "__init__.py": frozenset({"load"}),
     "materialize.py": frozenset({"prepare"}),
 }
 
@@ -147,18 +141,23 @@ class TestTheFreeFunctionSanctionIsBounded:
         assert module.is_file(), f"{module} is missing"
         assert _public_free_functions(module) == _SANCTIONED_BY_MODULE["materialize.py"]
 
-    def test_the_package_declares_exactly_the_three_sanctioned_functions(self):
-        """The sum over the package: no fourth free function anywhere in it."""
+    def test_the_package_declares_exactly_the_sanctioned_functions(self):
+        """The sum over the package: no extra free function anywhere in it."""
         declared = {name for path in _MODULE_FILES for name in _public_free_functions(path)}
         assert declared == set(_SANCTIONED_FREE_FUNCTIONS)
 
-    def test_the_loader_facade_exports_all_three(self):
+    def test_the_loader_facade_exports_the_sanctioned_functions(self):
         """Where they are defined is layering; where they are reached is the API."""
         assert _SANCTIONED_FREE_FUNCTIONS <= set(molhub.loader.__all__)
 
-    def test_the_distribution_root_defines_no_free_function_of_its_own(self):
-        """``molhub/__init__`` is the front door, not a place work is written."""
-        assert _public_free_functions(_ROOT_INIT) == set()
+    def test_the_distribution_root_only_defines_name_verbs(self):
+        """``fetch`` / ``search`` / ``artifacts`` / ``snapshot`` are package verbs."""
+        assert _public_free_functions(_ROOT_INIT) == {
+            "fetch",
+            "search",
+            "artifacts",
+            "snapshot",
+        }
 
     def test_the_distribution_root_re_exports_the_one_the_loader_defines(self):
         """``from molhub import prepare`` keeps working — it is the same object."""

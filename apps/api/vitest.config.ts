@@ -18,5 +18,9 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ["./test/apply-migrations.ts"],
+    // One miniflare (workerd) instance at a time: parallel native-runtime
+    // startups race for resources and fail intermittently on shared hosts,
+    // and four workerd boots buy no wall-clock on a 4-file suite anyway.
+    fileParallelism: false,
   },
 });

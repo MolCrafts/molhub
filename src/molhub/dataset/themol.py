@@ -5,22 +5,20 @@ torsion scan or optimization trajectory into interchangeable frames.  Dataset
 definition construction performs no IO; :meth:`load` is the explicit fetch and
 index boundary.
 
-**A record IS a molpy object.** One geometry is a :class:`molpy.Frame` — the
-Cartesian Hessian is a COO ``hessian`` block, the per-atom MBIS multipoles are
-``atoms`` columns while the MBIS Slater shells (one row per *shell*, not per
-atom) are the ``mbis_shells`` block, scalars are ``frame.meta`` entries — and a
-multi-frame sampling unit (a relaxation, a torsion profile) is a :class:`molpy.Trajectory`
-whose per-frame ``meta`` carries that frame's scalars. There is no wrapper
-object on top of ``Frame``; the four record dataclasses that used to be one
-were deleted by ``hf-facade-02-frame-records`` (D1), per the 2026-08-15
-operator note in ``.claude/notes/notes.md``.
+**A record IS a** :data:`~molpy.FrameCollection` (**``Sequence[Frame]``**).
+One geometry is a length-1 collection — the Cartesian Hessian is a COO
+``hessian`` block, the per-atom MBIS multipoles are ``atoms`` columns while
+the MBIS Slater shells (one row per *shell*, not per atom) are the
+``mbis_shells`` block, scalars are ``frame.meta`` entries. A multi-frame
+sampling unit (a relaxation, a torsion profile) is a longer collection whose
+per-frame ``meta`` carries that frame's scalars. There is no
+:class:`~molpy.Trajectory` and no wrapper object on top of ``Frame``.
 
 Laziness *between* records — the per-process HDF5 handle in
 :class:`THEMolShardDataset` — is what bounds memory and is unchanged. Laziness
-*within* one record is deliberately given up (D2): ``molpy.Trajectory``
-materializes on construction, and the largest unit (a torsion-relax scan,
-≈24 constraints × ≈10 steps × 40 atoms × 3 × 8 B ≈ 230 kB) is three orders
-below the block ceiling.
+*within* one record is given up: the collection is a materialized tuple, and
+the largest unit (a torsion-relax scan, ≈24 constraints × ≈10 steps × 40
+atoms × 3 × 8 B ≈ 230 kB) is three orders below the block ceiling.
 """
 
 from __future__ import annotations
@@ -31,11 +29,11 @@ from pathlib import Path
 from typing import Any, Callable, Generic, TypeVar, overload
 
 import numpy as np
-from molpy import Block, Element, Frame, Trajectory
+from molpy import Block, Element, Frame
 
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import TargetSchema
+from molhub.dataset.protocol import FrameCollection, TargetSchema
 
 __all__ = [
     "THEMOL_UNITS",
@@ -375,7 +373,7 @@ def _frame_with_energy_forces(
     return frame
 
 
-def _read_hessian(handle: Any, key: str, source_id: str) -> Frame:
+def _read_hessian(handle: Any, key: str, source_id: str) -> FrameCollection:
     """Read one equilibrium record as a Frame carrying a COO ``hessian`` block.
 
     Args:
@@ -409,7 +407,7 @@ def _read_hessian(handle: Any, key: str, source_id: str) -> Frame:
             "value": hessian.reshape(-1),
         }
     )
-    return frame
+    return (frame,)
 
 
 def _per_atom(key: str, name: str, values: Any, n_atoms: int) -> np.ndarray:
@@ -449,7 +447,7 @@ def _scalar_column(key: str, name: str, array: np.ndarray) -> np.ndarray:
     )
 
 
-def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
+def _read_mbis(handle: Any, key: str, source_id: str) -> FrameCollection:
     """Read one MBIS record as a Frame: multipoles per atom, shells per shell.
 
     Args:
@@ -542,7 +540,7 @@ def _read_mbis(handle: Any, key: str, source_id: str) -> Frame:
             "inverse_width": np.ascontiguousarray(shells[:, 2]),
         }
     )
-    return frame
+    return (frame,)
 
 
 def _numbered_keys(group: Any, prefix: str) -> list[str]:
@@ -583,8 +581,8 @@ def _scan_block(indices: tuple[int, int, int, int]) -> Block:
     )
 
 
-def _read_hessian_relax(handle: Any, key: str, source_id: str) -> Trajectory:
-    """Read one relaxation as a Trajectory ordered by its per-frame step index.
+def _read_hessian_relax(handle: Any, key: str, source_id: str) -> FrameCollection:
+    """Read one relaxation as a FrameCollection ordered by per-frame step index.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -592,9 +590,9 @@ def _read_hessian_relax(handle: Any, key: str, source_id: str) -> Trajectory:
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :class:`~molpy.Trajectory` of one frame per optimization step, each
-        carrying ``energy`` and ``step_index`` in its ``meta`` and its forces as
-        ``fx``/``fy``/``fz`` atom columns.
+        A :data:`~molpy.FrameCollection` of one frame per optimization step,
+        each carrying ``energy`` and ``step_index`` in its ``meta`` and its
+        forces as ``fx``/``fy``/``fz`` atom columns.
 
     Raises:
         ValueError: The record has no steps, or a step's geometry disagrees with
@@ -624,11 +622,11 @@ def _read_hessian_relax(handle: Any, key: str, source_id: str) -> Trajectory:
                 topology_frame=topology,
             )
         )
-    return Trajectory(frames)
+    return tuple(frames)
 
 
-def _read_torsion(handle: Any, key: str, source_id: str) -> Trajectory:
-    """Read one complete constrained torsion profile as a Trajectory.
+def _read_torsion(handle: Any, key: str, source_id: str) -> FrameCollection:
+    """Read one complete constrained torsion profile as a FrameCollection.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -636,9 +634,10 @@ def _read_torsion(handle: Any, key: str, source_id: str) -> Trajectory:
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :class:`~molpy.Trajectory` of one frame per constraint, each carrying
-        ``energy``, ``torsion_angle``, ``scan_id`` and ``constraint_index`` in
-        its ``meta`` and the scanned dihedral in a 1-row ``scan`` block.
+        A :data:`~molpy.FrameCollection` of one frame per constraint, each
+        carrying ``energy``, ``torsion_angle``, ``scan_id`` and
+        ``constraint_index`` in its ``meta`` and the scanned dihedral in a
+        1-row ``scan`` block.
 
     Raises:
         ValueError: The record does not name four atom indices, contains no
@@ -673,11 +672,11 @@ def _read_torsion(handle: Any, key: str, source_id: str) -> Trajectory:
         )
         frame["scan"] = _scan_block(indices)
         frames.append(frame)
-    return Trajectory(frames)
+    return tuple(frames)
 
 
-def _read_torsion_relax(handle: Any, key: str, source_id: str) -> Trajectory:
-    """Read one torsion-constrained optimization as a Trajectory.
+def _read_torsion_relax(handle: Any, key: str, source_id: str) -> FrameCollection:
+    """Read one torsion-constrained optimization as a FrameCollection.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -685,10 +684,10 @@ def _read_torsion_relax(handle: Any, key: str, source_id: str) -> Trajectory:
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :class:`~molpy.Trajectory` of one frame per (constraint, step), in
-        that order, each carrying ``energy``, ``torsion_angle``, ``scan_id``,
-        ``constraint_index`` and ``step_index`` in its ``meta`` and the scanned
-        dihedral in a 1-row ``scan`` block.
+        A :data:`~molpy.FrameCollection` of one frame per (constraint, step),
+        in that order, each carrying ``energy``, ``torsion_angle``,
+        ``scan_id``, ``constraint_index`` and ``step_index`` in its ``meta``
+        and the scanned dihedral in a 1-row ``scan`` block.
 
     Raises:
         ValueError: The record does not name four atom indices, a constraint's
@@ -730,7 +729,7 @@ def _read_torsion_relax(handle: Any, key: str, source_id: str) -> Trajectory:
             frames.append(frame)
     if not frames:
         raise ValueError(f"THEMol torsion relaxation {key} contains no steps.")
-    return Trajectory(frames)
+    return tuple(frames)
 
 
 class _THEMolDefinition(Generic[RecordT]):
@@ -779,8 +778,8 @@ class _THEMolDefinition(Generic[RecordT]):
     units={"hessian": THEMOL_UNITS["hessian"]},
     blocks=("hessian",),
 )
-class THEMolHessian(_THEMolDefinition[Frame]):
-    """THEMol equilibrium geometries; one record is one :class:`~molpy.Frame`.
+class THEMolHessian(_THEMolDefinition[FrameCollection]):
+    """THEMol equilibrium geometries; one record is a length-1 FrameCollection.
 
     The Cartesian Hessian is the frame's ``hessian`` block —
     ``row``/``col``/``value``, all ``(3N)**2`` entries in row-major order — not
@@ -806,8 +805,8 @@ class THEMolHessian(_THEMolDefinition[Frame]):
     tags=("off-equilibrium", "energy", "forces", "class-i"),
     units=_ENERGY_FORCE_UNITS,
 )
-class THEMolHessianRelax(_THEMolDefinition[Trajectory]):
-    """THEMol relaxations; one record is one :class:`~molpy.Trajectory`.
+class THEMolHessianRelax(_THEMolDefinition[FrameCollection]):
+    """THEMol relaxations; one record is one FrameCollection.
 
     Per-frame ``meta`` carries ``energy`` and ``step_index`` — the latter is
     where the deleted ``optimization_steps`` tuple went.
@@ -831,8 +830,8 @@ class THEMolHessianRelax(_THEMolDefinition[Trajectory]):
     tags=("torsion", "profile", "class-i"),
     units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
-class THEMolTorsionScan(_THEMolDefinition[Trajectory]):
-    """THEMol torsion profiles; one whole scan is one :class:`~molpy.Trajectory`.
+class THEMolTorsionScan(_THEMolDefinition[FrameCollection]):
+    """THEMol torsion profiles; one whole scan is one FrameCollection.
 
     Per-frame ``meta`` carries ``energy``, ``torsion_angle``, ``scan_id`` and
     ``constraint_index``; the scanned dihedral is the 1-row ``scan`` block
@@ -858,7 +857,7 @@ class THEMolTorsionScan(_THEMolDefinition[Trajectory]):
     tags=("off-equilibrium", "torsion", "energy", "forces", "class-i"),
     units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
-class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
+class THEMolTorsionRelax(_THEMolDefinition[FrameCollection]):
     """THEMol torsion-constrained optimizations, one scan per record.
 
     Same shape as :class:`THEMolTorsionScan`, plus a per-frame
@@ -882,8 +881,8 @@ class THEMolTorsionRelax(_THEMolDefinition[Trajectory]):
     units=_MBIS_UNITS,
     blocks=(_MBIS_SHELL_BLOCK,),
 )
-class THEMolMBIS(_THEMolDefinition[Frame]):
-    """THEMol MBIS supervision; one record is one :class:`~molpy.Frame`.
+class THEMolMBIS(_THEMolDefinition[FrameCollection]):
+    """THEMol MBIS supervision; one record is a length-1 FrameCollection.
 
     Every *per-atom* target is an ``atoms`` column, so ``TARGET_SCHEMA.atom_level``
     names the columns a reader will actually find on the frame:

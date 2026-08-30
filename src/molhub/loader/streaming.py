@@ -3,7 +3,7 @@
 ``load_dataset(name, split=..., streaming=True)`` hands back a
 :class:`StreamingSplitDataset`: it walks the dataset's published files in
 manifest order, keeps **at most one of them on local disk**, and yields the
-records of one split as the :class:`molpy.Frame` / :class:`molpy.Trajectory` the
+records of one split as the :data:`~molpy.FrameCollection` the
 dataset's own reader builds. ``.take(n)`` bounds the walk in HuggingFace
 spelling.
 
@@ -181,7 +181,7 @@ class PublishedParts:
             "Every delivered file is re-verified against a published checksum before it is "
             "read and thrown away again, so there is nothing to verify these against. Ask "
             "whoever published it to record the checksums, or read the dataset whole with "
-            "load_dataset(name, split=..., streaming=False), which verifies nothing and "
+            "load_dataset(name, streaming=False), which verifies nothing and "
             "keeps what it fetches."
         )
 
@@ -282,18 +282,21 @@ class StreamingSplitDataset:
         self,
         definition: _ShardDefinition,
         *,
-        split: str,
-        table: _SplitTable,
         parts: Sequence[RemoteBlock],
         transfer: ShardTransfer,
         ledger: Ledger,
         disk_budget: int = DEFAULT_BUDGET_BYTES,
+        table: _SplitTable | None = None,
+        split: str | None = None,
     ) -> None:
-        counts = table.counts()
-        if split not in counts:
-            raise KeyError(
-                f"{split!r} is not a split of this table, which records {sorted(counts)}."
-            )
+        if split is not None:
+            if table is None:
+                raise TypeError("a filtered walk needs the published assignment table")
+            counts = table.counts()
+            if split not in counts:
+                raise KeyError(
+                    f"{split!r} is not a split of this table, which records {sorted(counts)}."
+                )
         if disk_budget <= 0:
             raise ValueError(
                 f"disk_budget is a number of bytes and must be positive; got {disk_budget!r}. "
@@ -308,8 +311,8 @@ class StreamingSplitDataset:
         self._disk_budget = disk_budget
 
     @property
-    def split(self) -> str:
-        """The split this walk yields."""
+    def split(self) -> str | None:
+        """The split this walk yields — ``None`` for an unfiltered walk."""
         return self._split
 
     @property
@@ -339,7 +342,7 @@ class StreamingSplitDataset:
         """Walk the parts in order, yielding this split's records.
 
         Yields:
-            One :class:`molpy.Frame` or :class:`molpy.Trajectory` per record of
+            One :data:`~molpy.FrameCollection` per record of
             this split, in the order the published files hold them.
 
         Raises:
@@ -364,7 +367,7 @@ class StreamingSplitDataset:
             records = self._definition(path).load(part.id.block_id)
             try:
                 for index, key in enumerate(records.keys()):
-                    if self._split_of(key) == self._split:
+                    if self._split is None or self._split_of(key) == self._split:
                         yield records[index]
             except GeneratorExit:
                 # A bounded walk stopping at its own limit: this file was read
@@ -416,6 +419,12 @@ class StreamingSplitDataset:
 
     def _split_of(self, key: str) -> str:
         """The split *key* belongs to, refusing loudly outside the key space."""
+        if self._table is None:
+            raise RuntimeError(
+                "_split_of on an unfiltered walk: the constructor admits a "
+                "table-less walk only with split=None, and iteration checks "
+                "split before asking for a key's split"
+            )
         try:
             return self._table.split_of(key)
         except KeyError as error:

@@ -34,9 +34,13 @@ class CollectionRole:
             form ``<block>.<column>`` addresses one column of a source block
             whose columns do not share a unit, which is the only honest
             spelling when a single string would be wrong for one of them.
-        reference_method: Electronic-structure provenance for the targets.
+        reference_method: Electronic-structure or classical-MM provenance
+            for the targets.
         derived: Whether the source must be materialized by a versioned,
             reproducible derivation before production use.
+        active: Whether this role belongs to the v0 resolve/materialize
+            set. Inactive roles stay addressable by :meth:`MultiSourceDatasetCollection.role`
+            but are omitted from :attr:`MultiSourceDatasetCollection.source_coordinates`.
     """
 
     name: str
@@ -46,6 +50,7 @@ class CollectionRole:
     units: tuple[tuple[str, str], ...]
     reference_method: str
     derived: bool = False
+    active: bool = True
 
 
 @dataclass(frozen=True)
@@ -64,11 +69,16 @@ class MultiSourceDatasetCollection:
         raise KeyError(f"Unknown collection role {name!r}. Available: {available}")
 
     @property
+    def active_roles(self) -> tuple[CollectionRole, ...]:
+        """Roles that belong to the v0 resolve set, in declaration order."""
+        return tuple(role for role in self.roles if role.active)
+
+    @property
     def source_coordinates(self) -> tuple[str, ...]:
-        """All pinned source coordinates in role order, without duplicates."""
+        """Active-role source coordinates in role order, without duplicates."""
         return tuple(
             dict.fromkeys(
-                coordinate for role in self.roles for coordinate in role.source_coordinates
+                coordinate for role in self.active_roles for coordinate in role.source_coordinates
             )
         )
 
@@ -82,11 +92,17 @@ class MultiSourceDatasetCollection:
     tags=("class-i", "multi-source", "task-balanced"),
 )
 class Class1Universal2026:
-    """MolHub definition for the first THEMol-only Class-I collection.
+    """MolHub definition for Universal Class-I v0.
 
-    Construction and :meth:`load` perform no network or filesystem IO. The
-    return value is a composition manifest; consumers resolve and load each
-    role source explicitly. Training mixtures belong to the Molexp experiment.
+    v0 active roles are OMol25-small train (DFT energy / forces, native eV /
+    eV·Å⁻¹ as published) and PhAlkEthOH-MM validation (classical ``mm_energy``,
+    native kcal/mol). Every role records its source's native units verbatim —
+    molhub never converts; consumers convert (e.g.
+    :class:`~molhub.dataset.transforms.UnitConvert`). Construction and
+    :meth:`load` perform no network or filesystem IO. THEMol Hessian /
+    torsion-scan / relax / MBIS roles stay declared with ``active=False`` so
+    they are not a resolve gate. Training mixtures belong to the Molexp
+    experiment.
 
     **The electrostatic role's MBIS Slater shells are not atom-level.** The
     source ``parameters`` array is one row per Slater *shell*, not per atom —
@@ -113,10 +129,48 @@ class Class1Universal2026:
     COORDINATE = "dataset:molcrafts/class1-universal-2026@1"
 
     def load(self) -> MultiSourceDatasetCollection:
-        """Return the immutable v0 physical-role composition."""
+        """Return the immutable v0 role composition.
+
+        Active roles are OMol25-small train and PhAlkEthOH-MM validation.
+        THEMol roles are declared with ``active=False`` and are not a
+        resolve gate.
+        """
         return MultiSourceDatasetCollection(
             coordinate=self.COORDINATE,
             roles=(
+                CollectionRole(
+                    name="train",
+                    source_coordinates=("dataset:molcrafts/omol25-small@1",),
+                    target_schema=TargetSchema(
+                        graph_level=frozenset({"energy"}),
+                        atom_level=frozenset({"forces"}),
+                        qm=frozenset({"energy", "forces"}),
+                    ),
+                    sampling_unit="molecule",
+                    units=(
+                        ("coordinates", "angstrom"),
+                        ("energy", "eV"),
+                        ("forces", "eV/angstrom"),
+                    ),
+                    reference_method="ωB97M-V/def2-TZVPD",
+                    derived=True,
+                ),
+                CollectionRole(
+                    name="validation",
+                    source_coordinates=("dataset:espaloma/phalkethoh-mm-small@1",),
+                    target_schema=TargetSchema(
+                        graph_level=frozenset({"mm_energy"}),
+                        atom_level=frozenset({"forces"}),
+                        mm=frozenset({"mm_energy", "forces"}),
+                    ),
+                    sampling_unit="molecule",
+                    units=(
+                        ("coordinates", "angstrom"),
+                        ("mm_energy", "kcal/mol"),
+                        ("forces", "kcal/mol/angstrom"),
+                    ),
+                    reference_method="classical MM (Espaloma PhAlkEthOH-MM-small)",
+                ),
                 CollectionRole(
                     name="equilibrium",
                     source_coordinates=("dataset:themol/hessian@1",),
@@ -131,6 +185,7 @@ class Class1Universal2026:
                         ("hessian", "kcal/mol/angstrom^2"),
                     ),
                     reference_method="B3LYP-D3(BJ)/DZVP",
+                    active=False,
                 ),
                 CollectionRole(
                     name="torsion",
@@ -148,6 +203,7 @@ class Class1Universal2026:
                         ("forces", "kcal/mol/angstrom"),
                     ),
                     reference_method="B3LYP-D3(BJ)/DZVP",
+                    active=False,
                 ),
                 CollectionRole(
                     name="off-equilibrium",
@@ -165,6 +221,7 @@ class Class1Universal2026:
                     ),
                     reference_method="B3LYP-D3(BJ)/DZVP",
                     derived=True,
+                    active=False,
                 ),
                 CollectionRole(
                     name="electrostatic",
@@ -200,6 +257,7 @@ class Class1Universal2026:
                         ("mbis_shells.inverse_width", "angstrom^-1"),
                     ),
                     reference_method="PBE0/def2-TZVPD (DZVP for iodine)",
+                    active=False,
                 ),
             ),
         )

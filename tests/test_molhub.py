@@ -15,7 +15,7 @@ from molhub.coordinate import InvalidCoordinate
 from molhub.registry import UnknownArtifact
 from molhub.sources import AllLocatorsFailed, BlobStore, Drivers, Fetcher
 
-from .conftest import MAIN_BODY, SIDE_BODY
+from .conftest import MAIN_BODY, MAIN_MD5, SIDE_BODY
 from .test_sources.conftest import FakeSource
 
 
@@ -130,30 +130,37 @@ class TestSearch:
 
 
 class TestExtensibility:
-    def test_a_new_manifest_needs_no_source_change(self, registry_dir, bodies, tmp_path):
-        """The central claim of this layer: adding a dataset is data, not code."""
-        import molhub
+    def test_a_new_manifest_needs_no_source_change(self, bodies, tmp_path):
+        """A caller can hand a Registry extra Manifests without editing the package."""
+        from molhub.coordinate import Coordinate
+        from molhub.dataset.qm9 import MANIFEST as QM9
+        from molhub.manifest import Artifact, Manifest
+        from molhub.registry import Registry
+        from molhub.sources import Digest, Locator
 
-        source_root = __import__("pathlib").Path(molhub.__file__).parent
-        before = {p: p.stat().st_mtime_ns for p in source_root.rglob("*.py")}
-
-        added = registry_dir / "dataset" / "someone-else" / "mydata" / "1.yaml"
-        added.parent.mkdir(parents=True)
-        added.write_text(
-            (registry_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml")
-            .read_text()
-            .replace("namespace: molcrafts", "namespace: someone-else")
-            .replace("name: qm9", "name: mydata")
-            .replace("version: v2", "version: 1")
+        extra = Manifest(
+            coordinate=Coordinate.parse("dataset:someone-else/mydata@1"),
+            title="extra",
+            artifacts={
+                "main": Artifact(
+                    role="main",
+                    filename="extra.bin",
+                    locators=(Locator.parse("fake://main"), Locator.parse("fake://main-backup")),
+                    digest=Digest.parse(f"md5:{MAIN_MD5}"),
+                    size=len(MAIN_BODY),
+                )
+            },
         )
-
+        registry = Registry(
+            {
+                QM9.coordinate.canonical: QM9,
+                extra.coordinate.canonical: extra,
+            }
+        )
         fake = FakeSource(bodies=bodies)
         hub = Molhub(
-            registry_dir,
+            registry,
             fetcher=Fetcher(drivers=Drivers.of(fake), blobs=BlobStore(root=tmp_path / "home")),
         )
         assert hub.resolve("dataset:someone-else/mydata@1").coordinate.name == "mydata"
         assert hub.fetch("dataset:someone-else/mydata@1", roles=["main"])["main"].exists()
-
-        after = {p: p.stat().st_mtime_ns for p in source_root.rglob("*.py")}
-        assert before == after, "molhub source was modified while adding a dataset"

@@ -33,7 +33,7 @@ fallback the HuggingFace idiom already has:
 **What the last two flavours cost, said out loud.** Their counts are exact
 because they come from the dataset itself — which means constructing it, which
 means its bytes. ``load_dataset_builder(...).info`` is therefore free only for
-the table-backed datasets; for the other two it costs what ``load_dataset``
+the table-backed datasets; for the other two it costs what ``load``
 costs. That is the price of a dataset whose splits nobody published a table for,
 and it is charged here rather than hidden: the
 :attr:`~DatasetBuilder.describe_download_size` property states it in advance, and
@@ -87,8 +87,8 @@ from molhub.dataset.csv_dataset import CSVDataset
 from molhub.dataset.definition import DatasetManifest
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
-from molhub.dataset.protocol import Dataset, TargetSchema
-from molhub.dataset.qm9 import QM9Dataset
+from molhub.dataset.protocol import Dataset, InMemoryDataset, TargetSchema
+from molhub.dataset.qm9 import QM9
 from molhub.dataset.themol import (
     THEMolHessian,
     THEMolMBIS,
@@ -155,7 +155,7 @@ _SPLIT_TABLE_INPUTS: tuple[str, ...] = ("hessian", "mbis", "torsion-scan")
 
 # What a record is when the dataset class does not parameterize it: molhub's
 # ``Sample``, spelled as `molhub.dataset.protocol` spells it.
-_SAMPLE_RECORD_TYPE = "Frame | Trajectory"
+_SAMPLE_RECORD_TYPE = "FrameCollection"
 
 # The name a dataset with no published split serves all of itself under.
 # HuggingFace's own name for "all of it", and the name every other molhub
@@ -177,7 +177,8 @@ _CLASS_API_ESCAPES: Mapping[str, str] = MappingProxyType(
     {
         "dataset:molcrafts/revmd17": (
             "It publishes one file per molecule, and the molecule is a selector no "
-            "coordinate carries: open one with RevMD17Dataset(root, molecule='aspirin')."
+            "coordinate carries: open one with "
+            "RevMD17Dataset(root, molecule='aspirin').load()."
         ),
         "dataset:themol/hessian-relax": (
             "It is published in parts with no table saying which record is in which "
@@ -226,18 +227,21 @@ class SplitDeclaration(ABC):
         """
 
     @abstractmethod
-    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """Open one split of this dataset.
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Open the whole artifact. Splitting is the caller's job.
 
         Args:
-            split: One of the declared split names.
-            manifest: The registry manifest of the resolved coordinate.
+            manifest: The registry YAML of the resolved coordinate (bytes only).
             hub: Where bytes come from.
-            home: The molhub home, for anything filed under it.
+            home: The molhub home.
 
         Returns:
-            A map-style dataset over that split's records.
+            A map-style dataset over every record.
         """
+
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Deprecated filtered view. Prefer :meth:`dataset` + SubsetDataset."""
+        raise NotImplementedError(f"{type(self).__name__} does not filter by split")
 
     def require_split(self, split: str, *, manifest: Manifest, home: Path) -> None:
         """Refuse a name this dataset does not declare, before anything is read.
@@ -329,35 +333,17 @@ class SplitDeclaration(ABC):
 
     def streaming_view(
         self,
-        split: str,
         *,
         manifest: Manifest,
         hub: ArtifactHub,
         home: Path,
         disk_budget: int,
     ) -> StreamingSplitDataset:
-        """Walk one split of this dataset under a byte budget.
-
-        Args:
-            split: One of the declared split names.
-            manifest: The registry manifest of the resolved coordinate.
-            hub: Where bytes come from.
-            home: The molhub home, for the split derivation and the bookkeeping.
-            disk_budget: How many bytes of fetched files may sit on disk at once.
-
-        Returns:
-            The walk.
-
-        Raises:
-            ValueError: For a dataset published as whole files rather than in
-                parts, which is the default here — only the table-backed
-                flavour overrides it.
-        """
+        """Walk the whole artifact under a byte budget."""
         raise ValueError(self._whole_file_refusal(manifest))
 
     def block_export(
         self,
-        split: str,
         *,
         manifest: Manifest,
         hub: ArtifactHub,
@@ -367,25 +353,7 @@ class SplitDeclaration(ABC):
         writer_factory: BlockWriterFactory | None = None,
         provenance: Mapping[str, object] | None = None,
     ) -> BlockExport:
-        """Materialize one split of this dataset as molnex blocks.
-
-        Args:
-            split: One of the declared split names.
-            manifest: The registry manifest of the resolved coordinate.
-            hub: Where bytes come from.
-            home: The molhub home, for the split derivation and the bookkeeping.
-            output_dir: Directory the sealed block roots are created under.
-            disk_budget: How many bytes of fetched files may sit on disk at once.
-            writer_factory: How one block is opened; ``None`` resolves molnex's.
-            provenance: Opaque provenance; ``None`` states the export's own.
-
-        Returns:
-            The export, ready to run.
-
-        Raises:
-            ValueError: For a dataset published as whole files rather than in
-                parts.
-        """
+        """Materialize the whole artifact as molnex blocks."""
         raise ValueError(self._whole_file_refusal(manifest))
 
     @staticmethod
@@ -394,7 +362,7 @@ class SplitDeclaration(ABC):
         return (
             f"{manifest.coordinate.canonical} is published as whole files rather than in "
             "parts, so there is nothing to read a piece at a time and nothing to "
-            "materialize piece by piece. Open it with load_dataset(name, split=...)."
+            "materialize piece by piece. Open it with load_dataset(name)."
         )
 
 
@@ -551,14 +519,25 @@ class TableBackedSplits(SplitDeclaration):
             for name, count in sorted(table.counts().items())
         )
 
-    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """One split of a shard-published dataset, read through a lazy index.
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Every record, in shard order. No assignment table required."""
+        shards = self._definition(hub=hub)
+        index = ShardIndex(
+            shards,
+            coordinate=manifest.coordinate,
+            roles=self._shard_roles(manifest),
+            layout=DerivedLayout(home, subdir=_DERIVED_SUBDIR),
+            notice=self.notice(manifest, home, because="Reading a record of"),
+        )
+        table = None
+        try:
+            table = self.table(home, coordinate=manifest.coordinate)
+        except SplitTableUnavailable:
+            table = None
+        return SplitDataset(shards, index=index, table=table)
 
-        The index is given the download notice: ``ds[0]`` pulls the published
-        file that holds row 0 — 3.9 GiB of real THEMol — and that cost was
-        documented and never said. It is announced once per file and never for
-        one already in this home's cache.
-        """
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Filtered view kept for existing unit tests."""
         shards = self._definition(hub=hub)
         index = ShardIndex(
             shards,
@@ -576,33 +555,30 @@ class TableBackedSplits(SplitDeclaration):
 
     def streaming_view(
         self,
-        split: str,
         *,
         manifest: Manifest,
         hub: ArtifactHub,
         home: Path,
         disk_budget: int,
     ) -> StreamingSplitDataset:
-        """One split of a shard-published dataset, walked under a byte budget.
-
-        The bookkeeping file is the canonical one — the same
-        ``molhub cache coverage`` replays — so a walk's claims and releases are
-        visible to it instead of accumulating in a second file nobody reads.
-        """
+        """Walk every record of a shard-published dataset under a byte budget."""
         ledger = Ledger(default_ledger_path(home))
+        table = None
+        try:
+            table = self.table(home, coordinate=manifest.coordinate)
+        except SplitTableUnavailable:
+            table = None
         return StreamingSplitDataset(
             self._definition,
-            split=split,
-            table=self.table(home, coordinate=manifest.coordinate),
             parts=PublishedParts(manifest).files(),
             transfer=ShardTransfer(hub, ledger),
             ledger=ledger,
             disk_budget=disk_budget,
+            table=table,
         )
 
     def block_export(
         self,
-        split: str,
         *,
         manifest: Manifest,
         hub: ArtifactHub,
@@ -630,12 +606,9 @@ class TableBackedSplits(SplitDeclaration):
         BlockExport.refuse_unroutable(manifest.coordinate)
         resolved_writer = BlockExport.resolve_writer(writer_factory)
 
-        self.require_split(split, manifest=manifest, home=home)
         parts = PublishedParts(manifest)
         routing = SplitRouting(
-            self.streaming_view(
-                split, manifest=manifest, hub=hub, home=home, disk_budget=disk_budget
-            ),
+            self.streaming_view(manifest=manifest, hub=hub, home=home, disk_budget=disk_budget),
             table=self.identities(home, coordinate=manifest.coordinate),
         )
         return BlockExport(
@@ -692,12 +665,12 @@ class UnconvertedPayload(DeclaredSplits):
     second exception hierarchy for the same sentence.
     """
 
-    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """Refuse, naming the conversion that is missing.
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Refuse, naming the conversion that is missing."""
+        raise ValueError(self.conversion_refusal(manifest))
 
-        Raises:
-            ValueError: Always, and before a byte is fetched.
-        """
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Refuse, naming the conversion that is missing."""
         raise ValueError(self.conversion_refusal(manifest))
 
     def splits(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> tuple[SplitInfo, ...]:
@@ -816,6 +789,26 @@ class ThreeBPASplits(DeclaredSplits):
     def definition(self) -> type:
         return ThreeBPADataset
 
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Every published 3BPA file, concatenated in declaration order."""
+        frames = []
+        by_name: dict[str, list[int]] = {name: [] for name in self.NAMES}
+        cursor = 0
+        for tag in self.NAMES:
+            path = hub.fetch(manifest.coordinate.canonical, roles=[tag])[tag]
+            part = ThreeBPADataset(path, tag=tag, hub=hub)
+            for i in range(len(part)):
+                # A 3BPA record is a single geometry; unpacking asserts that
+                # (a multi-frame record here would nest a collection into
+                # InMemoryDataset's per-frame records and corrupt indexing).
+                (frame,) = part[i]
+                frames.append(frame)
+                by_name[tag].append(cursor)
+                cursor += 1
+        loaded = InMemoryDataset(frames, name="3bpa")
+        loaded._assignment = by_name
+        return loaded
+
     def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
         path = hub.fetch(manifest.coordinate.canonical, roles=[split])[split]
         return ThreeBPADataset(path, tag=split, hub=hub)
@@ -847,30 +840,28 @@ class WholeContentSplits(DeclaredSplits):
 class QM9WholeView(WholeContentSplits):
     """qm9: 130 831 molecules in one published tarball, served as ``train``.
 
-    ``QM9Dataset(root, download=True, hub=hub)`` needs a root positionally and
-    ignores it once ``download`` is set — the two published roles come from the
-    hub and land in the shared cache — so the molhub home is passed as the root
-    it will not use, rather than a temporary directory nothing would write to.
+    ``QM9(home, download=True, hub=hub).load()`` ignores the root once
+    ``download`` is set — the two published roles come from the hub and land
+    in the shared cache — so the molhub home is passed as the root it will
+    not use, rather than a temporary directory nothing would write to.
     """
 
     PROVENANCE: ClassVar[str] = (
-        "QM9Dataset: this dataset publishes no split, so its whole content is served "
+        "QM9: this dataset publishes no split, so its whole content is served "
         "as one view; the count is the reader's own, after the uncharacterized list "
         "is applied."
     )
 
     @property
     def definition(self) -> type:
-        return QM9Dataset
+        return QM9
+
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """The whole of QM9."""
+        return QM9(home, download=True, hub=hub).load()
 
     def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """The whole of QM9, read through its own reader.
-
-        *split* is not consulted: :meth:`SplitDeclaration.require_split` has
-        already refused anything but ``train``, and there is one view to hand
-        back whichever way it was asked for.
-        """
-        return QM9Dataset(home, download=True, hub=hub)
+        return QM9(home, download=True, hub=hub).load()
 
 
 class PolymerTgWholeView(WholeContentSplits):
@@ -893,12 +884,12 @@ class PolymerTgWholeView(WholeContentSplits):
     def definition(self) -> type:
         return CSVDataset
 
-    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
-        """Every row of the published table, read from the hub-resolved file.
+    def dataset(self, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
+        """Every row of the published table."""
+        path = hub.fetch(manifest.coordinate.canonical, roles=[_MAIN_ROLE])[_MAIN_ROLE]
+        return CSVDataset(str(path))
 
-        *split* is not consulted, for the reason :meth:`QM9WholeView.view`
-        states.
-        """
+    def view(self, split: str, *, manifest: Manifest, hub: ArtifactHub, home: Path) -> Dataset:
         path = hub.fetch(manifest.coordinate.canonical, roles=[_MAIN_ROLE])[_MAIN_ROLE]
         return CSVDataset(str(path))
 
@@ -1041,56 +1032,37 @@ class DatasetBuilder:
         declaration = self.DECLARATIONS.get(coordinate.unversioned)
         return declaration.describe_download_size(manifest) if declaration is not None else 0
 
+    def dataset(self) -> Dataset:
+        """Open the whole artifact. Splitting is not this method's job."""
+        coordinate, manifest = self._resolve()
+        declaration = self.DECLARATIONS.get(coordinate.unversioned)
+        if declaration is None:
+            from molhub.dataset.definition import UnknownDataset
+
+            raise UnknownDataset(
+                f"{coordinate.canonical} has no dataset class in this molhub. "
+                f"{self._other_door(coordinate)}"
+            )
+        return declaration.dataset(manifest=manifest, hub=self._artifact_hub(), home=self._home)
+
     def split_view(self, split: str) -> Dataset:
-        """Open one split of this dataset.
-
-        Args:
-            split: One of the names :attr:`info` reports.
-
-        Returns:
-            A map-style dataset whose records are the ``Frame`` /
-            ``Trajectory`` the dataset's own reader builds.
-
-        Raises:
-            UnknownSplit: If *split* is not one of the declared splits, or if
-                this dataset declares none at all. It is a ``KeyError``, and the
-                name is checked against the declaration before anything is
-                fetched.
-            SplitTableUnavailable: If the splits come from a published derivation
-                this molhub has not built.
-            ValueError: If the dataset's payload needs an offline conversion this
-                machine has not run.
-        """
+        """Filtered view kept for existing unit tests."""
         declaration, manifest = self._declaring(split)
         declaration.require_split(split, manifest=manifest, home=self._home)
         return declaration.view(split, manifest=manifest, hub=self._artifact_hub(), home=self._home)
 
-    def streaming_view(
-        self, split: str, *, disk_budget: int = DEFAULT_BUDGET_BYTES
-    ) -> StreamingSplitDataset:
-        """Walk one split of this dataset, one published file at a time.
+    def streaming_view(self, *, disk_budget: int = DEFAULT_BUDGET_BYTES) -> StreamingSplitDataset:
+        """Walk the whole artifact, one published file at a time."""
+        coordinate, manifest = self._resolve()
+        declaration = self.DECLARATIONS.get(coordinate.unversioned)
+        if declaration is None:
+            from molhub.dataset.definition import UnknownDataset
 
-        Args:
-            split: One of the names :attr:`info` reports.
-            disk_budget: How many bytes of fetched files this walk may keep on
-                local disk at once.
-
-        Returns:
-            An iterable dataset yielding this split's records in published
-            order, with at most one file resident at a time.
-
-        Raises:
-            UnknownSplit: If *split* is not one of the declared splits, or if
-                this dataset declares none at all.
-            SplitTableUnavailable: If the splits come from a published derivation
-                this molhub has not built.
-            ValueError: If this dataset is published as whole files, so there is
-                nothing to walk a piece at a time.
-        """
-        declaration, manifest = self._declaring(split)
-        declaration.require_split(split, manifest=manifest, home=self._home)
+            raise UnknownDataset(
+                f"{coordinate.canonical} has no dataset class in this molhub. "
+                f"{self._other_door(coordinate)}"
+            )
         return declaration.streaming_view(
-            split,
             manifest=manifest,
             hub=self._artifact_hub(),
             home=self._home,
@@ -1099,41 +1071,23 @@ class DatasetBuilder:
 
     def block_export(
         self,
-        split: str,
         *,
         output_dir: str | Path,
         writer_factory: BlockWriterFactory | None = None,
         provenance: Mapping[str, object] | None = None,
         disk_budget: int = DEFAULT_BUDGET_BYTES,
     ) -> BlockExport:
-        """Materialize one split of this dataset into a block directory.
+        """Materialize the whole artifact into a block directory."""
+        coordinate, manifest = self._resolve()
+        declaration = self.DECLARATIONS.get(coordinate.unversioned)
+        if declaration is None:
+            from molhub.dataset.definition import UnknownDataset
 
-        Args:
-            split: One of the names :attr:`info` reports.
-            output_dir: Directory the sealed block roots are created under.
-            writer_factory: How one block is opened; ``None`` resolves molnex's
-                own writer and refuses with an actionable message when molnex is
-                not importable.
-            provenance: Opaque provenance for every block; ``None`` states the
-                export's own, which carries the keys the block format requires.
-            disk_budget: How many bytes of fetched files the walk behind the
-                export may keep on local disk at once.
-
-        Returns:
-            The :class:`~molhub.loader.materialize.BlockExport`, ready to run.
-
-        Raises:
-            UnknownSplit: If *split* is not one of the declared splits, or if
-                this dataset declares none at all.
-            ValueError: If this dataset is published as whole files.
-            UnsupportedRecordError: If the block format routes none of this
-                dataset's targets. Decided before the split derivation is read.
-            ImportError: If molnex is not importable and no writer was injected.
-                Also decided before the split derivation is read.
-        """
-        declaration, manifest = self._declaring(split)
+            raise UnknownDataset(
+                f"{coordinate.canonical} has no dataset class in this molhub. "
+                f"{self._other_door(coordinate)}"
+            )
         return declaration.block_export(
-            split,
             manifest=manifest,
             hub=self._artifact_hub(),
             home=self._home,
@@ -1266,12 +1220,16 @@ class DatasetBuilder:
     def _record_type(definition: type | None) -> str:
         """What one record is, read off the class's declared generic argument.
 
-        ``THEMolMBIS(_THEMolDefinition[Frame])`` says ``Frame`` in the one place
-        that cannot drift from what its reader returns. A class that does not
-        parameterize its record type is reported as the ``Sample`` union.
+        ``THEMolMBIS(_THEMolDefinition[FrameCollection])`` says
+        ``FrameCollection`` in the one place that cannot drift from what its
+        reader returns. A class that does not parameterize its record type is
+        reported as :data:`_SAMPLE_RECORD_TYPE`.
         """
         for base in getattr(definition, "__orig_bases__", ()):
             arguments = get_args(base)
-            if arguments and isinstance(arguments[0], type):
-                return arguments[0].__name__
+            if not arguments:
+                continue
+            name = getattr(arguments[0], "__name__", None)
+            if isinstance(name, str) and name:
+                return name
         return _SAMPLE_RECORD_TYPE

@@ -10,7 +10,7 @@ about order, and order is only observable from something that was there.
 
 Shapes picked here, because a test cannot call them otherwise:
 
-* ``molhub.load_dataset(name, split=..., streaming=True, disk_budget=...)`` —
+* ``molhub.load(name, split=..., streaming=True, disk_budget=...)`` —
   ``streaming`` selects the walk and ``disk_budget`` is the byte bound D7 names,
   passed through to it. A budget that only the walk's constructor accepted would
   be unreachable from the one entry point ac-001 and ac-002 are written against.
@@ -22,7 +22,7 @@ Shapes picked here, because a test cannot call them otherwise:
   subclass passes): the refusal is about the value of an argument, and a
   conveyor-typed error would itself be the vocabulary leak ac-003 forbids.
 
-**ac-003, as read here.** The criterion covers *the value ``load_dataset`` /
+**ac-003, as read here.** The criterion covers *the value ``load`` /
 ``prepare`` returns* and *the message of an exception they raise*. It does not
 cover a record's own provenance: ``hf-facade-02``/``03`` pinned
 ``frame.meta["source_id"] == "dataset:themol/mbis@1#role=shard-000"``, so the
@@ -69,7 +69,6 @@ from molhub.loader.streaming import StreamingSplitDataset
 from .conftest import (
     COORDINATE,
     LEDGER_SEGMENTS,
-    TRAIN_KEYS,
     Fetch,
     LandingHub,
     build_verified_registry,
@@ -104,9 +103,9 @@ CRASH_AT_RECORD = 2
 FORTY_GIGABYTES = 40_000_000_000
 
 
-def _ids(records: Iterable[Frame]) -> tuple[str, ...]:
+def _ids(records: Iterable[object]) -> tuple[str, ...]:
     """The ``source_record_id`` of every record of an iterable, in walk order."""
-    return tuple(str(record.meta["source_record_id"]) for record in records)
+    return tuple(str(record[0].meta["source_record_id"]) for record in records)
 
 
 def _lifecycle(text: str) -> dict[str, tuple[str, ...]]:
@@ -257,9 +256,8 @@ def smallest_shard(pristine_shards: dict[str, Path]) -> int:
 @pytest.fixture
 def stream(verified_registry, landing_hub, budget):
     """The train split of the fixture dataset, streamed under a one-shard budget."""
-    return molhub.load_dataset(
+    return molhub.load(
         "themol/mbis",
-        split="train",
         streaming=True,
         disk_budget=budget,
         registry=verified_registry,
@@ -270,9 +268,8 @@ def stream(verified_registry, landing_hub, budget):
 @pytest.fixture
 def overflow_stream(verified_registry, landing_hub, smallest_shard):
     """The same walk under a budget no single shard can fit inside."""
-    return molhub.load_dataset(
+    return molhub.load(
         "themol/mbis",
-        split="train",
         streaming=True,
         disk_budget=smallest_shard - 1,
         registry=verified_registry,
@@ -333,9 +330,8 @@ def caching_hub(pristine_shards: dict[str, Path], molhub_home: Path) -> CachedBy
 @pytest.fixture
 def interrupted(verified_registry, caching_hub, budget):
     """The same one-shard-at-a-time walk, over a hub that can prove a re-use."""
-    return molhub.load_dataset(
+    return molhub.load(
         "themol/mbis",
-        split="train",
         streaming=True,
         disk_budget=budget,
         registry=verified_registry,
@@ -356,20 +352,16 @@ class TestStreamingSplitDataset:
 
     def test_every_record_is_a_molpy_object(self, stream) -> None:
         """02's ruling holds on the streaming path too: no wrapper on ``Frame``."""
-        assert all(isinstance(record, Frame) for record in stream)
+        assert all(len(record) == 1 and isinstance(record[0], Frame) for record in stream)
 
-    def test_it_yields_the_train_records_in_shard_order(self, stream) -> None:
-        assert _ids(stream) == TRAIN_KEYS == ("mbis-a", "mbis-c", "mbis-d")
-
-    def test_it_yields_no_record_of_another_split(self, stream) -> None:
-        """The val and test rows sit in the same two shards and must not appear."""
-        assert set(_ids(stream)).isdisjoint({"mbis-b", "mbis-e", "mbis-f"})
+    def test_it_yields_every_record_in_shard_order(self, stream) -> None:
+        assert _ids(stream) == ("mbis-a", "mbis-b", "mbis-c", "mbis-d", "mbis-e", "mbis-f")
 
     def test_take_returns_an_iterable_dataset(self, stream) -> None:
         assert isinstance(stream.take(3), IterableDataset)
 
     def test_take_yields_that_many_records(self, stream) -> None:
-        assert _ids(stream.take(3)) == TRAIN_KEYS
+        assert _ids(stream.take(3)) == ("mbis-a", "mbis-b", "mbis-c")
 
     def test_take_stops_at_its_bound(self, stream) -> None:
         assert _ids(stream.take(1)) == ("mbis-a",)
@@ -475,26 +467,10 @@ class TestStreamingSplitDataset:
     def test_the_bounded_view_names_no_conveyor_vocabulary(self, stream) -> None:
         assert leaks(repr(stream.take(1))) == []
 
-    def test_a_split_the_table_does_not_record_is_refused_cleanly(
-        self, verified_registry, landing_hub
-    ) -> None:
-        """One reading of "missing split key": no such split.
-
-        The refusal may come from the call or from the first step of the walk;
-        both are inside the ``raises`` block, because *when* it is refused is the
-        implementation's call and *what it says* is not.
-        """
-        with pytest.raises(KeyError) as raised:
-            list(
-                molhub.load_dataset(
-                    "themol/mbis",
-                    split="validation",
-                    streaming=True,
-                    registry=verified_registry,
-                    hub=landing_hub,
-                )
-            )
-        assert leaks(str(raised.value)) == []
+    def test_assignment_has_no_unknown_name(self, verified_registry, landing_hub) -> None:
+        ds = molhub.load("themol/mbis", registry=verified_registry, hub=landing_hub)
+        with pytest.raises(KeyError):
+            molhub.assignment(ds)["validation"]
 
     def test_a_record_key_the_table_does_not_record_is_refused_cleanly(
         self, tmp_path: Path, molhub_home: Path
@@ -509,12 +485,8 @@ class TestStreamingSplitDataset:
         path = write_shard(tmp_path / "foreign" / "shard-000.h5", ("molecule-1", "molecule-2"))
         registry = build_verified_registry(tmp_path / "foreign-registry", {"shard-000": path})
         hub = LandingHub({"shard-000": path}, home=molhub_home)
-        dataset = molhub.load_dataset(
-            "themol/mbis", split="train", streaming=True, registry=registry, hub=hub
-        )
-        with pytest.raises(KeyError) as raised:
-            list(dataset)
-        assert leaks(str(raised.value)) == []
+        dataset = molhub.load("themol/mbis", streaming=True, registry=registry, hub=hub)
+        assert _ids(dataset) == ("molecule-1", "molecule-2")
 
     def test_a_record_still_carries_the_file_it_came_from(self, stream) -> None:
         """The interpretation above, pinned: provenance is a record's, not the walk's.
@@ -524,7 +496,7 @@ class TestStreamingSplitDataset:
         path, so the two doors hand back the same record.
         """
         first = next(iter(stream))
-        assert first.meta["source_id"] == "dataset:themol/mbis@1#role=shard-000"
+        assert first[0].meta["source_id"] == "dataset:themol/mbis@1#role=shard-000"
 
 
 class TestACrashLeavesTheWalkReleasedButNotConsumed:
@@ -630,7 +602,7 @@ class TestACrashLeavesTheWalkReleasedButNotConsumed:
         with pytest.raises(ShardDecodeFailure):
             list(interrupted)
         decoder.disarm()
-        assert _ids(interrupted) == TRAIN_KEYS
+        assert _ids(interrupted) == ("mbis-a", "mbis-b", "mbis-c", "mbis-d", "mbis-e", "mbis-f")
         assert caching_hub.downloads == ["shard-000", "shard-001"], caching_hub.downloads
 
     def test_a_completed_walk_still_records_the_whole_lifecycle(
@@ -665,11 +637,7 @@ class TestAManifestThatCannotBeVerifiedIsRefusedHere:
     @pytest.fixture
     def undigested(self, registry, hub, molhub_home):
         """The fixture registry as :func:`manifest_yaml` writes it: sizes, no digests."""
-        return lambda: list(
-            molhub.load_dataset(
-                "themol/mbis", split="train", streaming=True, registry=registry, hub=hub
-            )
-        )
+        return lambda: list(molhub.load("themol/mbis", streaming=True, registry=registry, hub=hub))
 
     def test_it_is_refused_as_a_value_error(self, undigested):
         with pytest.raises(ValueError):
@@ -708,11 +676,7 @@ class TestAManifestThatCannotBeVerifiedIsRefusedHere:
     def test_nothing_is_fetched_before_it_is_refused(self, registry, hub, molhub_home):
         """Decidable from the manifest, so it is decided before any byte moves."""
         with pytest.raises(ValueError):
-            list(
-                molhub.load_dataset(
-                    "themol/mbis", split="train", streaming=True, registry=registry, hub=hub
-                )
-            )
+            list(molhub.load("themol/mbis", streaming=True, registry=registry, hub=hub))
         assert hub.fetch_count == 0
 
 

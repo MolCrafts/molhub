@@ -720,7 +720,7 @@ def _lifecycle(text: str) -> dict[str, tuple[str, ...]]:
 def check_streaming_walk(registry: Registry, hub: LandingHub, ledger: Path, budget: int) -> None:
     """ac-001 + ac-002: the pinned ids, the pinned lifecycle, nothing left behind."""
     before = _ledger_text(ledger)
-    stream = molhub.load_dataset(
+    stream = molhub.load(
         "themol/mbis",
         split="train",
         streaming=True,
@@ -766,7 +766,7 @@ def check_take_bounds_the_walk(
     def stream() -> IterableDataset[Frame]:
         return cast(
             "IterableDataset[Frame]",
-            molhub.load_dataset(
+            molhub.load(
                 "themol/mbis",
                 split="train",
                 streaming=True,

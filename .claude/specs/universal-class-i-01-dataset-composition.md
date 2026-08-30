@@ -1,372 +1,166 @@
 ---
-title: Universal Class-I FF — Dataset Composition Specification
+title: Universal Class-I v0 数据集组成（OMol25 训练 / PhAlkEthOH 验证）
 status: approved
 created: 2026-08-13
+revised: 2026-08-20
+grilled: true
 chain: universal-class-i-dataset
 owners: [molhub]
 ---
 
-# Universal Class-I FF — Dataset Composition
+# Universal Class-I v0 数据集组成（OMol25 训练 / PhAlkEthOH 验证）
 
-## 1. Goal
+## Summary
 
-The training dataset must not be constructed as one giant pool of
-interchangeable molecular configurations. Different datasets constrain
-different parts of the Class-I potential:
+MolHub 集合 `dataset:molcrafts/class1-universal-2026@1` 的 v0 活跃角色改为「OMol25-small 训练、PhAlkEthOH-MM 验证」：`Class1Universal2026.load()` 零 IO 返回的解析/物化集合只含 `dataset:molcrafts/omol25-small@1` 与 `dataset:espaloma/phalkethoh-mm-small@1`，不再把 THEMol hessian / torsion-scan / relax / mbis 当作 v0 门槛；验证坐标不得进入训练。THEMol 与后续 OMol25 分子间 / OPoly26 叙事仍保留为未激活角色与远期路线，供 v1 再打开，但不阻塞本版解析。训练损失与验证指标由 Molexp 实验拥有；MolNex 库保持与具体坐标无关。
 
-\[
-\Theta_{\mathrm{MM}} =
-\{r_0,k_b,\theta_0,k_\theta,V_{\mathrm{torsion}},q,\sigma,\epsilon\}.
-\]
+## Domain basis
 
-The dataset collection is therefore a multi-source training collection. Every
-source has a declared physical role, provenance, target schema, sampling
-policy, and split policy. Sources are combined at the training-task level, not
-by concatenating all frames into an undifferentiated dataset.
-
-The initial MolHub collection is:
-
-**`molcrafts/class1-universal-2026@1`**
-
-```text
-class1-universal-2026
-├── equilibrium
-│   └── themol/hessian@1
-├── torsion
-│   └── themol/torsion-scan@1
-├── off-equilibrium
-│   ├── themol/hessian-relax
-│   └── themol/torsion-relax
-├── electrostatics
-│   └── themol/mbis@1
-├── intermolecular
-│   └── selected OMol25
-└── polymer
-    └── OPoly26                 # later specialization
-```
-
-## 2. Core dataset: THEMol
-
-THEMol supplies the majority of the first universal Class-I training data. It
-is divided into logically distinct task sources.
-
-### 2.1 Equilibrium — `themol/hessian@1`
-
-Use the complete or nearly complete Hessian molecular set.
-
-Primary targets:
-
-- optimized geometry;
-- equilibrium bond lengths and angles;
-- Hessian / curvature information;
-- equilibrium energy and forces where appropriate.
-
-Primary parameters constrained:
+Class-I 势能按 Wang 2022 Appendix A 的加和式，在 OpenMM real 单位（能量 kcal/mol，长度 Å，力 kcal/mol/Å）下书写：
 
 \[
-r_0,\quad \theta_0,\quad k_b,\quad k_\theta.
+U_{\mathrm{MM}}
+= U_{\mathrm{bond}} + U_{\mathrm{angle}} + U_{\mathrm{torsion}} + U_{\mathrm{nb}},
+\qquad
+\Theta_{\mathrm{MM}}
+= \{r_0,k_b,\theta_0,k_\theta,V_{\mathrm{torsion}},q,\sigma,\epsilon\}.
 \]
 
-This source defines local equilibrium structure and stiffness. It receives
-high sampling priority even though it has fewer configurations than relaxation
-sources.
+键与角为谐波 \( \tfrac12 k (x-x_0)^2 \)；二面角为 OpenMM / AMBER `PeriodicTorsion`
 
-## 3. Torsion — `themol/torsion-scan@1`
+\[
+U_{\mathrm{torsion}} = \sum k\bigl[1+\cos(n\phi-\gamma)\bigr].
+\]
 
-Use THEMol TorsionScan as the principal torsional source.
+OMol25 是 ωB97M-V/def2-TZVPD **DFT 总能**（eV）与力（eV/Å），不是经典 MM。换算
 
-Primary targets:
+\[
+E_{\mathrm{kcal}} = 23.06055\, E_{\mathrm{eV}},
+\qquad
+F_{\mathrm{kcal}} = 23.06055\, F_{\mathrm{eV/Å}}.
+\]
 
-- relative torsion energy;
-- barrier heights;
-- minimum positions;
-- conformer ordering;
-- complete profile shape.
+**molhub 不做单位换算**（operator decision 2026-08-20，见 notes
+`mol:note:topic:native-units`）：数据集如实记录原生单位（OMol25 为 eV /
+eV/Å）并在角色 `units` 里声明；上式换算由消费方在训练边界完成（molnex 走
+`molix.units`，或 in-tree `UnitConvert` transform）。PhAlkEthOH 的
+`mm_energy` 是 **经典 MM 势能**（原生 kcal/mol；原生 DGL `u_ref` 已在转换树
+中变为 kcal/mol），零点与量级都不是 DFT 总能。
 
-Primary parameters constrained are the Fourier coordinates
-\(\{a_n,b_n\}_{n=1}^{N_{\max}}\).
+**禁止**把 OMol25 DFT 总能与 `mm_energy` 放进同一个 MSE。训练只对 OMol25：能量必须 **按分子减均值** 再 MSE，并另加力 MSE；\( F = -\mathrm{d}E/\mathrm{dpos} \)。验证只在 seed-2666 holdout 分子上，对训练好的 Class-I \(U_{\mathrm{MM}}\) 与 `mm_energy` 做 **按分子中心化后的 MAE（kcal/mol）**。训练路径永不读 `mm_energy`。OMol25 E/F 不能唯一确定 \(\{q,\sigma,\epsilon\}\)；v0 冻结或 legacy-init LJ，电荷若训必须有单独 charge loss。不把 THEMol / Hessian / torsion-scan / relax / MBIS 纳入 v0，与这一可辨识性缺口一致。
 
-The training object is a complete torsion profile, not an individual frame.
-MolHub must preserve this hierarchy and keep every scan group intact:
+Wang et al. Chem. Sci. 2022 DOI 10.1039/D2SC02739A / arXiv:2010.01196 — Espaloma; QM fit uses per-molecule mean centering; MM-mimic and QM-fit are separate experiments; freeze LJ on QM fits.
 
-```text
-molecule
-└── torsion scan
-    ├── angle
-    ├── geometry
-    ├── energy
-    └── scan identity
-```
+Levine et al. arXiv:2505.08762 v2 — OMol25 ωB97M-V/def2-TZVPD; energy eV, forces eV/Å; no Hessian/MBIS as product.
 
-## 4. Off-equilibrium — derived diverse relaxation source
+OpenMM User Guide standard forces — ½k harmonic; PeriodicTorsion.
 
-Raw sources:
+Never one MSE over DFT totals and mm_energy.
 
-- `themol/hessian-relax`
-- `themol/torsion-relax`
+Val = per-molecule-centered MAE of applied Class-I vs mm_energy.
 
-Do not use all billions of relaxation configurations. Create:
+## Design
 
-**`molcrafts/themol-relax-diverse@1`**
+本 spec 只改 MolHub 集合声明，不新造集合类型，不改 THEMol 源适配器，不实现训练循环。拥有类型仍是 `CollectionRole`、`MultiSourceDatasetCollection`、`Class1Universal2026`。`load()` 继续零 IO：返回不可变角色表，由调用方按坐标自行 `fetch` / 打开。训练混合、batch、损失、指标属于 Molexp；MolNex 的 `FrameDataset` / `DataModule` 只作为实验侧已有原语被点名，本仓不实现、不接线。
 
-The initial target is **20–30 million configurations**. A later larger version
-may contain approximately 50 million configurations.
+### `CollectionRole.active`
 
-### 4.1 Sampling relaxation frames
+给现有冻结数据类增加 `active: bool = True`（放在已有 `derived` 之后，保持默认值在末尾）。`active=True` 的角色进入 v0 解析/物化集；`active=False` 的角色仍可通过 `role(name)` 按名取出（远期叙事与现有 conveyor 夹具对 `electrostatic` / `torsion` 的查找继续成立），但 **不得** 出现在 `source_coordinates` 里，因此遍历解析集不会去要 hessian / torsion-scan / relax / mbis。禁止另起 `DeferredCollection` 或第二套集合类。未知名仍按现有模式 `KeyError`，消息列出全部已声明角色名。
 
-Sampling must be stratified by:
+`MultiSourceDatasetCollection` 增加只读 `active_roles`（`tuple` 过滤 `role.active`）。现有 `source_coordinates` 改为只折叠 **active** 角色的坐标、保序去重；`role()` 仍在全部 `roles` 上查找。
 
-- molecular identity;
-- chemical environment;
-- relative energy and force magnitude;
-- bond and angle distortion;
-- torsion angle;
-- optimization progress;
-- rare elements;
-- molecular size.
+### v0 `Class1Universal2026.load()` 角色表
 
-Aggressively remove consecutive, highly correlated optimization frames. The
-objective is to cover the accessible PES, not to reproduce optimizer
-trajectories frame by frame.
+活跃角色只有两个，且必须排在声明表前部：
 
-### 4.2 HessianRelax / TorsionRelax balance
+| name | source | schema / family | units（原生，如实记录） | sampling_unit | derived | active |
+|---|---|---|---|---|---|---|
+| `train` | `dataset:molcrafts/omol25-small@1` | graph `energy` + atom `forces`；`qm` | `eV`，`eV/angstrom`，坐标 Å | `molecule` | True | True |
+| `validation` | `dataset:espaloma/phalkethoh-mm-small@1` | graph `mm_energy` + 可选 atom `forces`；`mm` | `kcal/mol`，`kcal/mol/angstrom`，坐标 Å | `molecule` | False | True |
 
-The initial 20–30M subset starts near:
+`train` 的派生契约已经由 `OMol25Small` / `OMol25SmallFilter` 实现，本 spec 只声明、不重写：源是 `dataset:fairchem/omol25@1` 的 role `4m`；保留 Neutral、singlet、\(n_{\mathrm{atoms}}\le 32\)、有机 Z；标签保持原生 eV / eV/Å（换算归消费方）；推断键。`reference_method` 为 `ωB97M-V/def2-TZVPD`。
 
-```text
-40% HessianRelax
-60% TorsionRelax
-```
+`validation` 复用 `PhalkethohMMDataset`：173 分子 × 100 构象，`mm_energy` 已是 kcal/mol，分子级 80:10:10、seed 2666。集合钉的是整条坐标，不在 `load()` 里选 split；Molexp 只许用该坐标的 holdout 分子做验证，**整条 PhAlkEthOH 坐标不得进入训练 loader**（包括其 published `train` 分片，因为标签是 MM 而不是 DFT）。`reference_method` 必须写明经典 MM，不得写成 DFT。
 
-Coverage analysis may change this ratio. TorsionRelax starts higher because
-torsional and conformational error is expected to be a major Class-I limit.
+单位字符串跟各自源模块已有拼写走（OMol25-small 的 `eV` / `eV/angstrom`，PhAlkEthOH 的 `kcal/mol`），集合层不发明第三套拼写。
 
-## 5. Electrostatics — `themol/mbis@1`
+### 未激活但仍声明的 THEMol 角色
 
-Use the complete available MBIS subset where practical.
+不要删除远期物理角色。`load().roles` 在两个活跃角色之后继续声明，全部 `active=False`：
 
-Targets may include:
+- `equilibrium` → `dataset:themol/hessian@1`（分子；Hessian / 平衡几何）
+- `torsion` → `dataset:themol/torsion-scan@1`（完整 torsion profile）
+- `off-equilibrium` → `dataset:molcrafts/themol-relax-diverse@1`（派生；分子再选构象）
+- `electrostatic` → `dataset:themol/mbis@1`（MBIS；壳层不是 per-atom，现有 docstring 约束保留）
 
-- atomic charges, dipoles, and quadrupoles;
-- molecular dipole;
-- atomic volume and other MBIS descriptors.
+这些坐标 **不是** v0 的 `source_coordinates`，因此不是解析/物化门槛。THEMol 适配器（`src/molhub/dataset/themol.py` 及 generate/audit 脚本）本 spec 不动。当前误把 `omol25-small` 标成 `intermolecular` 的活跃角色删除：v0 的 OMol25-small 是训练用小分子 DFT E/F，不是分子间专项；真正的 `omol25/intermolecular@1` 等坐标尚未存在，只留在下面的远期树里。
 
-The exported Class-I model ultimately uses point charges \(q_i\), but the
-encoder should be supervised by richer electronic information. This source
-remains physically separate from B3LYP valence data because its electronic
-structure reference may differ. It is a separate task, not another energy
-dataset.
-
-## 6. THEMol v0 composition
-
-The first universal intramolecular collection is approximately:
-
-```text
-THEMol Hessian          ~3.1M equilibrium structures
-THEMol TorsionScan      up to ~94M scan configurations
-THEMol Relax Diverse    ~20–30M selected configurations
-THEMol MBIS             ~3.1M electrostatic structures
-```
-
-Raw counts must not determine sampling probability. In particular, the
-TorsionScan frame count must not overwhelm other physical targets.
-
-## 7. Handoff to Molexp
-
-MolHub exposes the physical roles and preserves each role's hierarchical
-sampling unit. It does **not** choose task probabilities, curriculum stages,
-batch sizes, model dimensions, optimizers, hardware, or production duration.
-
-Those run-specific values live only in the versioned Molexp experiment. The
-current v0 authority is `universal-class-i-v0-calibration-gh200`, which records
-the Stage A/B/C mixtures supplied with this dataset specification. MolNex
-remains unaware of all concrete source coordinates.
-
-## 9. Add OMol25 selectively
-
-OMol25 must not be blindly appended to THEMol. Its initial role is chemical
-coverage and intermolecular supervision. Create derived MolHub subsets:
-
-```text
-omol25/
-├── molecular-diverse
-├── intermolecular
-├── solvated
-└── charged
-```
-
-Prioritize **`omol25/intermolecular@1`** and
-**`omol25/molecular-diverse@1`** for the first Class-I extension.
-
-## 10. OMol25 molecular-diverse
-
-Select several million to tens of millions of representative structures by
-diversity in:
-
-- atom embeddings or graph fingerprints;
-- elements and functional groups;
-- formal charge;
-- ring chemistry;
-- molecule size.
-
-Do not sample OMol25 uniformly. Its role is coverage, not repetition of common
-organic chemistry.
-
-## 11. OMol25 intermolecular
-
-Prioritize dimers, molecular complexes, explicit solvent, electrolyte-like
-contacts, ion–molecule interactions, hydrogen bonding, and
-dispersion-dominated interactions. Where available, deliberately sample the
-repulsive region, equilibrium region, and attractive tail of interaction
-distance curves.
-
-## 12. Do not blindly mix QM levels
-
-THEMol and OMol25 use different reference electronic-structure methods. Their
-absolute energies must not be treated as one common scale.
-
-```text
-Shared Chemical Encoder
-├── THEMol physical losses
-└── OMol25 physical losses
-```
-
-Use source-aware targets, normalization, losses, and task sampling. THEMol is
-the canonical reference for intramolecular Class-I parameterization; OMol25
-adds coverage and intermolecular information.
-
-## 13. UniversalClassI-v1 collection
-
-The v1 MolHub collection adds the versioned OMol25 molecular-diverse and
-intermolecular roles. Their batch probabilities belong to the consuming
-Molexp experiment and are not fields of the MolHub collection.
-
-## 14. Polymer data: OPoly26
-
-Do not heavily mix OPoly26 into initial universal training. First train
-**UniversalClassI**, then specialize **UniversalClassI-Poly** with OPoly26 so
-the universal representation is not disproportionately biased toward polymer
-structures.
-
-## 15. Polymer specialization handoff
-
-The polymer collection identifies OPoly26 and the universal replay sources.
-Fine-tuning probabilities and replay schedules live in the corresponding
-Molexp specialization experiment, not in MolHub or MolNex.
-
-## 16. Molecular graph weighting
-
-Raw conformation count must not determine molecular importance. Use:
-
-```text
-task → molecule / scan → conformations
-```
-
-Never use a flat random configuration draw across the complete collection. A
-molecule with 1,000 relaxation frames must not automatically receive 100 times
-the influence of one with 10 frames.
-
-## 17. Rare chemistry rebalancing
-
-Track and rebalance coverage by element, formal charge, aromatic environment,
-ring size, local graph pattern, SMARTS prototype, and molecule size. The goal
-is a useful distribution over chemical environments, not a uniform molecular
-distribution.
-
-## 18. Deduplication across datasets
-
-MolHub must identify overlapping molecules across THEMol, OMol25, OPoly26, and
-future sources. Exact molecular graph duplicates should share a global
-molecular identity. Cross-source deduplication must precede final split
-assignment to prevent the same molecule appearing in train and test through
-different sources.
-
-## 19. Split before configuration sampling
-
-The required order is:
-
-```text
-normalize molecular graphs
-→ assign global molecular identity
-→ train / validation / test split
-→ sample configurations
-```
-
-All structures of one molecular identity remain in one split. Never sample
-configurations first and randomly split frames afterward.
-
-## 20. Clean, frozen validation collections
-
-The universal test collection is not a random 10% slice. Maintain separately
-versioned, frozen evaluation collections:
-
-```text
-validation/
-├── random-molecule
-├── scaffold-holdout
-├── environment-holdout
-├── rare-element
-├── torsion
-├── high-energy
-└── intermolecular
-```
-
-They must not be changed casually between model releases.
-
-## 21. MolHub structure
+### 远期叙事（不进 v0 `source_coordinates`）
 
 ```text
 molcrafts/class1-universal-2026@1
-├── equilibrium
-│   └── themol/hessian@1
-├── torsion
-│   └── themol/torsion-scan@1
-├── off-equilibrium
-│   └── molcrafts/themol-relax-diverse@1
-├── electrostatic
-│   └── themol/mbis@1
-├── foundation
-│   ├── omol25/molecular-diverse@1
-│   └── omol25/intermolecular@1
-└── validation
-    └── molcrafts/class1-benchmark@1
+├── train          dataset:molcrafts/omol25-small@1          # v0 active
+├── validation     dataset:espaloma/phalkethoh-mm-small@1    # v0 active；禁止入训
+├── equilibrium    themol/hessian@1                          # deferred
+├── torsion        themol/torsion-scan@1                     # deferred
+├── off-equilibrium molcrafts/themol-relax-diverse@1         # deferred
+├── electrostatic  themol/mbis@1                             # deferred
+├── foundation     omol25/molecular-diverse@1 + intermolecular@1   # v1
+└── polymer        OPoly26                                   # v1-poly；先通用再特化
 ```
 
-OMol25 components may be omitted in v0.
+跨源去重、全局分子身份、先 split 再抽构象、以及独立冻结的 `molcrafts/class1-benchmark@1`（random-molecule / scaffold / environment / rare-element / torsion / high-energy / intermolecular）仍是后续版本的策略，不是 v0 门槛。v0 验证集就是 PhAlkEthOH-MM-small 的 seed-2666 holdout，不是 `class1-benchmark`。
 
-## 22. Release sequence
+### 实验侧交接（本仓不实现）
 
-### Dataset collection v0 — THEMol only
+Molexp 用 `Class1Universal2026().load().active_roles`（或等价地只解析 `source_coordinates`）接线：train loader 只打开 OMol25-small；val loader 只打开 PhAlkEthOH-MM-small 的 holdout。损失与指标按 Domain basis。MolNex `FrameDataset` / `DataModule` 保持坐标无关，由实验脚本组合。
 
-Hessian + TorsionScan + 20–30M diverse Relax + MBIS. Purpose: universal
-intramolecular Class-I.
+### Reuse decision
 
-### Dataset collection v1 — THEMol + selected OMol25
+- reuse `Class1Universal2026` — 仍是唯一集合定义；只改 `load()` 角色表与类文档。
+- generalize `CollectionRole` — 增加 `active`，让同一类型同时表达 v0 活跃角色与延期物理角色。
+- generalize `MultiSourceDatasetCollection` — `source_coordinates` 只发射 active 坐标，并暴露 `active_roles`。
+- reuse `OMol25Small` / `OMol25SmallFilter` — train 角色只钉其坐标与已有过滤/换算/键推断；不重写过滤器。
+- reuse `PhalkethohMMDataset` — validation 角色只钉其坐标、`mm_energy` schema 与 seed-2666 分子级 split。
+- reuse `FrameDataset` — 实验侧已有原语；本 spec 不改 molnex。
+- reuse `DataModule` — 同上。
+- new — 无。不发明新集合类型，不改 THEMol 源适配器，不把 v0 val 做成 `class1-benchmark`。
 
-v0 + OMol25 molecular-diverse + OMol25 intermolecular. Purpose: broader
-chemistry and improved nonbonded potential.
+## Files to create or modify
 
-### Dataset collection v1-poly
+- `src/molhub/dataset/universal_class_i.py`
+- `tests/test_dataset/test_universal_class_i.py`
+- `regressions/universal-class-i-01-dataset-composition.py` (new)
 
-v1 + OPoly26 through domain-adaptation sampling rather than full replacement.
-Purpose: polymer specialization.
+## Tasks
 
-## 23. Key principle
+- [x] Write failing unit tests for CollectionRole, MultiSourceDatasetCollection, and Class1Universal2026 (tests/test_dataset/test_universal_class_i.py → TestCollectionRole, TestMultiSourceDatasetCollection, TestClass1Universal2026)
+- [x] Generalize `CollectionRole` in src/molhub/dataset/universal_class_i.py to cover deferred physical roles via `active: bool = True`
+- [x] Generalize `MultiSourceDatasetCollection.source_coordinates` in src/molhub/dataset/universal_class_i.py to emit only active-role coordinates and expose `active_roles`
+- [x] Generalize `Class1Universal2026.load()` in src/molhub/dataset/universal_class_i.py so v0 active roles are `train=dataset:molcrafts/omol25-small@1` and `validation=dataset:espaloma/phalkethoh-mm-small@1`; keep THEMol physical roles with `active=False`
+- [x] Add docstring per google with units in src/molhub/dataset/universal_class_i.py
+- [x] Add regression example regressions/universal-class-i-01-dataset-composition.py (public API only; hard-coded goldens, no third-party runtime)
+- [x] Verify against the v0 resolve-set (no hessian/torsion/relax/mbis) and disjoint QM vs MM schemas
+- [x] Run full check + test suite
 
-Do not describe this as merely “130 million molecular configurations.” The
-scientifically meaningful description is:
+## Testing strategy
 
-> A task-balanced combination of equilibrium/Hessian, torsional,
-> off-equilibrium, electrostatic, and intermolecular datasets, each selected to
-> identify a different component of the Class-I potential.
+单元测试只放在 `tests/test_dataset/test_universal_class_i.py`，按类型镜像：`TestCollectionRole`、`TestMultiSourceDatasetCollection`、`TestClass1Universal2026`。每个测试只打一个方法。禁止在 `tests/` 里拉真实制品、网络或 Molexp 训练。
 
-\[
-\boxed{
-\text{Hessian} + \text{Torsion PES} +
-\text{diverse off-equilibrium E/F} +
-\text{electrostatics} + \text{intermolecular interactions}
-}
-\]
+- 快乐路径：`load()` 零 IO；`active_roles` 名为 `("train", "validation")`；`source_coordinates == ("dataset:molcrafts/omol25-small@1", "dataset:espaloma/phalkethoh-mm-small@1")`；train 为派生 QM `energy`/`forces`、`reference_method` 含 `ωB97M-V/def2-TZVPD`；validation 为 MM `mm_energy`、坐标即 PhAlkEthOH-MM-small。
+- 边界：`role("flat-pool")` 为 `KeyError` 且消息列出全部已声明名；`role("electrostatic")` / `role("torsion")` 仍可取到且 `active is False`；`role("intermolecular")` 不再存在；构造与 `load()` 在 `Molhub.fetch` 被替换成断言失败时仍成功。
+- 域验证（硬编码）：train 的 `target_schema.qm` 含 `energy`/`forces` 且不含 `mm_energy`；validation 的 `target_schema.mm` 含 `mm_energy` 且 `qm` 为空；train 的 `units` 为原生 `eV` 族、validation 为原生 `kcal/mol` 族、坐标均为 Å。不在本仓断言训练 MAE。
 
-Every component preserves its provenance, physical targets, sampling policy,
-and MolHub version. Raw size never determines scientific weight.
+回归示例 `regressions/universal-class-i-01-dataset-composition.py` 只调用公开 API：`Class1Universal2026().load()`，把上述坐标、活跃名、未激活 THEMol 名、以及 `source_coordinates` 不含 `themol/hessian` / `themol/torsion-scan` / `themol-relax-diverse` / `themol/mbis` 写成字面量断言。注释写明 tool / command / date；运行时不导入 ASE、espaloma 或第三方 oracle。换算因子 23.06055 只作为注释中的科学约定，回归不重算。
+
+## Out of scope
+
+- 改 `src/molhub/dataset/themol.py` 或任何 THEMol shard / manifest 生成脚本。
+- 物化 hessian、torsion-scan、relax-diverse、MBIS，或把它们重新变成 v0 解析门槛。
+- 新建 `molcrafts/class1-benchmark@1` 或改 v0 验证去用它。
+- 派生 `omol25/molecular-diverse`、`omol25/intermolecular`、OPoly26。
+- 跨源全局身份、先 split 再抽样的实现（策略保留在远期叙事）。
+- Molexp 训练循环、按分子中心化 MSE / MAE、LJ 冻结、charge loss、以及 `FrameDataset` / `DataModule` 接线。
+- MolNex 库代码与 molnex 侧 composition spec。
+- 改 conveyor / loader / CLI 层；它们继续按名取延期角色，但 v0 物化必须走 `active_roles` / `source_coordinates`。
+- 把 DFT 总能与 `mm_energy` 混进同一个损失（科学上禁止；由实验遵守，本集合只保证 schema 分离）。

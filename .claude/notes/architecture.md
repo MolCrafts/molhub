@@ -18,7 +18,7 @@ Root / L2 resolution — `src/molhub/`:
 - `src/molhub/_version.py` — `__version__` only.
 - `src/molhub/coordinate.py` — `kind:namespace/name@version` parsing, shorthand expansion, `relative_path()` / `cache_path()` projections.
 - `src/molhub/manifest.py` — strict single-manifest parser; `SCHEMA_VERSION = 1` enforced.
-- `src/molhub/registry.py` — directory-backed manifest store; source order explicit path → `$MOLHUB_REGISTRY` → bundled `registry_data/`.
+- `src/molhub/registry.py` — Python catalog via `Registry.builtin()`; optional `$MOLHUB_REGISTRY` YAML overlay for tests. Frontend uses `snapshot()`.
 - `src/molhub/molhub.py` — composes `Registry` + `Fetcher`; coordinate → role→path. No HTTP of its own.
 - `src/molhub/cli.py` — typer app: `search` / `info` / `fetch` + `cache verify|status|coverage`. `info` is content-first (renders `DatasetInfo` via `_describe`, falling back to the manifest).
 
@@ -71,7 +71,7 @@ Block plumbing — `src/molhub/conveyor/`:
 
 Loader façade L4 — `src/molhub/loader/`:
 
-- `__init__.py` — defines `load_dataset` / `load_dataset_builder`, re-exports `prepare` and the loader types.
+- `__init__.py` — defines `load` / `load_dataset_builder`, re-exports `prepare` and the loader types.
 - `naming.py` — `DatasetName` (HF spelling → `Coordinate`), newest-version resolution, `AmbiguousRevision` when versions do not order.
 - `info.py` — `Feature` / `SplitInfo` / `DatasetInfo`, content-first description built from `DatasetManifest` + `TargetSchema`.
 - `builder.py` — `DatasetBuilder` plus the `SplitDeclaration` hierarchy (`TableBackedSplits` for THEMol shards; `DeclaredSplits` subclasses for water-les / zinc-typing / phalkethoh / 3BPA).
@@ -90,7 +90,7 @@ Tests / regressions:
 
 ### Public surface
 
-- `molhub` — `__version__`, `load_dataset`, `load_dataset_builder`, `prepare`, `DatasetBuilder`, `DatasetInfo`, `Molhub`, `Coordinate`, `InvalidCoordinate`, `Manifest`, `Artifact`, `TargetDeclaration`, `InvalidManifest`, `Registry`, `RegistrySource`, `UnknownArtifact`.
+- `molhub` — `__version__`, `load`, `fetch`, `search`, `assignment`, `SubsetDataset`, `prepare`, `Molhub`. No `load_dataset`. Dataset primitive is `from molhub.dataset import QM9`.
 - `molhub.coordinate` — `Coordinate` (`parse`, `coerce`, `canonical`, `unversioned`, `relative_path`, `cache_path`), `InvalidCoordinate`; `DEFAULT_KIND`, `DEFAULT_NAMESPACE`, `KINDS`.
 - `molhub.manifest` — `Artifact`, `TargetDeclaration`, `Manifest` (`from_mapping` / `from_yaml` / `from_path`, `artifact`, `matches`), `InvalidManifest`, `SCHEMA_VERSION`, `FORMAT_PATTERN`, `MEDIA_TYPE_PATTERN`.
 - `molhub.registry` — `RegistrySource`, `Registry` (`load`, `get`, `search`, `versions`), `UnknownArtifact`, `ENV_VAR`.
@@ -101,7 +101,7 @@ Tests / regressions:
 - `molhub.dataset.themol` — `THEMOL_UNITS`, `THEMolShardDataset` (`keys`, `close`, `__len__`, `__getitem__`, `path`, `source_id`), five definition classes (each: `COORDINATE`, `TARGET_SCHEMA`, `manifest`, `load(role="shard-000")`).
 - `molhub.conveyor` — `DEFAULT_BUDGET_BYTES`, `default_ledger_path`, `BlockId`, `BlockState`, `ConveyorError` subtree (`IllegalTransition`, `InvalidBlockId`, `UnknownBlockState`, `RosterError`+4, `TransferError`+1, `PrepareError`+5, `TierError`+4, `QueueError`+3, `BlockFormatError`, `BlockNotSealed`, `UnsupportedBlockFormat`, `InvalidRecord`, `LedgerCorruption`, `SplitProvenanceMismatch`, `WorkerRefusal`), `Clock`, `SystemClock`, `LedgerRecord`, `LeaseRecord`, `Ledger`, `RemoteBlock`, `BlockRoster`, `SplitProvenance`, `TransferLedger`, `Backoff`, `ExponentialBackoff`, `TransferAttempt`, `ShardTransfer`, `RawUnit`, `THEMolUnitEncoder`, `BlockWriterLike`, `BlockWriterFactory`, `PreparedBlock`, `PreparedBlocks`, `PrepareJob`, `MolnexBlockWriter`, `BlockLedger`, `VisitOrder`, `DerivedLayout`, `TierStore`, `ByteBoundedQueue`, `JobRunner`, `PrepareWorkers`, `CoveragePoint`, `CoverageReport`, `BlockMetadata`, `ReadyBlocks`.
 - `molhub.conveyor.splits` — `SplitProvenance`, `SplitProvenanceMismatch` only; `_SplitTable` is deliberately private (D9), imported by private name from three loader modules.
-- `molhub.loader` — `load_dataset`, `load_dataset_builder`, `prepare`, `DatasetBuilder`, `DatasetInfo`, `SplitInfo`, `Feature`, `DatasetName`, `AmbiguousRevision`, `ShardIndex`, `SplitDataset`, `UnknownRecordKey`, `StreamingSplitDataset`, `BoundedStream`, `PublishedParts`, `BlockExport`, `SplitRouting`.
+- `molhub.loader` — `load`, `prepare`, and the catchable refusals. `DatasetBuilder` / `Feature` / `DatasetInfo` live in their modules and are not the user surface.
 - `molhub.loader.naming` — `AmbiguousRevision`, `DatasetName` (`revision`, `unversioned`, `resolve(registry)`).
 - `molhub.loader.info` — `Feature` (`name`, `level`, `units`; `Feature.declared`), `SplitInfo` (`name`, `num_examples`, `provenance`), `DatasetInfo` (`coordinate`, `description`, `citation`, `license`, `features`, `splits`, `record_type`, `download_size`); level constants `ATOM_LEVEL` / `META_LEVEL` / `BLOCK_LEVEL`.
 - `molhub.loader.builder` — `SplitDeclaration` (ABC: `definition`, `view`, `splits`, `streaming_view`, `block_export`), `TableBackedSplits`, `DeclaredSplits`, `WaterLESSplits`, `ZincTypingSplits`, `PhalkethohSplits`, `ThreeBPASplits`, `DatasetBuilder` (`info`, `split_view`, `streaming_view`, `block_export`).
@@ -112,7 +112,7 @@ Tests / regressions:
 
 ### Style summary
 
-- `loader/*` — types `PascalCase`, one noun per module; `DatasetBuilder(name, revision=, registry=, hub=)` with `registry`/`hub` injected as seams; views produced by methods (`split_view`, `streaming_view`, `block_export`), never factories; free functions: exactly three, machine-checked in `tests/test_loader/test_layering.py` (`_SANCTIONED_BY_MODULE`: `__init__.py` → the two readers, `materialize.py` → `prepare`); typed local errors (`AmbiguousRevision`, `UnknownRecordKey`, `KeyError` for unknown split, `ValueError` for streaming a whole-file dataset); Google docstrings whose module headers state the decision and cite `.claude/specs/hf-facade-0*` + the 2026-08-15 operator note.
+- `loader/*` — types `PascalCase`, one noun per module; `DatasetBuilder` is the internal dispatcher (`split_view`, `streaming_view`, `block_export`), not a user type; free functions: exactly two, machine-checked in `tests/test_loader/test_layering.py` (`load` in `__init__.py`, `prepare` in `materialize.py`).
 - `loader/builder.py` — the one polymorphic module: `SplitDeclaration` ABC with a per-dataset subclass, so `DatasetBuilder` holds no `if dataset == …` ladder.
 - `conveyor/*` — `*Store` / `*Job` / `*Transfer` / `*Report` by role; collaborators injected as protocols (`BlockLedger`, `TransferLedger`, `Clock`, `BlockWriterFactory`, `JobRunner`) — every unit fake-able; one `ConveyorError` root with a per-stage subtree; the two shared caller decisions (`DEFAULT_BUDGET_BYTES`, `default_ledger_path`) stated once in the `__init__` docstring; no env var, no network, no disk-layout decision of its own.
 - `dataset/*` — uniform `*Dataset`, `COORDINATE` module constant, `TARGET_SCHEMA` / `SPLITS` class attrs; `hub: ArtifactHub | None` seam; `themol` / `water_les` / `molrec` / `universal_class_i` defer IO to `.load()`, `qm9` lazy, the rest parse in `__init__`; records are `molpy.Frame` / `Trajectory` only — no wrapper dataclasses, no meta codec, scalars from `frame.meta`; `source_id` convention: canonical coordinate verbatim, `#key=value` qualifiers for views, ad-hoc prefixes only where no coordinate exists (`csv:` / `memory:`; `SubsetDataset` appends `":subset=<hash12>"`).
@@ -135,7 +135,7 @@ Layers: **L1 transport** (locator → bytes) · **L2 resolution** (coordinate �
 Layering edges, as the code stands:
 
 - **loader → {dataset, conveyor, registry/manifest/coordinate, molhub, sources.blobs}, one-way.** No module under `dataset/` or `conveyor/` imports `molhub.loader` (three docstring cross-references only). Enforced by `tests/test_loader/test_layering.py` (AST walk).
-- **Free-function sanction scoped to `loader/`**: `load_dataset` + `load_dataset_builder` in `loader/__init__.py`; `prepare` defined in `loader/materialize.py`, re-exported from `loader/__init__.py` and `molhub/__init__.py`. Same test asserts no other loader module declares a public free function.
+- **Free-function sanction scoped to `loader/`**: `load` + `load_dataset_builder` in `loader/__init__.py`; `prepare` defined in `loader/materialize.py`, re-exported from `loader/__init__.py` and `molhub/__init__.py`. Same test asserts no other loader module declares a public free function.
 - Two public free functions outside the sanction, both deliberate: `molhub.dataset.definition.dataset` (class decorator) and `molhub.conveyor.default_ledger_path` (shared path decision).
 - `_SplitTable` (private to `conveyor.splits`) imported by private name from `loader/{builder,mapstyle,materialize}.py` — deliberate in-distribution reach-through (D9), not exported.
 - L1 isolation guarded by `tests/test_sources/test_layering.py`; conveyor has its own `tests/test_conveyor/test_layering.py`.
@@ -162,7 +162,7 @@ The base inventory above predates the usability-fix waves. Corrections, verified
 ### Public surface (highlights)
 
 - `molhub.__all__` grew: `Feature`, `SplitInfo`, `PreparedBlocks`, `AllLocatorsFailed`, `AmbiguousRevision`, `SplitProvenanceMismatch`, `SplitTableUnavailable`, `UnknownRecordKey`, `UnknownSplit`, `UnroutableUnitError`, `UnsupportedRecordError` — every exception a public docstring names is catchable from `import molhub`. `ByteSize` is exported from `molhub.loader` but deliberately NOT from the root.
-- `load_dataset` is `@overload`-narrowed on `streaming: Literal[True|False]` → `StreamingSplitDataset | Dataset`; omitting `split=` raises a molhub-authored `TypeError` naming `load_dataset_builder(name).info.splits`. Signatures are user-first, injected seams last; `DatasetBuilder` gained `home=` and `__repr__`.
+- `load` is `@overload`-narrowed on `streaming: Literal[True|False]` → `StreamingSplitDataset | Dataset`; omitting `split=` raises a molhub-authored `TypeError` naming `load_dataset_builder(name).info.splits`. Signatures are user-first, injected seams last; `DatasetBuilder` gained `home=` and `__repr__`.
 - `materialize`: `BlockExport.refuse_unroutable(coordinate)` / `resolve_writer(factory)` promoted public (called from builder for hoisted cheap refusals); the mbis refusal raises `from None` (single error, no conveyor chain); `$MOLNEX_SRC` honored (sys.path insert before the molix probe).
 - `streaming`: both walk types have real reprs; a mid-stream CRASH preserves the cached shard (close+release only) while `GeneratorExit`/`take` keeps consumed→unlink→remote; digest-less manifests surface as a reader-facing `ValueError` advising `streaming=False`.
 

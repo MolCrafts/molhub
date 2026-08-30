@@ -86,9 +86,10 @@ class TestInMemoryDataset:
         f1 = _make_frame([8])
         ds = InMemoryDataset([f0, f1])
         assert len(ds) == 2
-        assert isinstance(ds[0], Frame)
-        assert ds[0]["atoms"]["number"][0] == 1
-        assert ds[1]["atoms"]["number"][0] == 8
+        assert len(ds[0]) == 1
+        assert isinstance(ds[0][0], Frame)
+        assert ds[0][0]["atoms"]["number"][0] == 1
+        assert ds[1][0]["atoms"]["number"][0] == 8
 
     def test_source_id(self):
         ds = InMemoryDataset([], name="test")
@@ -112,8 +113,8 @@ class TestSubsetDataset:
         )
         sub = SubsetDataset(base, [0, 2])
         assert len(sub) == 2
-        assert sub[0]["atoms"]["number"][0] == 1
-        assert sub[1]["atoms"]["number"][0] == 8
+        assert sub[0][0]["atoms"]["number"][0] == 1
+        assert sub[1][0]["atoms"]["number"][0] == 8
 
     def test_source_id_contains_subset(self):
         base = InMemoryDataset([_make_frame([1])], name="base")

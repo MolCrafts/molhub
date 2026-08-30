@@ -48,7 +48,7 @@ from molpy import Block, Box, Element, Frame
 
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import InMemoryDataset, TargetSchema
+from molhub.dataset.protocol import FrameCollection, TargetSchema
 from molhub.molhub import Molhub
 
 __all__ = ["COORDINATE", "WaterLESDataset"]
@@ -217,6 +217,7 @@ class WaterLESDataset:
         TARGET_SCHEMA: Energy is graph-level, forces are atom-level.
     """
 
+    COORDINATE = COORDINATE
     TRAIN_FILE: str = "train-H2O_RPBE-D3.xyz"
     TEST_FILE: str = "test-H2O_RPBE-D3.xyz"
     TRAIN_VAL_RATIO: tuple[float, float] = (0.95, 0.05)
@@ -240,6 +241,7 @@ class WaterLESDataset:
         self.root = Path(root).expanduser() if root is not None else None
         self.split = split
         self._hub = hub
+        self._frames: list[Frame] | None = None
 
     @property
     def source_id(self) -> str:
@@ -253,18 +255,35 @@ class WaterLESDataset:
         """
         return f"{COORDINATE}#split={self.split}"
 
-    def load(self) -> InMemoryDataset:
+    def load(self) -> WaterLESDataset:
         """Retrieve or locate this split's file and parse its frames.
 
+        Idempotent: a second call returns immediately. The returned dataset
+        keeps this view's :attr:`source_id` — the coordinate plus the split,
+        never a local frame count.
+
         Returns:
-            A map-style :class:`~molhub.dataset.protocol.Dataset` of
-            :class:`molpy.Frame` samples in file order.
+            This dataset, now indexable in file order.
 
         Raises:
             ValueError: A structure declares no forces column.
         """
-        frames = _parse_water_extxyz(self._locate())
-        return InMemoryDataset(self._select(frames), name=f"water-les#split={self.split}")
+        if self._frames is None:
+            self._frames = self._select(_parse_water_extxyz(self._locate()))
+        return self
+
+    def __len__(self) -> int:
+        return len(self._require_loaded())
+
+    def __getitem__(self, idx: int) -> FrameCollection:
+        return (self._require_loaded()[idx],)
+
+    def _require_loaded(self) -> list[Frame]:
+        if self._frames is None:
+            raise RuntimeError(
+                "WaterLESDataset: call load() before indexing; construction does no IO."
+            )
+        return self._frames
 
     def _select(self, frames: list[Frame]) -> list[Frame]:
         """Apply the deterministic tail split to a parsed train pool."""

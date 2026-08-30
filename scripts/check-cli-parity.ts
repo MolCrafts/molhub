@@ -105,7 +105,12 @@ try {
   assertEqual("search coordinates", coordinates(python(["search", "sample"])), coordinates(node(["search", "sample"])));
   const coordinate = "dataset:lab/sample@v1";
   assertEqual("info coordinate", coordinates(python(["info", coordinate])), coordinates(node(["info", coordinate])));
-  assertEqual("info roles", bracketedRoles(python(["info", coordinate])), bracketedRoles(node(["info", coordinate])));
+  assertEqual(
+    "info roles",
+    bracketedRoles(python(["info", coordinate, "--files"])),
+    bracketedRoles(node(["info", coordinate, "--files"])),
+  );
+  assertEqual("info hides files by default", bracketedRoles(python(["info", coordinate])), bracketedRoles(node(["info", coordinate])));
   assertEqual("fetch roles", fetchedRoles(python(["fetch", coordinate])), fetchedRoles(node(["fetch", coordinate])));
   process.stdout.write("Python and Node CLIs agree on search, info, fetch, coordinates, and roles.\n");
 } finally {

@@ -10,16 +10,26 @@ from molhub.dataset.definition import (
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.molrec import MolRecDataset
 from molhub.dataset.neighbor import NeighborDelegate
+from molhub.dataset.omol25 import (
+    OMol25,
+    OMol25Dataset,
+    OMol25Lmdb,
+    OMol25Small,
+    OMol25SmallFilter,
+    infer_bonds,
+)
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import (
     Dataset,
+    FrameCollection,
     InMemoryDataset,
     IterableDataset,
     Sample,
     SubsetDataset,
     TargetSchema,
+    assignment,
 )
-from molhub.dataset.qm9 import QM9Dataset
+from molhub.dataset.qm9 import QM9
 from molhub.dataset.revmd17 import RevMD17Dataset
 from molhub.dataset.themol import (
     THEMolHessian,
@@ -39,6 +49,11 @@ from molhub.dataset.universal_class_i import (
 from molhub.dataset.water_les import WaterLESDataset
 from molhub.dataset.zinc_typing import ZincTypingDataset
 
+ThreeBPA = ThreeBPADataset
+MBIS = THEMolMBIS
+Hessian = THEMolHessian
+TorsionScan = THEMolTorsionScan
+
 __all__ = [
     "dataset",
     "DatasetManifest",
@@ -46,14 +61,17 @@ __all__ = [
     "UnknownDataset",
     "ArtifactHub",
     "Dataset",
+    "FrameCollection",
     "IterableDataset",
     "Sample",
     "TargetSchema",
     "InMemoryDataset",
     "SubsetDataset",
+    "assignment",
     "CSVDataset",
-    "QM9Dataset",
+    "QM9",
     "RevMD17Dataset",
+    "ThreeBPA",
     "ThreeBPADataset",
     "ZincTypingDataset",
     "PhalkethohMMDataset",
@@ -63,12 +81,21 @@ __all__ = [
     "UnitConvert",
     "ConstantLabel",
     "NeighborDelegate",
+    "OMol25",
+    "OMol25Dataset",
+    "OMol25Lmdb",
+    "OMol25Small",
+    "OMol25SmallFilter",
+    "infer_bonds",
     "THEMolShardDataset",
     "THEMolHessian",
     "THEMolHessianRelax",
     "THEMolTorsionScan",
     "THEMolTorsionRelax",
     "THEMolMBIS",
+    "MBIS",
+    "Hessian",
+    "TorsionScan",
     "CollectionRole",
     "MultiSourceDatasetCollection",
     "Class1Universal2026",

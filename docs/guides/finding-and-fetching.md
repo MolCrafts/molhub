@@ -60,28 +60,26 @@ Counting the splits of dataset:molcrafts/3bpa@v1 will download 18.5 MiB (1940007
 ```
 
 The notice belongs to the **library**, not to the CLI, so the same sentence
-appears when a notebook or a training script calls
-`load_dataset_builder(name).info` — the path that surprised people never went
-through `molhub info` at all. It also fires on the map-style record path, where
-it opens with `Reading a record of` instead: `train[0]` on a THEMol split pulls
-the multi-GiB published file holding row 0, and that cost is now said out loud.
-It stays silent for a file already in this home's cache — a warning printed on
-every cache hit is one nobody reads by the third call — and stderr keeps a piped
-report unchanged.
+appears when a notebook or a training script calls `load`. It also
+fires on the map-style record path, where it opens with `Reading a record of`
+instead: `train[0]` on a THEMol split pulls the multi-GiB published file
+holding row 0, and that cost is now said out loud. It stays silent for a file
+already in this home's cache — a warning printed on every cache hit is one
+nobody reads by the third call — and stderr keeps a piped report unchanged.
 
-The same answer in Python is `load_dataset_builder(name).info`, which is where
-the command line reads it from — one authority, two renderings:
+Describe an artifact from the shell. There is no second Python type for this:
+
+```console
+$ molhub info themol/mbis
+```
 
 <!-- test: fixture-home -->
 
 ```python
 import molhub
 
-builder = molhub.load_dataset_builder("themol/mbis")
-assert builder.describe_download_size == 0        # a table-backed dataset describes free
-info = builder.info
-print(info.description)
-print([(split.name, split.num_examples) for split in info.splits])
+ds = molhub.load("themol/mbis")
+assert len(ds) > 0
 ```
 
 ## Reading a dataset, whole or a piece at a time
@@ -93,19 +91,18 @@ Two spellings of the same split, differing only in what they keep on disk:
 ```python
 import molhub
 
-train = molhub.load_dataset("themol/mbis", split="train")                  # map-style
-walk = molhub.load_dataset("themol/mbis", split="train", streaming=True)   # one file at a time
+ds = molhub.load("themol/mbis")                  # map-style, whole artifact
+walk = molhub.load("themol/mbis", streaming=True)   # one file at a time
 
-first = train[0]                                 # a molpy.Frame
-assert first.meta["source_record_id"]            # which published record this is
+record = ds[0]                                   # FrameCollection = Sequence[Frame]
+frame = record[0]                                # one geometry
+assert frame.meta["source_record_id"]            # which published record this is
 assert walk.take(1).limit == 1                   # take(n) bounds the walk
 ```
 
-Which of the two record types comes back is the dataset's own business and is
-stated by `info.record_type`: an MBIS record is one geometry, so it is a
-`Frame`, while a `themol/torsion-scan` record is a whole constrained scan and
-comes back as a `molpy.Trajectory` whose `.frames` each carry their own
-`meta["torsion_angle"]`.
+An MBIS record is a length-1 `FrameCollection`. A `themol/torsion-scan`
+record is a longer collection whose frames each carry their own
+`meta["torsion_angle"]`. There is no `Trajectory` on this surface.
 
 `streaming=True` takes `disk_budget=` — the bytes of fetched files it may keep —
 and deletes each file once it has been read, out of the same `$MOLHUB_HOME`
@@ -121,9 +118,7 @@ blocks through that same bounded walk:
 ```python
 from molhub import prepare
 
-prepared = prepare("themol/torsion-scan", split="train", output_dir="blocks/")
-assert prepared.blocks[0].split == "train"
-assert prepared.blocks[0].root.name == "themol-torsion-scan@1-train-000"
+prepare("themol/torsion-scan", output_dir="blocks/")
 ```
 
 `prepare` needs molnex importable and refuses, before writing anything, when it
@@ -131,4 +126,4 @@ is not — naming the `prepare` extra (`pip install 'molhub[prepare]'`, which
 brings torch) and `MOLNEX_SRC`, which it puts on `sys.path` for you when it is
 set. It also refuses a dataset whose targets `molix.block/1` has no column routes
 for — `themol/mbis`, whose atom-level electrostatics an export could only drop —
-so those are read with `load_dataset` rather than materialized.
+so those are read with `load` rather than materialized.

@@ -26,7 +26,7 @@ class Molhub:
     Args:
         registry: Where manifests come from. Accepts an :class:`Registry`, an
             :class:`RegistrySource`, a directory path, or ``None`` to use
-            ``$MOLHUB_REGISTRY`` and then the bundled snapshot.
+            ``$MOLHUB_REGISTRY`` when set, otherwise the Python catalog.
         fetcher: How bytes are retrieved. Defaults to a :class:`Fetcher` with
             the discovered drivers and the shared cache under ``$MOLHUB_HOME``,
             which files each artifact by coordinate and role.

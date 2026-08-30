@@ -33,6 +33,7 @@ from typing import Any
 from molpy import Frame
 
 from molhub.dataset.cache import DownloadCache
+from molhub.dataset.protocol import FrameCollection
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -146,11 +147,11 @@ class CSVDataset:
     def __len__(self) -> int:
         return len(self._rows)
 
-    def __getitem__(self, idx: int) -> Frame:
+    def __getitem__(self, idx: int) -> FrameCollection:
         row = self._rows[idx]
         frame = Frame()
         frame.meta.update(row)
-        return frame
+        return (frame,)
 
     # -- introspection -------------------------------------------------------
 

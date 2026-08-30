@@ -1,7 +1,7 @@
 """What the REMOTE tier holds for one collection role — projected, never indexed.
 
 molhub already ships an index of every remote block: the registry manifests
-(``src/molhub/registry_data/dataset/themol/*/1.yaml``), where each shard is one
+(``src/molhub/dataset/themol_files.py``), where each shard is one
 artifact role with its filename, size, digest and locators. A roster that kept
 its own copy of any of that would be a second index, and a second index is a
 thing that drifts — quietly, in the direction of whichever copy is not the one

@@ -11,7 +11,7 @@ keys ``THEMolShardDataset`` already listed, and memoizes it under the same
 The consequence is stated rather than hidden: a map-style view fetches the shard
 owning the row you ask for, plus every earlier shard it has not indexed yet.
 Sequential access pays once per shard; random access to a late row pays for the
-walk. That is HuggingFace's own ``load_dataset`` semantic — it downloads — only
+walk. That is HuggingFace's own ``load`` semantic — it downloads — only
 charged out loud.
 
 **One key space, declared, never guessed.** A shard's group keys are read as
@@ -343,67 +343,92 @@ class ShardIndex:
 
 
 class SplitDataset:
-    """One split of a shard-published dataset, map-style.
+    """A shard-published dataset, map-style, over every record.
 
-    ``len`` is the split table's own count — no shard bytes at all.
-    ``ds[i]`` walks :attr:`ShardIndex.roles` in order, keeping the records this
-    split claims, and reads the i-th of them through the index that opened the
-    shard.
+    ``load`` returns this view of the **whole** artifact. A published
+    train/val/test assignment is a separate index list, applied with
+    :class:`~molhub.dataset.protocol.SubsetDataset`. Passing *split* keeps
+    the old filtered view for tests that still construct one; the façade
+    never does.
 
     Args:
-        shards: The dataset definition the records come from. The same object
-            *index* was built over: an index of one artifact's shards paired
-            with another's would count rows here and read them there.
-        split: Which split this view exposes.
-        table: The provenance-verified split assignment, keyed by record uuid.
-        index: The shard index, which owns *which keys a shard holds* — this
-            class owns *which of them are in this split*.
+        shards: The dataset definition the records come from.
+        index: Which keys each shard holds.
+        table: Optional published assignment, keyed by record uuid. Needed
+            only for :meth:`assignment`.
+        split: If set, expose only that assignment's rows. ``None`` (the
+            default) exposes every record in shard order.
 
     Raises:
         ValueError: If *index* was built over a different source than *shards*.
-        KeyError: If *table* records no row for *split*; the message names the
-            splits it does record, which is what discovery would have said.
+        KeyError: If *split* is set and *table* has no such name.
     """
 
     def __init__(
         self,
         shards: ShardSource,
         *,
-        split: str,
-        table: _SplitTable,
         index: ShardIndex,
+        table: _SplitTable | None = None,
+        split: str | None = None,
     ) -> None:
         if index.source is not shards:
             raise ValueError(
                 "This split view and its shard index were built over different sources; "
                 "rows would be counted in one artifact and read from another."
             )
-        counts = table.counts()
-        if split not in counts:
-            raise KeyError(
-                f"{split!r} is not a split of this table, which records {sorted(counts)}."
-            )
+        if split is not None:
+            if table is None:
+                raise TypeError("a filtered view needs the published assignment table")
+            counts = table.counts()
+            if split not in counts:
+                raise KeyError(
+                    f"{split!r} is not a split of this table, which records {sorted(counts)}."
+                )
+            self._length = counts[split]
+        else:
+            self._length = sum(len(index.keys(role)) for role in index.roles)
         self._split = split
         self._table = table
         self._index = index
-        self._length = counts[split]
         self._positions_by_role: dict[str, tuple[int, ...]] = {}
 
     @property
-    def split(self) -> str:
-        """The split this view exposes."""
+    def split(self) -> str | None:
+        """Filtered assignment name, or ``None`` for the whole artifact."""
         return self._split
 
-    def __repr__(self) -> str:
-        """Which dataset, which split, how much of it — and no shard role.
+    @property
+    def source_id(self) -> str:
+        return self._index.coordinate.canonical
 
-        This is what ``load_dataset(name, split=...)`` hands back, so its repr is
-        the first thing a notebook prints and the first thing a traceback
-        carries; ``<SplitDataset object at 0x…>`` names none of the three. All
-        three are already in hand — the coordinate from the index, the split and
-        its count from the table — so echoing this view costs no fetch, which is
-        the same promise ``len`` makes.
+    def assignment(self) -> dict[str, list[int]]:
+        """Published name → indices into this whole-artifact view.
+
+        Raises:
+            SplitTableUnavailable: If no assignment table was attached.
+            TypeError: If this view is already a filtered subset.
         """
+        from molhub.loader.errors import SplitTableUnavailable
+
+        if self._split is not None:
+            raise TypeError("assignment() is computed on the whole dataset, not a filtered view")
+        if self._table is None:
+            raise SplitTableUnavailable(
+                f"{self._index.coordinate.canonical} has no published assignment on this "
+                "machine. Build it with: python -m molhub.scripts.build_class1_splits"
+            )
+        by_name: dict[str, list[int]] = {name: [] for name in self._table.counts()}
+        cursor = 0
+        for role in self._index.roles:
+            for key in self._index.keys(role):
+                by_name[self._split_of(key, role)].append(cursor)
+                cursor += 1
+        return by_name
+
+    def __repr__(self) -> str:
+        if self._split is None:
+            return f"SplitDataset({self._index.coordinate.canonical!r}, records={self._length})"
         return (
             f"SplitDataset({self._index.coordinate.canonical!r}, split={self._split!r}, "
             f"records={self._length})"
@@ -420,8 +445,7 @@ class SplitDataset:
                 back from the end, as elsewhere in Python.
 
         Returns:
-            The :class:`molpy.Frame` or :class:`molpy.Trajectory` the shard
-            reader builds — no wrapper on top of it.
+            The :data:`~molpy.FrameCollection` the shard reader builds.
 
         Raises:
             TypeError: If *index* is not an integer. Deciding it here is what
@@ -440,17 +464,19 @@ class SplitDataset:
             position = operator.index(index)
         except TypeError:
             raise TypeError(
-                f"A split view is addressed by integer position, not by {index!r} "
-                f"({type(index).__name__}). This is split {self._split!r} of "
-                f"{self._index.coordinate.canonical}; its first record is ds[0]."
+                f"A dataset is addressed by integer position, not by {index!r} "
+                f"({type(index).__name__}). This is {self._index.coordinate.canonical}; "
+                "its first record is ds[0]."
             ) from None
         asked = position
         position = position + self._length if position < 0 else position
         if position < 0 or position >= self._length:
-            raise IndexError(
-                f"{asked} is outside split {self._split!r} of "
-                f"{self._index.coordinate.canonical}, which holds {self._length} records."
+            where = (
+                f"split {self._split!r} of {self._index.coordinate.canonical}"
+                if self._split is not None
+                else self._index.coordinate.canonical
             )
+            raise IndexError(f"{asked} is outside {where}, which holds {self._length} records.")
         remaining = position
         held = 0
         for role in self._index.roles:
@@ -460,31 +486,30 @@ class SplitDataset:
                 return self._index.shard(role)[positions[remaining]]
             remaining -= len(positions)
         raise IndexError(
-            f"The published files hold {held} records of split {self._split!r} of "
-            f"{self._index.coordinate.canonical}, but the split table counts "
-            f"{self._length}. The table and the files are from different releases of "
-            "this dataset."
+            f"The published files hold {held} records of "
+            f"{self._index.coordinate.canonical}, but this view counts "
+            f"{self._length}."
         )
 
     def _positions(self, role: str) -> tuple[int, ...]:
-        """Where this split's records sit within the shard *role*.
-
-        Kept once per role: a shard holds ≈50 k records, and re-folding the
-        table over all of them on every ``ds[i]`` would make a sequential walk
-        quadratic in the size of the dataset.
-        """
+        """Where this view's records sit within the shard *role*."""
         remembered = self._positions_by_role.get(role)
         if remembered is None:
-            remembered = tuple(
-                offset
-                for offset, key in enumerate(self._index.keys(role))
-                if self._split_of(key, role) == self._split
-            )
+            if self._split is None:
+                remembered = tuple(range(len(self._index.keys(role))))
+            else:
+                remembered = tuple(
+                    offset
+                    for offset, key in enumerate(self._index.keys(role))
+                    if self._split_of(key, role) == self._split
+                )
             self._positions_by_role[role] = remembered
         return remembered
 
     def _split_of(self, key: str, role: str) -> str:
-        """The split *key* belongs to, refusing loudly outside the key space."""
+        """The assignment name *key* belongs to."""
+        if self._table is None:
+            raise RuntimeError("assignment lookup needs the published table")
         try:
             return self._table.split_of(key)
         except KeyError as error:
