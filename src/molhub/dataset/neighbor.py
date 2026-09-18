@@ -3,7 +3,7 @@
 The cutoff graph (``edge_index`` / ``edge_diff`` / ``edge_dist``) is a physics
 contract: which pairs count, how periodic images are folded in, whether the
 list is bidirectional, and which way an edge displacement points. MolNex owns
-that contract in ``molix.batch.NeighborList``, together with the kernel-output
+that contract in ``molix.neighbor.NeighborList``, together with the kernel-output
 normalisation it implies — the periodic-image handling, the padding strip, the
 symmetry expansion and the edge-sign convention. A second implementation over
 here would not be a copy for long, and the two would then disagree about the
@@ -41,7 +41,7 @@ __all__ = ["NeighborListSeam", "NeighborDelegate"]
 class NeighborListSeam(Protocol):
     """What :class:`NeighborDelegate` requires of the list it wraps.
 
-    ``molix.batch.NeighborList`` satisfies this by shape and declares nothing;
+    ``molix.neighbor.NeighborList`` satisfies this by shape and declares nothing;
     so does any stand-in a caller injects. Naming the molnex class at this seam
     instead would make every substitute a subclass problem — and would drag a
     torch import into a package that does not need one.
@@ -58,7 +58,7 @@ class NeighborListSeam(Protocol):
 
 
 class NeighborDelegate:
-    """Builds a sample's cutoff graph by asking ``molix.batch.NeighborList``.
+    """Builds a sample's cutoff graph by asking ``molix.neighbor.NeighborList``.
 
     Args:
         cutoff: Cutoff radius in Å for the list this delegate builds.
@@ -92,10 +92,10 @@ class NeighborDelegate:
         """
         if self._neighbor_list is None:
             try:
-                from molix.batch.neighbor import NeighborList
+                from molix.neighbor import NeighborList
             except ImportError as error:
                 raise ImportError(
-                    "molhub.dataset.neighbor delegates to molix.batch.NeighborList, "
+                    "molhub.dataset.neighbor delegates to molix.neighbor.NeighborList, "
                     "which is not importable here. Install molnex alongside molhub, "
                     "or inject a list of your own via neighbor_list=."
                 ) from error

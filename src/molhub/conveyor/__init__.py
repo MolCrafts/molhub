@@ -57,15 +57,20 @@ returning the evidence a ``READY`` record needs::
         shard,
         encoder=THEMolUnitEncoder(task="torsion-scan"),
         split_of={identity: table.split_of(identity) for identity in identities},
-        writer_factory=MolnexBlockWriter,
+        writer_factory=YourBlockWriter,   # no default; bring a writer
         root=blocks_root,
         name="themol-torsion-scan-shard-000",
         provenance=provenance,
     ).run()
     prepared.blocks[0].block_digest   # what the READY record quotes
 
-molnex enters through :class:`~molhub.conveyor.prepare.MolnexBlockWriter` alone,
-which imports ``molix`` lazily, so the base install stays torch-free.
+``writer_factory`` has **no default**. It used to be an adapter onto molnex's
+``molix.block/1`` writer; that format was deleted on 2026-09-17 (molnex spec
+``data-layer-01-consolidation``) as having no producer, no consumer and no
+instance on disk. The writer-shaped seam — :class:`~molhub.conveyor.prepare.BlockWriterLike`
+/ :class:`~molhub.conveyor.prepare.BlockWriterFactory` — stays, so a caller can
+bring their own; molhub imports no molnex writer, and the base install stays
+torch-free because there is nothing to import.
 
 The residency half decides what stays on local disk and what the run can prove
 it saw. :class:`~molhub.conveyor.tier.TierStore` bounds one subdirectory in
@@ -155,7 +160,6 @@ from molhub.conveyor.ledger import (
 from molhub.conveyor.prepare import (
     BlockWriterFactory,
     BlockWriterLike,
-    MolnexBlockWriter,
     PreparedBlock,
     PreparedBlocks,
     PrepareJob,
@@ -215,7 +219,7 @@ def default_ledger_path(home: str | Path) -> Path:
     walk must agree on before either has constructed anything.
 
     Args:
-        home: The molhub home — ``$MOLHUB_HOME``, or whatever ``--home`` names.
+        home: The molhub home — ``config.home_dir``, or whatever ``--home`` names.
 
     Returns:
         ``<home>/conveyor/ledger.jsonl``. The path, not the file: a
@@ -264,7 +268,6 @@ __all__ = [
     "PreparedBlock",
     "PreparedBlocks",
     "PrepareJob",
-    "MolnexBlockWriter",
     "PrepareError",
     "UnsupportedRecordError",
     "IncompleteRecordError",

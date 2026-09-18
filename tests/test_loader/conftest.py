@@ -1242,27 +1242,35 @@ def layout(tmp_path: Path) -> DerivedLayout:
 
 
 @pytest.fixture
-def molhub_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """``$MOLHUB_HOME`` pointed at ``tmp_path``, split derivation already in it."""
+def molhub_home(tmp_path: Path) -> Path:
+    """Process home pointed at ``tmp_path``, split derivation already in it."""
+    from molhub.config import config
+
     home = tmp_path / "home"
     write_split_derivation(home.joinpath(*SPLIT_SUBPATH))
-    monkeypatch.setenv("MOLHUB_HOME", str(home))
-    return home
+    previous = config.home_dir
+    config.home_dir = home
+    yield home
+    config.home_dir = previous
 
 
 @pytest.fixture
-def bare_molhub_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """``$MOLHUB_HOME`` pointed at a home with **no** split derivation in it.
+def bare_molhub_home(tmp_path: Path) -> Path:
+    """Process home pointed at a home with **no** split derivation in it.
 
     The sibling of :func:`molhub_home`, and the state every reader is in before
     they have ever built the table: the home exists, the cache under it may even
     be warm, and ``derived/`` is simply not there. Absent is not corrupt, so it
     gets its own fixture rather than a flag on the other one.
     """
+    from molhub.config import config
+
     home = tmp_path / "bare-home"
     home.mkdir()
-    monkeypatch.setenv("MOLHUB_HOME", str(home))
-    return home
+    previous = config.home_dir
+    config.home_dir = home
+    yield home
+    config.home_dir = previous
 
 
 @pytest.fixture

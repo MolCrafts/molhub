@@ -9,14 +9,13 @@
 @import "./tokens.css";
 @import "./constitution-theme.css";
 @import "./constitution-base.css";
+/* Site archetype: body copy and control heights. Vendored from molcrafts-ui;
+   must come after the constitution it layers over. */
+@import "./density-site.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: var(--mc-font-ui);
-  --font-display: var(--mc-font-display);
-  --font-mono: var(--mc-font-mono);
-
   --color-background: var(--mc-canvas);
   --color-paper: var(--mc-canvas);
   --color-canvas-tinted: var(--mc-canvas-tinted);
@@ -75,34 +74,18 @@
   --color-state-critical-line: color-mix(in srgb, var(--mc-danger) 34%, transparent);
   --color-scrim: rgb(8 18 11 / 58%);
 
-  --radius-control: var(--mc-radius-sm);
-  --radius-panel: var(--mc-radius-md);
-  --radius-overlay: var(--mc-radius-lg);
-  --radius-sm: var(--mc-radius-sm);
-  --radius-md: var(--mc-radius-md);
-  --radius-lg: var(--mc-radius-lg);
-  --radius-xl: var(--mc-radius-xl);
+  /* Product-only keys — the constitution names none of these. Everything it
+     DOES name (type ramp, control heights, radius, motion, icon sizes) now
+     comes from the constitution plus `density-site.css`; this product declares
+     no geometry of its own, so there is nothing here that can drift from it. */
+  --font-display: var(--mc-font-display);
   --shadow-raised: var(--mc-shadow-sm);
   --shadow-overlay: var(--mc-shadow-md);
-
-  --text-micro: 0.6875rem;
-  --text-label: 0.75rem;
   --text-meta: 0.8125rem;
-  --text-body: 0.9375rem;
-  --text-title: 1.0625rem;
-  --text-heading: 1.375rem;
-  --text-display: clamp(2.45rem, 5vw, 3.45rem);
-
-  --spacing-control-compact: 2rem;
-  --spacing-control: 2.5rem;
-  --spacing-control-comfortable: 3rem;
-  --spacing-touch-target: 2.75rem;
   --spacing-header: 3.5rem;
   --container-content: 82rem;
   --container-prose-measure: 46rem;
   --container-rail: 18rem;
-
-  --ease-standard: var(--mc-ease);
 }
 
 @layer base {

@@ -30,8 +30,8 @@ warning, and two layers stating one sentence is one notice printed twice at the
 terminal — which is how a warning becomes noise, and noise is how the real one
 gets skipped. ``--home`` joins it for parity with ``cache status`` /
 ``cache verify``: the split derivation ``info`` reads lives under the cache root,
-and with only ``$MOLHUB_HOME`` to go on there is no way to point this verb at a
-second molhub home without exporting a variable around it.
+and ``--home`` writes ``config.home_dir`` and injects that path so a second
+cache root does not need an environment variable.
 
 **Byte counts are rendered by the library's own type.**
 ``download 31041658614 B`` is a number a reader counts digits on; the same line
@@ -52,6 +52,7 @@ from typing import Annotated, Optional
 
 import typer
 
+from molhub.config import config
 from molhub.conveyor import DEFAULT_BUDGET_BYTES, ConveyorError, default_ledger_path
 from molhub.coordinate import InvalidCoordinate
 from molhub.loader import AmbiguousRevision, SplitTableUnavailable
@@ -60,7 +61,7 @@ from molhub.loader.info import ByteSize, DatasetInfo
 from molhub.manifest import InvalidManifest, Manifest
 from molhub.molhub import Molhub
 from molhub.registry import UnknownArtifact
-from molhub.sources import BlobStore, Digest, SourceError
+from molhub.sources import BlobStore, Digest, Fetcher, SourceError
 
 app = typer.Typer(
     name="molhub",
@@ -77,7 +78,7 @@ _RegistryOption = Annotated[
 ]
 _HomeOption = Annotated[
     Optional[Path],
-    typer.Option("--home", help="Cache root. Defaults to $MOLHUB_HOME."),
+    typer.Option("--home", help="Cache root. Defaults to the process home."),
 ]
 
 # The conveyor's two tiers, spelled here because the CLI is where a user's
@@ -90,10 +91,21 @@ _RAW_SUBDIR = "conveyor/raw"
 _BLOCKS_SUBDIR = "conveyor/blocks"
 
 
-def _hub(registry: Path | None) -> Molhub:
+def _apply_home(home: Path | None) -> Path | None:
+    """Write ``config.home_dir`` when ``--home`` is present; leave it when omitted."""
+    if home is None:
+        return None
+    path = Path(home).expanduser()
+    config.home_dir = path
+    return path
+
+
+def _hub(registry: Path | None, *, blobs: BlobStore | None = None) -> Molhub:
     """Build a hub, turning a broken registry into a clean error rather than a traceback."""
     try:
-        return Molhub(registry)
+        if blobs is None:
+            return Molhub(registry)
+        return Molhub(registry, fetcher=Fetcher(blobs=blobs))
     except InvalidManifest as error:
         raise typer.BadParameter(str(error)) from error
 
@@ -128,7 +140,7 @@ def _describe(hub: Molhub, name: str, home: Path | None) -> DatasetInfo:
         hub: The resolved registry.
         name: The dataset name or coordinate, as typed.
         home: Cache root the split derivation is read from; ``None`` uses
-            ``$MOLHUB_HOME``.
+            ``config.home_dir``.
 
     Returns:
         The description — content only, and never a file role.
@@ -205,6 +217,7 @@ def info(
     the split counts are the dataset's own and reading them is the only way to
     have them. The byte total is printed to stderr before that happens.
     """
+    home = _apply_home(home)
     hub = _hub(registry)
     described = _describe(hub, name, home)
     manifest = _resolve(hub, described.coordinate.canonical)
@@ -247,9 +260,11 @@ def fetch(
         Optional[Path], typer.Option("--into", help="Also copy the files into this directory.")
     ] = None,
     registry: _RegistryOption = None,
+    home: _HomeOption = None,
 ) -> None:
     """Download COORDINATE's files, checking any digest the manifest records."""
-    hub = _hub(registry)
+    home = _apply_home(home)
+    hub = _hub(registry, blobs=BlobStore(home) if home is not None else None)
     manifest = _resolve(hub, coordinate)
     try:
         paths = hub.fetch(manifest.coordinate)
@@ -276,6 +291,7 @@ def cache_verify(
     Files whose manifest records no digest are counted and skipped: the
     platform published nothing to check them against.
     """
+    home = _apply_home(home)
     store = BlobStore(home)
     hub = _hub(registry)
 
@@ -327,6 +343,7 @@ def cache_status(
     # conveyor's numpy import, and `molhub.dataset.neighbor` set this precedent.
     from molhub.conveyor import Ledger, TierStore
 
+    home = _apply_home(home)
     root = BlobStore(home).root
     ledger = Ledger(default_ledger_path(root))
     tiers = [
@@ -376,6 +393,7 @@ def cache_coverage(
     """
     from molhub.conveyor import ConveyorError, CoverageReport, Ledger, ReadyBlocks, TierStore
 
+    home = _apply_home(home)
     hub = _hub(registry)
     root = BlobStore(home).root
     try:

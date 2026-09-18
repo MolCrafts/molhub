@@ -50,10 +50,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from molpy import Frame
+
 from molhub.conveyor.splits import _SplitTable
 from molhub.conveyor.tier import DerivedLayout
 from molhub.coordinate import Coordinate
-from molhub.dataset.protocol import Sample
 from molhub.loader.info import ByteSize
 from molhub.sources.blobs import BlobStore
 
@@ -166,7 +167,7 @@ class ShardRecords(Protocol):
         """The shard's record keys, positionally aligned with ``self[i]``."""
         ...
 
-    def __getitem__(self, index: int) -> Sample:
+    def __getitem__(self, index: int) -> Sequence[Frame]:
         """The record at *index*."""
         ...
 
@@ -437,7 +438,7 @@ class SplitDataset:
     def __len__(self) -> int:
         return self._length
 
-    def __getitem__(self, index: int) -> Sample:
+    def __getitem__(self, index: int) -> Sequence[Frame]:
         """The record at *index* within this split.
 
         Args:
@@ -445,7 +446,7 @@ class SplitDataset:
                 back from the end, as elsewhere in Python.
 
         Returns:
-            The :data:`~molpy.FrameCollection` the shard reader builds.
+            The ``Sequence[Frame]`` the shard reader builds.
 
         Raises:
             TypeError: If *index* is not an integer. Deciding it here is what

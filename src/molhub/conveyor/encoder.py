@@ -2,7 +2,7 @@
 
 This is the semantic half of the prepare stage: it maps the records
 :mod:`molhub.dataset.themol` already parses out of HDF5 — a
-:data:`~molpy.FrameCollection` (``Sequence[Frame]``) — onto the column names
+``Sequence[Frame]`` (``Sequence[Frame]``) — onto the column names
 ``molix.block/1`` routes, and does nothing else. It opens no file, holds no
 writer, decides no split, and imports neither torch nor molix — so a shard
 can be encoded, inspected and unit-tested in an environment where molnex is
@@ -16,7 +16,7 @@ depth — so :meth:`THEMolUnitEncoder.encode` cannot name ``Frame`` or
 first item has ``meta``. A bare frame is not a collection.
 
 **Column names are molnex's route names, not molhub's.** They are rows of the
-closed ``_COLUMN_ROUTES`` registry in ``molnex:src/molix/store/block.py``, which
+closed ``_COLUMN_ROUTES`` registry molnex used to carry, which
 resolves a column to a row space and a payload route by *name* — an
 unregistered column is a ``ValueError``, not a new prefix — so the encoder emits
 exactly: ``Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` /
@@ -27,7 +27,7 @@ exactly: ``Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` /
 :data:`~molhub.dataset.themol.THEMOL_UNITS` declares Å / kcal mol⁻¹ /
 kcal mol⁻¹ Å⁻¹, which is already the block format's convention. The only numeric
 transformation is the dtype narrowing the store refuses to do silently
-(float64 → ``<f4``, molpy's uint32 valence columns → ``<i4``, atomic numbers →
+(float64 → ``<f4``, molpy's uint64 valence columns → ``<i4``, atomic numbers →
 ``<i2``); no conversion factor appears anywhere in this module, and the caller
 puts ``THEMOL_UNITS`` itself into ``provenance["units"]``.
 
@@ -75,7 +75,7 @@ from molhub.conveyor.errors import IncompleteRecordError, UnsupportedRecordError
 __all__ = ["RawUnit", "THEMolUnitEncoder"]
 
 # The two columns every block declares, and the names this module derives its
-# counts from. Mirrored from `molnex:src/molix/store/block.py`'s required pair,
+# counts from. Mirrored from the block format's required pair,
 # name for name.
 _REQUIRED_TOPOLOGY = "Z"
 _REQUIRED_FRAME = "pos"
@@ -231,7 +231,7 @@ class THEMolUnitEncoder:
         """Encode one whole THEMol record as one whole :class:`RawUnit`.
 
         Args:
-            record: A :data:`~molpy.FrameCollection` — ``Sequence[Frame]`` —
+            record: A ``Sequence[Frame]`` — ``Sequence[Frame]`` —
                 exactly what ``THEMolShardDataset.__getitem__`` returns.
 
         Returns:
@@ -244,13 +244,17 @@ class THEMolUnitEncoder:
                 order, frames that disagree with its topology, a frame missing a
                 target its siblings declare, or no ``mapped_isomeric_smiles``.
         """
-        if isinstance(record, Sequence) and not isinstance(record, (str, bytes)):
-            frames = tuple(record)
+        if not isinstance(record, (str, bytes)):
+            try:
+                frames = tuple(record[index] for index in range(len(record)))
+            except (TypeError, AttributeError):
+                frames = ()
             if frames and hasattr(frames[0], "meta"):
                 return self._unit(frames)
         raise UnsupportedRecordError(
-            f"{type(record).__name__} is not a FrameCollection; encode() takes "
-            "Sequence[Frame], which is what THEMolShardDataset.__getitem__ returns."
+            f"{type(record).__name__} is not a ``Sequence[Frame]``; encode() takes "
+            "Sequence[Frame] (or a molpy Trajectory of frames), which is what "
+            "THEMolShardDataset.__getitem__ returns."
         )
 
     # -- one record --------------------------------------------------------
@@ -365,7 +369,7 @@ class THEMolUnitEncoder:
         by; that is :meth:`identity`.
         """
         name = "scan_id" if scanned else "molecule_id"
-        value = frame.meta.get(name)
+        value = getattr(frame.meta.get(name), "value", frame.meta.get(name))
         if not isinstance(value, str) or not value:
             raise IncompleteRecordError(
                 f"THEMol record carries no {name!r}, so its unit has no key; a sealed block "
@@ -463,7 +467,7 @@ class THEMolUnitEncoder:
                 "unit's first frame does. A frame column is one value per frame; dropping "
                 "this one would misalign every frame after it."
             )
-        return float(targets[name])
+        return float(getattr(targets[name], "value", targets[name]))
 
     @staticmethod
     def _torsion_atoms(key: str, torsion: Sequence[int], n_atoms: int) -> np.ndarray:
@@ -483,7 +487,11 @@ class THEMolUnitEncoder:
     @staticmethod
     def _smiles(key: str, targets: Mapping[str, Any]) -> str:
         """The molecular identity's only input, read off the frame's targets."""
-        smiles = targets.get("mapped_isomeric_smiles")
+        smiles = getattr(
+            targets.get("mapped_isomeric_smiles"),
+            "value",
+            targets.get("mapped_isomeric_smiles"),
+        )
         if not isinstance(smiles, str) or not smiles:
             raise IncompleteRecordError(
                 f"THEMol record {key!r} carries no 'mapped_isomeric_smiles' target, so it has "

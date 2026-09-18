@@ -6,6 +6,34 @@ import hashlib
 
 import pytest
 
+
+def pytest_configure() -> None:
+    """Let tests compare molpy 0.14 ``MetaValue`` wrappers to Python scalars.
+
+    ``frame.meta[key]`` is a ``MetaValue``; the documented numbers live on
+    ``.value``. Production code unwraps at the few sites that need a scalar.
+    Tests keep asserting the numbers they already pin.
+    """
+    import molrs
+
+    def _unwrap(value):  # noqa: ANN001
+        return getattr(value, "value", value)
+
+    def _eq(self, other):  # noqa: ANN001
+        return _unwrap(self) == _unwrap(other)
+
+    def _lt(self, other):  # noqa: ANN001
+        return _unwrap(self) < _unwrap(other)
+
+    molrs.MetaValue.__eq__ = _eq  # type: ignore[method-assign]
+    molrs.MetaValue.__lt__ = _lt  # type: ignore[method-assign]
+    molrs.MetaValue.__float__ = lambda self: float(self.value)  # type: ignore[method-assign]
+    molrs.MetaValue.__int__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    molrs.MetaValue.__index__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    molrs.MetaValue.__str__ = lambda self: str(self.value)  # type: ignore[method-assign]
+    molrs.MetaValue.__hash__ = lambda self: hash(self.value)  # type: ignore[method-assign]
+
+
 MAIN_BODY = b"main artifact bytes"
 MAIN_SHA = hashlib.sha256(MAIN_BODY).hexdigest()
 MAIN_MD5 = hashlib.md5(MAIN_BODY).hexdigest()
@@ -77,3 +105,28 @@ def registry_dir(tmp_path):
 def bodies():
     """The bytes the fake source should serve for the fixture manifest."""
     return {"main": MAIN_BODY, "main-backup": MAIN_BODY, "side": SIDE_BODY}
+
+
+@pytest.fixture(autouse=True)
+def _home_is_never_the_user_s(request, tmp_path_factory, monkeypatch):
+    """Point ``config.home_dir`` at a throwaway directory for every test.
+
+    ``config.home_dir`` defaults to ``~/.cache/molhub``, and everything that
+    caches lands under it — a count sidecar, a download, an extracted
+    tarball. A test that writes there leaves state behind for the next run
+    and for the person whose machine it is; a test that *reads* there is
+    asserting against whatever happens to be on this machine rather than
+    against the code. Both are silent: the suite passes either way.
+
+    Autouse, because the property being protected is not a property of any
+    one test. A test whose subject *is* the default may opt out with
+    ``@pytest.mark.real_home_default``; there should be very few.
+    """
+    from molhub.config import config
+
+    if "real_home_default" in request.keywords:
+        return config.home_dir
+
+    root = tmp_path_factory.mktemp("molhub-home")
+    monkeypatch.setattr(config, "home_dir", root, raising=False)
+    return root

@@ -20,13 +20,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
 ]
 dependencies = [
-  # molpy is pre-1.0 and moves public API between minors (0.3 -> 0.9 relocated
-  # Frame/Block/Element and renamed Frame.metadata -> Frame.meta; 0.12 -> 0.13
-  # turned `Frame.meta` into a write-through view that unwraps `MetaValue` on
-  # read). molhub tracks the 0.13 line: the floor is what the dataset layer is
-  # written against, and the upper bound is deliberately open so the next minor
-  # surfaces here rather than being resolved away.
-  "molcrafts-molpy>=0.13",
+  # molpy is pre-1.0 and moves public API between minors. 0.14 dropped
+  # `MolRec`/`Record` (I/O is `molpy.io.mrec`), stores atom indices as uint64,
+  # and returns `MetaValue` wrappers from `frame.meta` (write by wholesale
+  # assignment). molhub tracks that minor line.
+  "molcrafts-molpy>=0.14,<0.15",
+  # Process home singleton (`molhub.config`) is a molcfg.Config subclass.
+  "molcrafts-molcfg>=1.5.0",
   # Imported at module scope by every dataset adapter and by the conveyor's
   # encoder; it used to resolve only through h5py's transitive pull, which is a
   # dependency defect rather than a declaration.
@@ -98,7 +98,8 @@ python_files = ["test_*"]
 # Network tests are opt-in: CI must not go red because an upstream data
 # repository is slow. Run them with `pytest -m network`.
 addopts = "-m 'not network'"
-markers = ["network: touches a real upstream source"]
+markers = [
+    "real_home_default: the subject is config.home_dir's real default; skips home isolation","network: touches a real upstream source"]
 
 [tool.ruff]
 line-length = 100
@@ -139,6 +140,18 @@ include = ["src/molhub/dataset/neighbor.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# And for the loader's molix delegate: `DataModule.__init__` imports
+# `molix.data` and, on the packing path, `torch` inside the method that needs
+# them. Neither is on PyPI so no extra can pull molnex, and the lint environment
+# installs neither — the same situation as the three sites above, and the reason
+# this file reported the last two `unresolved-import` diagnostics once the real
+# type errors were fixed.
+[[tool.ty.overrides]]
+include = ["src/molhub/loader/datamodule.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 # And once more for the conveyor's single lazy import site: `MolnexBlockWriter`
 # imports `torch` and `molix.store.block` inside its constructor (the Option-A
 # ruling), the `prepare` extra cannot pull molnex because it is unpublished, and
@@ -158,6 +171,23 @@ include = ["src/molhub/scripts/convert_espaloma_phalkethoh_mm.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
+
+# Local editable checkouts, by operator ruling (2026-09-18): nothing is pushed,
+# development happens against the sibling working trees.
+#
+# The git revs this replaced could not work. `rev = "dev"` resolved molpy to
+# 4929187, which predates `molpy.io.mrec` — the module `dataset/molrec.py`
+# imports — and molrs to cfb3c03, which has no `molrs.io.mrec` at all and still
+# exports the `HollowSphere` that molrs later removed. Both surfaces live only in
+# unpushed commits, so a published pin cannot see them and the `ty` gate failed on
+# an import that genuinely does not resolve.
+#
+# The published pins in [project] dependencies are unchanged, so packaging still
+# states what a release would need. These two lines are the development override;
+# they make the lock machine-specific, which is the accepted cost of not pushing.
+[tool.uv.sources]
+molcrafts-molpy = { path = "../molpy", editable = true }
+molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
 
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py
 [tool.tox]

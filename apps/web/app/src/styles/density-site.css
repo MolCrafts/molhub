@@ -1,0 +1,29 @@
+/**
+ * Site density — the third archetype.
+ *
+ * The constitution's control heights and 13–14px body are tuned for an
+ * instrument: a surface an operator holds open all day, at a fixed distance,
+ * where every extra pixel costs a row. A public site is the opposite reading
+ * situation — a visitor arrives once, at arm's length, on an unknown display,
+ * and clicks two or three things. The same numbers read as cramped there.
+ *
+ * So this layer keeps every role name and meaning and gives four of them the
+ * site's scale. It is deliberately small: a difference that cannot be stated
+ * as a reading situation is drift, not density.
+ *
+ * Import AFTER `constitution-theme.css`. A product that imports this declares
+ * nothing itself — that is the point. Everything not listed here (radius, the
+ * status ramp, motion, icon sizes, row padding, the rest of the type ramp) is
+ * the constitution's, unchanged, because nothing about being a site argues for
+ * a different answer.
+ */
+
+@theme inline {
+  /* Body copy is read once, not scanned for hours; 13px is instrument density. */
+  --text-body: 0.9375rem;
+
+  /* A visitor's first click, not an operator's thousandth: 32 / 40 / 48px. */
+  --spacing-control-compact: 2rem;
+  --spacing-control: 2.5rem;
+  --spacing-control-comfortable: 3rem;
+}

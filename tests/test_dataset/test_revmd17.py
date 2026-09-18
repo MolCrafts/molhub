@@ -202,7 +202,8 @@ class TestRevMD17DatasetAccess:
 
     def test_energy_is_a_plain_float(self, npz_root):
         src = RevMD17Dataset(npz_root, download=False).load()
-        assert isinstance(src[0][0].meta["energy"], float)
+        energy = src[0][0].meta["energy"]
+        assert isinstance(getattr(energy, "value", energy), float)
 
     def test_frames_are_independent(self, npz_root):
         src = RevMD17Dataset(npz_root, download=False).load()
@@ -312,9 +313,14 @@ class TestRevMD17AgainstRealUpstream:
             assert remote.upstream_digest == str(artifact.digest)
             assert remote.size == artifact.size
 
-    def test_the_readme_role_transfers_and_verifies(self, tmp_path, monkeypatch):
+    def test_the_readme_role_transfers_and_verifies(self, tmp_path):
+        from molhub.config import config
         from molhub.molhub import Molhub
 
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub().fetch(COORDINATE, roles=["readme"])
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path
+            paths = Molhub().fetch(COORDINATE, roles=["readme"])
+        finally:
+            config.home_dir = previous
         assert paths["readme"].read_text(encoding="utf-8").startswith("THE REVISED MD17 dataset")

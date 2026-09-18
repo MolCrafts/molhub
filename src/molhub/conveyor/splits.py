@@ -286,7 +286,7 @@ class _SplitTable:
 
         Args:
             root: The derivation directory, e.g.
-                ``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1``.
+                ``<home>/derived/molcrafts/class1-universal-splits/1``.
             source: Which upstream source's table to load — one of ``hessian``,
                 ``mbis``, ``torsion-scan``.
 

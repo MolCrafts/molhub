@@ -59,7 +59,7 @@ __all__ = [
     "UnsupportedBlockFormat",
 ]
 
-# molnex's block contract, as `molnex:src/molix/store/block.py` writes it. Two
+# The block contract as molnex's deleted writer wrote it. Two
 # fields are validated and eight are read; the rest ride along untouched.
 _BLOCK_FORMAT = "molix.block/1"
 _SCHEMA_VERSION = 1

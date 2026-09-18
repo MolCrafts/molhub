@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +39,8 @@ from molpy import Block, Element, Frame
 from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Digest, Locator
@@ -218,7 +220,7 @@ def _load_molecule_confs(mol_dir: Path, molecule_id: str) -> list[Frame]:
         }
         if legacy is not None:
             meta["legacy_params_json"] = legacy
-        frame.meta.update(meta)
+        frame.meta = meta
         frames.append(frame)
     return frames
 
@@ -242,7 +244,7 @@ def _load_molecule_confs(mol_dir: Path, molecule_id: str) -> list[Frame]:
     # the molpy unit registry.
     units={"mm_energy": "kcal/mol", "forces": "kcal/mol/angstrom"},
 )
-class PhalkethohMMDataset:
+class PhalkethohMMDataset(Dataset, StatisticMixin):
     """Map-style PhAlkEthOH MM-small multi-conformer dataset.
 
     Args:
@@ -341,5 +343,5 @@ class PhalkethohMMDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._frames[idx],)

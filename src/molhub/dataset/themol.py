@@ -5,7 +5,7 @@ torsion scan or optimization trajectory into interchangeable frames.  Dataset
 definition construction performs no IO; :meth:`load` is the explicit fetch and
 index boundary.
 
-**A record IS a** :data:`~molpy.FrameCollection` (**``Sequence[Frame]``**).
+**A record IS a** ``Sequence[Frame]`` (**``Sequence[Frame]``**).
 One geometry is a length-1 collection — the Cartesian Hessian is a COO
 ``hessian`` block, the per-atom MBIS multipoles are ``atoms`` columns while
 the MBIS Slater shells (one row per *shell*, not per atom) are the
@@ -25,15 +25,17 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar, overload
+from typing import Any, Callable, overload
 
 import numpy as np
 from molpy import Block, Element, Frame
 
-from molhub.dataset.definition import dataset
+from molhub.dataset.definition import DatasetManifest, dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 
 __all__ = [
     "THEMOL_UNITS",
@@ -137,10 +139,8 @@ _ENERGY_FORCE_UNITS: dict[str, str] = {
     "forces": THEMOL_UNITS["forces"],
 }
 
-RecordT = TypeVar("RecordT")
 
-
-class THEMolShardDataset(Generic[RecordT]):
+class THEMolShardDataset(Dataset, StatisticMixin):
     """Lazy map-style view of one immutable THEMol HDF5 shard.
 
     HDF5 handles are opened lazily per process, so a collection can be safely
@@ -153,12 +153,17 @@ class THEMolShardDataset(Generic[RecordT]):
         path: str | Path,
         *,
         source_id: str,
-        reader: Callable[[Any, str, str], RecordT],
+        reader: Callable[[Any, str, str], Sequence[Frame]],
+        manifest: DatasetManifest,
     ) -> None:
         self.path = Path(path).expanduser().resolve()
         if not self.path.is_file() or self.path.stat().st_size == 0:
             raise FileNotFoundError(f"THEMol shard is missing or empty: {self.path}")
         self.source_id = source_id
+        #: What the definition declared. Carried onto the loaded dataset so a
+        #: consumer can read the published units off the object it holds
+        #: instead of restating them (:class:`~molhub.dataset.protocol.DeclaredDataset`).
+        self.manifest = manifest
         self._reader = reader
         self._pid: int | None = None
         self._handle: Any | None = None
@@ -182,12 +187,12 @@ class THEMolShardDataset(Generic[RecordT]):
         return self._keys
 
     @overload
-    def __getitem__(self, index: int) -> RecordT: ...
+    def __getitem__(self, index: int) -> Sequence[Frame]: ...
 
     @overload
-    def __getitem__(self, index: slice) -> list[RecordT]: ...
+    def __getitem__(self, index: slice) -> list[Sequence[Frame]]: ...
 
-    def __getitem__(self, index: int | slice) -> RecordT | list[RecordT]:
+    def __getitem__(self, index: int | slice) -> Sequence[Frame] | list[Sequence[Frame]]:
         if isinstance(index, slice):
             return [self[i] for i in range(*index.indices(len(self)))]
         if index < 0:
@@ -318,16 +323,14 @@ def _mapped_topology_frame(
         frame["bonds"] = Block(bond_columns)
 
     molecule_id = uuid.uuid5(uuid.UUID(int=0), mapped_isomeric).hex
-    frame.meta.update(
-        {
-            "molecule_id": molecule_id,
-            "source_record_id": record_id,
-            "mapped_nonisomeric_smiles": mapped_nonisomeric,
-            "mapped_isomeric_smiles": mapped_isomeric,
-            "source_id": source_id,
-            "total_charge": int(formal_charge.sum()),
-        }
-    )
+    frame.meta = {
+        "molecule_id": molecule_id,
+        "source_record_id": record_id,
+        "mapped_nonisomeric_smiles": mapped_nonisomeric,
+        "mapped_isomeric_smiles": mapped_isomeric,
+        "source_id": source_id,
+        "total_charge": int(formal_charge.sum()),
+    }
     return frame
 
 
@@ -369,11 +372,13 @@ def _frame_with_energy_forces(
             "fz": forces[:, 2],
         }
     )
-    frame.meta.update({"energy": float(energy), **extra_meta})
+    merged = {key: getattr(value, "value", value) for key, value in frame.meta.items()}
+    merged.update({"energy": float(energy), **extra_meta})
+    frame.meta = merged
     return frame
 
 
-def _read_hessian(handle: Any, key: str, source_id: str) -> FrameCollection:
+def _read_hessian(handle: Any, key: str, source_id: str) -> Sequence[Frame]:
     """Read one equilibrium record as a Frame carrying a COO ``hessian`` block.
 
     Args:
@@ -447,7 +452,7 @@ def _scalar_column(key: str, name: str, array: np.ndarray) -> np.ndarray:
     )
 
 
-def _read_mbis(handle: Any, key: str, source_id: str) -> FrameCollection:
+def _read_mbis(handle: Any, key: str, source_id: str) -> Sequence[Frame]:
     """Read one MBIS record as a Frame: multipoles per atom, shells per shell.
 
     Args:
@@ -581,8 +586,8 @@ def _scan_block(indices: tuple[int, int, int, int]) -> Block:
     )
 
 
-def _read_hessian_relax(handle: Any, key: str, source_id: str) -> FrameCollection:
-    """Read one relaxation as a FrameCollection ordered by per-frame step index.
+def _read_hessian_relax(handle: Any, key: str, source_id: str) -> Sequence[Frame]:
+    """Read one relaxation as a ``Sequence[Frame]`` ordered by per-frame step index.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -590,7 +595,7 @@ def _read_hessian_relax(handle: Any, key: str, source_id: str) -> FrameCollectio
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :data:`~molpy.FrameCollection` of one frame per optimization step,
+        A ``Sequence[Frame]`` of one frame per optimization step,
         each carrying ``energy`` and ``step_index`` in its ``meta`` and its
         forces as ``fx``/``fy``/``fz`` atom columns.
 
@@ -625,8 +630,8 @@ def _read_hessian_relax(handle: Any, key: str, source_id: str) -> FrameCollectio
     return tuple(frames)
 
 
-def _read_torsion(handle: Any, key: str, source_id: str) -> FrameCollection:
-    """Read one complete constrained torsion profile as a FrameCollection.
+def _read_torsion(handle: Any, key: str, source_id: str) -> Sequence[Frame]:
+    """Read one complete constrained torsion profile as a ``Sequence[Frame]``.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -634,7 +639,7 @@ def _read_torsion(handle: Any, key: str, source_id: str) -> FrameCollection:
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :data:`~molpy.FrameCollection` of one frame per constraint, each
+        A ``Sequence[Frame]`` of one frame per constraint, each
         carrying ``energy``, ``torsion_angle``, ``scan_id`` and
         ``constraint_index`` in its ``meta`` and the scanned dihedral in a
         1-row ``scan`` block.
@@ -675,8 +680,8 @@ def _read_torsion(handle: Any, key: str, source_id: str) -> FrameCollection:
     return tuple(frames)
 
 
-def _read_torsion_relax(handle: Any, key: str, source_id: str) -> FrameCollection:
-    """Read one torsion-constrained optimization as a FrameCollection.
+def _read_torsion_relax(handle: Any, key: str, source_id: str) -> Sequence[Frame]:
+    """Read one torsion-constrained optimization as a ``Sequence[Frame]``.
 
     Args:
         handle: Open HDF5 file of the shard.
@@ -684,7 +689,7 @@ def _read_torsion_relax(handle: Any, key: str, source_id: str) -> FrameCollectio
         source_id: Provenance string written to every frame's ``meta``.
 
     Returns:
-        A :data:`~molpy.FrameCollection` of one frame per (constraint, step),
+        A ``Sequence[Frame]`` of one frame per (constraint, step),
         in that order, each carrying ``energy``, ``torsion_angle``,
         ``scan_id``, ``constraint_index`` and ``step_index`` in its ``meta``
         and the scanned dihedral in a 1-row ``scan`` block.
@@ -732,9 +737,9 @@ def _read_torsion_relax(handle: Any, key: str, source_id: str) -> FrameCollectio
     return tuple(frames)
 
 
-class _THEMolDefinition(Generic[RecordT]):
+class _THEMolDefinition:
     COORDINATE: str
-    _READER: Callable[[Any, str, str], RecordT]
+    _READER: Callable[[Any, str, str], Sequence[Frame]]
 
     def __init__(
         self,
@@ -745,7 +750,7 @@ class _THEMolDefinition(Generic[RecordT]):
         self.root = Path(root).expanduser().resolve() if root is not None else None
         self._hub = hub
 
-    def load(self, role: str = "shard-000") -> THEMolShardDataset[RecordT]:
+    def load(self, role: str = "shard-000") -> THEMolShardDataset:
         """Fetch or locate one immutable shard and return its lazy collection."""
         if not role.startswith("shard-"):
             raise ValueError(f"THEMol load expects a shard role, got {role!r}.")
@@ -763,7 +768,14 @@ class _THEMolDefinition(Generic[RecordT]):
                 hub = Molhub()
             path = hub.fetch(self.COORDINATE, roles=[role])[role]
         source_id = f"{self.COORDINATE}#role={role}"
-        return THEMolShardDataset(path, source_id=source_id, reader=self._READER)
+        manifest = getattr(type(self), "manifest", None)
+        if manifest is None:
+            raise TypeError(
+                f"{type(self).__name__} carries no manifest: a THEMol definition "
+                "must be decorated with @dataset(...) so the dataset it loads can "
+                "state its own units."
+            )
+        return THEMolShardDataset(path, source_id=source_id, reader=self._READER, manifest=manifest)
 
 
 @dataset(
@@ -778,8 +790,8 @@ class _THEMolDefinition(Generic[RecordT]):
     units={"hessian": THEMOL_UNITS["hessian"]},
     blocks=("hessian",),
 )
-class THEMolHessian(_THEMolDefinition[FrameCollection]):
-    """THEMol equilibrium geometries; one record is a length-1 FrameCollection.
+class THEMolHessian(_THEMolDefinition):
+    """THEMol equilibrium geometries; one record is a length-1 ``Sequence[Frame]``.
 
     The Cartesian Hessian is the frame's ``hessian`` block —
     ``row``/``col``/``value``, all ``(3N)**2`` entries in row-major order — not
@@ -805,8 +817,8 @@ class THEMolHessian(_THEMolDefinition[FrameCollection]):
     tags=("off-equilibrium", "energy", "forces", "class-i"),
     units=_ENERGY_FORCE_UNITS,
 )
-class THEMolHessianRelax(_THEMolDefinition[FrameCollection]):
-    """THEMol relaxations; one record is one FrameCollection.
+class THEMolHessianRelax(_THEMolDefinition):
+    """THEMol relaxations; one record is one ``Sequence[Frame]``.
 
     Per-frame ``meta`` carries ``energy`` and ``step_index`` — the latter is
     where the deleted ``optimization_steps`` tuple went.
@@ -830,8 +842,8 @@ class THEMolHessianRelax(_THEMolDefinition[FrameCollection]):
     tags=("torsion", "profile", "class-i"),
     units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
-class THEMolTorsionScan(_THEMolDefinition[FrameCollection]):
-    """THEMol torsion profiles; one whole scan is one FrameCollection.
+class THEMolTorsionScan(_THEMolDefinition):
+    """THEMol torsion profiles; one whole scan is one ``Sequence[Frame]``.
 
     Per-frame ``meta`` carries ``energy``, ``torsion_angle``, ``scan_id`` and
     ``constraint_index``; the scanned dihedral is the 1-row ``scan`` block
@@ -857,7 +869,7 @@ class THEMolTorsionScan(_THEMolDefinition[FrameCollection]):
     tags=("off-equilibrium", "torsion", "energy", "forces", "class-i"),
     units={**_ENERGY_FORCE_UNITS, "torsion_angle": THEMOL_UNITS["torsion_angle"]},
 )
-class THEMolTorsionRelax(_THEMolDefinition[FrameCollection]):
+class THEMolTorsionRelax(_THEMolDefinition):
     """THEMol torsion-constrained optimizations, one scan per record.
 
     Same shape as :class:`THEMolTorsionScan`, plus a per-frame
@@ -881,8 +893,8 @@ class THEMolTorsionRelax(_THEMolDefinition[FrameCollection]):
     units=_MBIS_UNITS,
     blocks=(_MBIS_SHELL_BLOCK,),
 )
-class THEMolMBIS(_THEMolDefinition[FrameCollection]):
-    """THEMol MBIS supervision; one record is a length-1 FrameCollection.
+class THEMolMBIS(_THEMolDefinition):
+    """THEMol MBIS supervision; one record is a length-1 ``Sequence[Frame]``.
 
     Every *per-atom* target is an ``atoms`` column, so ``TARGET_SCHEMA.atom_level``
     names the columns a reader will actually find on the frame:

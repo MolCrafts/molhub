@@ -28,7 +28,7 @@ class Molhub:
             :class:`RegistrySource`, a directory path, or ``None`` to use
             ``$MOLHUB_REGISTRY`` when set, otherwise the Python catalog.
         fetcher: How bytes are retrieved. Defaults to a :class:`Fetcher` with
-            the discovered drivers and the shared cache under ``$MOLHUB_HOME``,
+            the discovered drivers and the shared cache under ``config.home_dir``,
             which files each artifact by coordinate and role.
 
     Example::

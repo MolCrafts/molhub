@@ -2,12 +2,15 @@
 
 Copied surface, no third-party dataset framework:
 
-* :class:`Dataset` — ``__len__`` and ``__getitem__``.
+* :class:`Dataset` — ``__len__`` and ``__getitem__`` (one sample is
+  ``Sequence[Frame]``).
+* :class:`StatisticMixin` — ``get_distrib(*fields)`` (one scan); mixed in
+  *beside* :class:`Dataset` (``class QM9(Dataset, StatisticMixin)``), not
+  inside it.
 * :class:`IterableDataset` — ``__iter__``.
 
-A sample is a :data:`~molpy.FrameCollection` — ``Sequence[Frame]``. Graph-level
-fields live in each frame's ``meta``. Concrete helpers may also expose
-``source_id``.
+A sample is ``Sequence[Frame]``. Graph-level fields live in each frame's
+``meta``. Concrete helpers may also expose ``source_id``.
 """
 
 from __future__ import annotations
@@ -19,28 +22,12 @@ from typing import Iterator, Protocol, runtime_checkable
 
 from molpy import Frame
 
-type FrameCollection = Sequence[Frame]
-"""``Sequence[Frame]`` — one record of trajectory-like data.
+from molhub.dataset.definition import DatasetManifest
+from molhub.dataset.statistic import StatisticMixin
 
-molpy ≥0.14 exports a plain alias of the same shape, but the PyPI 0.13 wheel
-does not, and molpy's lazy module ``__getattr__`` makes checkers resolve a
-missing name as ``ModuleType``. Declared locally as a PEP 695 alias it is
-checker-solid on both — and it keeps its ``__name__``, which is what
-``DatasetInfo.record_type`` reads off a definition's generic argument.
-"""
-
-# ---------------------------------------------------------------------------
-# Sample — one FrameCollection
-# ---------------------------------------------------------------------------
-
-type Sample = FrameCollection
-"""A sample is a :data:`FrameCollection` (``Sequence[Frame]``).
-
-One geometry is a length-1 collection. A sampling unit that is inseparable but
-multi-frame — a relaxation, a complete torsion profile — is a longer collection.
-Every frame carries its own scalars in its own ``meta``. There is no second
-record type and no :class:`~molpy.Trajectory` on this surface.
-"""
+# One geometry is a length-1 sequence. A sampling unit that is inseparable but
+# multi-frame — a relaxation, a complete torsion profile — is a longer sequence.
+# Every frame carries its own scalars in its own ``meta``.
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +37,7 @@ record type and no :class:`~molpy.Trajectory` on this surface.
 
 @dataclass(frozen=True)
 class TargetSchema:
-    """Declares how targets are organised in a :data:`Sample`.
+    """Declares how targets are organised in one ``Sequence[Frame]``.
 
     Layout axis (collate / storage):
 
@@ -95,7 +82,7 @@ class Dataset(Protocol):
         """Total number of samples available."""
         ...
 
-    def __getitem__(self, index: int, /) -> Sample:
+    def __getitem__(self, index: int, /) -> Sequence[Frame]:
         """Return the sample at integer *index*.
 
         The parameter is **positional-only**: ``ds[i]`` never passes it by
@@ -107,7 +94,7 @@ class Dataset(Protocol):
         ``load`` return a declared ``Dataset``.
 
         Returns:
-            A :data:`~molpy.FrameCollection` (``Sequence[Frame]``).
+            ``Sequence[Frame]``.
 
         Raises:
             IndexError: If *index* is out of range.
@@ -131,6 +118,30 @@ class IdentifiedDataset(Dataset, Protocol):
         ...
 
 
+@runtime_checkable
+class DeclaredDataset(Dataset, Protocol):
+    """A :class:`Dataset` that also carries the manifest its definition declared.
+
+    Like :class:`IdentifiedDataset`, this stays out of :class:`Dataset` because
+    it is optional there — a hand-built dataset of Frames declares nothing. A
+    consumer that needs to know **what the data is** (its units, above all)
+    takes this protocol rather than reading an attribute the wider one never
+    promised.
+
+    Why it matters that a *loaded* dataset answers this, and not only the
+    definition class: a consumer holding the loaded object and unable to ask it
+    must restate the unit at the call site, and a restated unit drifts. A
+    ``kcal/mol`` dataset read through an ``eV`` default scaled every label by
+    23.06 — silently, the result still being a plausible energy (molnex
+    ``ClassIPrepare``, 2026-09-17).
+    """
+
+    @property
+    def manifest(self) -> DatasetManifest:
+        """What the dataset definition declared — units, blocks, identity."""
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Iterable-style dataset
 # ---------------------------------------------------------------------------
@@ -143,11 +154,11 @@ class IterableDataset(Protocol):
     ``source_id`` is optional and is not required for ``isinstance``.
     """
 
-    def __iter__(self) -> Iterator[Sample]:
+    def __iter__(self) -> Iterator[Sequence[Frame]]:
         """Yield samples in streaming order.
 
         Returns:
-            An iterator over :data:`~molpy.FrameCollection` records.
+            An iterator over ``Sequence[Frame]`` records.
         """
         ...
 
@@ -157,7 +168,7 @@ class IterableDataset(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class InMemoryDataset:
+class InMemoryDataset(IdentifiedDataset, StatisticMixin):
     """A :class:`Dataset` wrapping an in-memory list of :class:`Frame` objects.
 
     Args:
@@ -180,11 +191,11 @@ class InMemoryDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._frames[idx],)
 
 
-class SubsetDataset:
+class SubsetDataset(IdentifiedDataset, StatisticMixin):
     """A :class:`Dataset` exposing a subset of another by index list.
 
     Args:
@@ -218,6 +229,11 @@ class SubsetDataset:
         return self._name
 
     @property
+    def source(self) -> IdentifiedDataset:
+        """Parent dataset this view indexes."""
+        return self._source
+
+    @property
     def indices(self) -> list[int]:
         """Copy of the parent indices this view exposes."""
         return list(self._indices)
@@ -226,10 +242,39 @@ class SubsetDataset:
     def source_id(self) -> str:
         return self._source_id
 
+    @property
+    def manifest(self) -> DatasetManifest:
+        """The parent's declaration — a subset publishes the same data.
+
+        Read *through* rather than copied, for the same reason
+        :attr:`source_id` is derived from the parent's: one fact, one owner. A
+        subset that could not answer this would push its consumers into walking
+        :attr:`source` themselves, and a consumer that cannot ask a dataset for
+        its units ends up restating them (:class:`DeclaredDataset`).
+
+        Raises:
+            AttributeError: The parent declares nothing — a hand-built dataset
+                of Frames, for instance. There is no manifest to read, and
+                inventing one is what this protocol exists to prevent.
+        """
+        # Read defensively rather than declaring `_source: DeclaredDataset`: the
+        # parent only has to be an `IdentifiedDataset`, and most are not
+        # declared. The explicit raise says which type came up short, where a
+        # bare attribute error would only name `manifest`.
+        manifest = getattr(self._source, "manifest", None)
+        if manifest is None:
+            raise AttributeError(
+                f"{type(self._source).__name__} declares no manifest, so this "
+                "subset cannot state its units either. Only a dataset built from "
+                "an @dataset(...) definition carries one; a hand-built dataset of "
+                "Frames declares nothing and there is none to infer."
+            )
+        return manifest
+
     def __len__(self) -> int:
         return len(self._indices)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         """The parent's collection at this view's *idx*."""
         return self._source[self._indices[idx]]
 
@@ -261,9 +306,7 @@ def assignment(dataset: object) -> dict[str, list[int]]:
 
 __all__ = [
     "Dataset",
-    "FrameCollection",
     "IterableDataset",
-    "Sample",
     "TargetSchema",
     "InMemoryDataset",
     "SubsetDataset",

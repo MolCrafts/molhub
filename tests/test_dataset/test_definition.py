@@ -243,17 +243,9 @@ class TestUniformDatasetShape:
         assert not missing, f"{cls.__name__} declares no unit for {sorted(missing)}"
 
     def test_declared_units_parse_through_the_molpy_registry(self, cls):
-        from molpy import UnitsError, UnitSystem
+        from molpy import UnitSystem
 
         registry = UnitSystem()
-        try:
-            registry.Unit("GHz")
-        except UnitsError:
-            pytest.skip(
-                "this molpy's unit registry predates GHz (added in 0.14; QM9 "
-                "declares rotational constants in it) — drop this skip when "
-                "the molcrafts-molpy pin reaches 0.14"
-            )
         for unit in cls.manifest.units.values():
             registry.Unit(unit)
 

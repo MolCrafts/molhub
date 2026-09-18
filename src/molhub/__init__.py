@@ -5,7 +5,7 @@ Primitive (a dataset is a class)::
     from molhub.dataset import QM9
 
     ds = QM9().load()
-    frames = ds[0]                # FrameCollection = Sequence[Frame]
+    frames = ds[0]                # Sequence[Frame]
 
 Package verbs, distinguished only by the name you pass::
 

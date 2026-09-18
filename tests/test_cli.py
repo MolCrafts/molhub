@@ -164,14 +164,17 @@ class TestInfo:
         shard bytes to print an example record fails here rather than merely
         being slow on a 28.9 GiB artifact.
         """
+        from molhub.config import config
         from molhub.molhub import Molhub
 
         from .test_loader.conftest import SPLIT_SUBPATH, build_registry, write_split_derivation
 
         root = tmp_path / "registry"
         build_registry(root)
-        write_split_derivation(tmp_path.joinpath("home", *SPLIT_SUBPATH))
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+        home = tmp_path / "home"
+        write_split_derivation(home.joinpath(*SPLIT_SUBPATH))
+        previous = config.home_dir
+        config.home_dir = home
 
         def refuse(self, coordinate, *, roles=None):
             raise AssertionError(
@@ -179,7 +182,10 @@ class TestInfo:
             )
 
         monkeypatch.setattr(Molhub, "fetch", refuse)
-        return ["--registry", str(root)]
+        try:
+            yield ["--registry", str(root)]
+        finally:
+            config.home_dir = previous
 
     @pytest.fixture
     def undeclared(self, tmp_path):
@@ -345,19 +351,24 @@ class TestInfo:
         made an error for the duration, so *whatever* is printed before the
         attempt is all the warning a reader would have got.
         """
+        from molhub.config import config
         from molhub.molhub import Molhub
 
         root = tmp_path / "3bpa-registry"
         path = root / "dataset" / "molcrafts" / "3bpa" / "1.yaml"
         path.parent.mkdir(parents=True)
         path.write_text(THREEBPA_MANIFEST, encoding="utf-8")
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+        previous = config.home_dir
+        config.home_dir = tmp_path / "home"
 
         def refuse(self, coordinate, *, roles=None):
             raise AssertionError(f"`molhub info` fetched {coordinate} roles={roles!r}.")
 
         monkeypatch.setattr(Molhub, "fetch", refuse)
-        return ["--registry", str(root)]
+        try:
+            yield ["--registry", str(root)]
+        finally:
+            config.home_dir = previous
 
     def test_it_says_what_describing_will_cost_before_it_fetches(self, threebpa):
         """The notice is on stderr, so a piped report is unchanged by it."""
@@ -397,26 +408,30 @@ class TestInfo:
         assert result.exit_code == 0
         assert "download" in result.output.lower()
 
-    def test_home_selects_the_cache_root_the_split_table_is_read_from(self, tmp_path, monkeypatch):
-        """Parity with ``cache status`` / ``cache verify``, which have taken
-        ``--home`` all along: the derivation ``info`` reads lives under it, and
-        with only ``$MOLHUB_HOME`` to go on there is no way to point this verb at
-        a second molhub home without exporting a variable around it."""
+    def test_home_selects_the_cache_root_the_split_table_is_read_from(self, tmp_path):
+        """Parity with ``cache status`` / ``cache verify``: ``--home`` writes the
+        singleton and injects the path, so a previous process home is not read."""
+        from molhub.config import config
+
         from .test_loader.conftest import SPLIT_SUBPATH, build_registry, write_split_derivation
 
         root = tmp_path / "registry"
         build_registry(root)
         home = tmp_path / "elsewhere"
         write_split_derivation(home.joinpath(*SPLIT_SUBPATH))
-        # The environment points somewhere with no derivation in it, so a pass
-        # here can only mean the option was read.
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "empty-home"))
-
-        result = runner.invoke(
-            app, ["info", "themol/mbis", "--home", str(home), "--registry", str(root)]
-        )
-        assert result.exit_code == 0, result.output
-        assert _reports(result.output, name="train", count=3), result.output
+        empty = tmp_path / "empty-home"
+        empty.mkdir()
+        previous = config.home_dir
+        try:
+            config.home_dir = empty
+            result = runner.invoke(
+                app, ["info", "themol/mbis", "--home", str(home), "--registry", str(root)]
+            )
+            assert result.exit_code == 0, result.output
+            assert _reports(result.output, name="train", count=3), result.output
+            assert config.home_dir == home
+        finally:
+            config.home_dir = previous
 
     def test_a_bare_namespace_suggests_the_full_names_under_it(self, themol):
         """``molhub info themol`` reads as "tell me about themol" and resolves as
@@ -428,20 +443,27 @@ class TestInfo:
         assert "themol/mbis" in result.output
         assert "Traceback" not in result.output
 
-    def test_a_missing_split_table_names_the_command_that_builds_it(self, tmp_path, monkeypatch):
+    def test_a_missing_split_table_names_the_command_that_builds_it(self, tmp_path):
         """The first-run state, at the terminal: nothing publishes the split
         derivation, so ``info`` on a THEMol dataset fails on a machine that has
         never built one — and the only useful reply is the command that does."""
+        from molhub.config import config
+
         from .test_loader.conftest import SPLIT_TABLE_COMMAND, build_registry
 
         root = tmp_path / "registry"
         build_registry(root)
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "empty-home"))
-
-        result = runner.invoke(app, ["info", "themol/mbis", "--registry", str(root)])
-        assert result.exit_code == 1
-        assert SPLIT_TABLE_COMMAND in result.output
-        assert "Traceback" not in result.output
+        empty = tmp_path / "empty-home"
+        empty.mkdir()
+        previous = config.home_dir
+        try:
+            config.home_dir = empty
+            result = runner.invoke(app, ["info", "themol/mbis", "--registry", str(root)])
+            assert result.exit_code == 1
+            assert SPLIT_TABLE_COMMAND in result.output
+            assert "Traceback" not in result.output
+        finally:
+            config.home_dir = previous
 
 
 class TestFetch:
@@ -477,6 +499,36 @@ class TestFetch:
 
     def test_unknown_coordinate_exits_nonzero(self, idx):
         assert runner.invoke(app, ["fetch", "qm9@v9", *idx]).exit_code == 1
+
+    def test_help_lists_home(self):
+        result = runner.invoke(app, ["fetch", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--home" in result.output
+
+    def test_help_does_not_name_molhub_home_env(self):
+        result = runner.invoke(app, ["fetch", "--help"])
+        assert "$MOLHUB_HOME" not in result.output
+
+    def test_home_files_under_the_given_path(self, idx, tmp_path):
+        from molhub.config import config
+        from molhub.coordinate import Coordinate
+        from molhub.sources import BlobStore
+
+        previous = config.home_dir
+        dest = tmp_path / "fetch-home"
+        other = tmp_path / "previous-home"
+        dest.mkdir()
+        other.mkdir()
+        try:
+            config.home_dir = other
+            result = runner.invoke(app, ["fetch", "qm9@v2", "--home", str(dest), *idx])
+            assert result.exit_code == 0, result.output
+            key = f"{Coordinate.parse('qm9@v2').cache_path()}/main"
+            assert BlobStore(root=dest).path_for(key).is_file()
+            assert BlobStore(root=other).has(key) is False
+            assert config.home_dir == dest
+        finally:
+            config.home_dir = previous
 
 
 class TestCacheVerify:
@@ -581,6 +633,19 @@ class TestCacheStatus:
         result = runner.invoke(app, ["cache", "status", "--home", str(tmp_path)])
         assert result.exit_code == 0
         assert f"No conveyor tiers under {tmp_path}." in result.output
+
+    def test_home_writes_the_config_singleton(self, tmp_path):
+        from molhub.config import config
+
+        previous = config.home_dir
+        dest = tmp_path / "cli-home"
+        dest.mkdir()
+        try:
+            result = runner.invoke(app, ["cache", "status", "--home", str(dest)])
+            assert result.exit_code == 0, result.output
+            assert config.home_dir == dest
+        finally:
+            config.home_dir = previous
 
     def test_prints_one_line_per_tier(self, tmp_path):
         self._both_tiers(tmp_path)
@@ -749,6 +814,18 @@ class TestCacheHelpText:
         who read past the first line is the one who was trying hardest."""
         assert "conveyor" not in self._help("cache", "status").lower()
 
+    def test_home_help_does_not_name_molhub_home_env(self):
+        assert "$MOLHUB_HOME" not in self._help("cache", "status")
+
+    def test_verify_home_help_does_not_name_molhub_home_env(self):
+        assert "$MOLHUB_HOME" not in self._help("cache", "verify")
+
+    def test_coverage_home_help_does_not_name_molhub_home_env(self):
+        assert "$MOLHUB_HOME" not in self._help("cache", "coverage")
+
+    def test_info_home_help_does_not_name_molhub_home_env(self):
+        assert "$MOLHUB_HOME" not in self._help("info")
+
     def test_the_coverage_summary_does_not_say_conveyor(self):
         assert "conveyor" not in _summary(self._help("cache", "coverage")).lower()
 
@@ -776,20 +853,25 @@ class TestTheDownloadNoticeIsPrintedOnce:
         """Counted on the humanized size, so the raw count on the report's own
         download line — a different stream and a different sentence — cannot be
         mistaken for a second notice."""
+        from molhub.config import config
         from molhub.molhub import Molhub
 
         root = tmp_path / "3bpa-registry"
         path = root / "dataset" / "molcrafts" / "3bpa" / "1.yaml"
         path.parent.mkdir(parents=True)
         path.write_text(THREEBPA_MANIFEST, encoding="utf-8")
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
+        previous = config.home_dir
+        config.home_dir = tmp_path / "home"
 
         def refuse(self, coordinate, *, roles=None):
             raise AssertionError(f"`molhub info` fetched {coordinate} roles={roles!r}.")
 
         monkeypatch.setattr(Molhub, "fetch", refuse)
-        result = runner.invoke(app, ["info", "molcrafts/3bpa", "--registry", str(root)])
-        assert result.stderr.count(THREEBPA_DOWNLOAD_HUMANIZED) == 1, result.stderr
+        try:
+            result = runner.invoke(app, ["info", "molcrafts/3bpa", "--registry", str(root)])
+            assert result.stderr.count(THREEBPA_DOWNLOAD_HUMANIZED) == 1, result.stderr
+        finally:
+            config.home_dir = previous
 
 
 class TestInfoOnAWholeViewDataset:

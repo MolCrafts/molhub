@@ -3,7 +3,7 @@
 ``load_dataset(name, split=..., streaming=True)`` hands back a
 :class:`StreamingSplitDataset`: it walks the dataset's published files in
 manifest order, keeps **at most one of them on local disk**, and yields the
-records of one split as the :data:`~molpy.FrameCollection` the
+records of one split as the ``Sequence[Frame]`` the
 dataset's own reader builds. ``.take(n)`` bounds the walk in HuggingFace
 spelling.
 
@@ -78,13 +78,14 @@ from collections.abc import Generator, Iterator, Sequence
 from datetime import timedelta
 from pathlib import Path
 
+from molpy import Frame
+
 from molhub.conveyor import DEFAULT_BUDGET_BYTES
 from molhub.conveyor.block import BlockState
 from molhub.conveyor.ledger import Ledger
 from molhub.conveyor.roster import BlockRoster, RemoteBlock, RosterError
 from molhub.conveyor.splits import _SplitTable
 from molhub.conveyor.transfer import ShardTransfer
-from molhub.dataset.protocol import Sample
 from molhub.dataset.themol import THEMolHessian, THEMolMBIS, THEMolTorsionScan
 from molhub.dataset.universal_class_i import Class1Universal2026, CollectionRole
 from molhub.loader.mapstyle import UnknownRecordKey
@@ -231,7 +232,7 @@ class BoundedStream:
     def __repr__(self) -> str:
         return f"BoundedStream({self._source!r}, limit={self._limit})"
 
-    def __iter__(self) -> Iterator[Sample]:
+    def __iter__(self) -> Iterator[Sequence[Frame]]:
         """Yield at most :attr:`limit` records, then close the walk behind them."""
         if self._limit == 0:
             return
@@ -338,11 +339,11 @@ class StreamingSplitDataset:
         """
         return BoundedStream(self, n)
 
-    def __iter__(self) -> Generator[Sample, None, None]:
+    def __iter__(self) -> Generator[Sequence[Frame], None, None]:
         """Walk the parts in order, yielding this split's records.
 
         Yields:
-            One :data:`~molpy.FrameCollection` per record of
+            One ``Sequence[Frame]`` per record of
             this split, in the order the published files hold them.
 
         Raises:

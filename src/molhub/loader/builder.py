@@ -11,7 +11,7 @@ fallback the HuggingFace idiom already has:
 
 * *table-backed* (THEMol): the split assignment is a published derivation,
   ``class1-universal-splits@1``. Counts come from one gzipped CSV under
-  ``$MOLHUB_HOME/derived/``, memoized per process, and cost **zero shard
+  ``<home>/derived/``, memoized per process, and cost **zero shard
   bytes** — which is what makes ``.info`` usable on an artifact of tens of GiB
   to several TiB.
 * *declared* (zinc-typing, phalkethoh-mm, 3BPA): the dataset class already owns
@@ -74,7 +74,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import ClassVar, get_args
+from typing import ClassVar
 
 from molhub.conveyor import DEFAULT_BUDGET_BYTES, default_ledger_path
 from molhub.conveyor.ledger import Ledger
@@ -153,9 +153,7 @@ _ESPALOMA_CONVERT_COMMAND = f"python -m {_ESPALOMA_CONVERTER}"
 # a "run the generator" message has to say out loud.
 _SPLIT_TABLE_INPUTS: tuple[str, ...] = ("hessian", "mbis", "torsion-scan")
 
-# What a record is when the dataset class does not parameterize it: molhub's
-# ``Sample``, spelled as `molhub.dataset.protocol` spells it.
-_SAMPLE_RECORD_TYPE = "FrameCollection"
+_SAMPLE_RECORD_TYPE = "Sequence[Frame]"
 
 # The name a dataset with no published split serves all of itself under.
 # HuggingFace's own name for "all of it", and the name every other molhub
@@ -908,9 +906,9 @@ class DatasetBuilder:
             :class:`~molhub.molhub.Molhub`. Nothing is fetched until a split is
             actually opened (or, for a declared-split dataset, counted).
         home: The molhub home the split derivation and any memo are read from;
-            ``None`` resolves ``$MOLHUB_HOME``. A second home is addressable
-            without exporting a variable around the call, which is what
-            ``molhub info --home`` is.
+            ``None`` reads ``config.home_dir``. A second home is addressable
+            without rewriting the process singleton around the call, which is
+            what ``molhub info --home`` is.
     """
 
     #: Which entry describes which artifact, by unversioned coordinate. The
@@ -1218,18 +1216,6 @@ class DatasetBuilder:
 
     @staticmethod
     def _record_type(definition: type | None) -> str:
-        """What one record is, read off the class's declared generic argument.
-
-        ``THEMolMBIS(_THEMolDefinition[FrameCollection])`` says
-        ``FrameCollection`` in the one place that cannot drift from what its
-        reader returns. A class that does not parameterize its record type is
-        reported as :data:`_SAMPLE_RECORD_TYPE`.
-        """
-        for base in getattr(definition, "__orig_bases__", ()):
-            arguments = get_args(base)
-            if not arguments:
-                continue
-            name = getattr(arguments[0], "__name__", None)
-            if isinstance(name, str) and name:
-                return name
+        """What one record is: ``Sequence[Frame]``."""
+        del definition
         return _SAMPLE_RECORD_TYPE

@@ -472,14 +472,12 @@ def _meta_and_block_frame(index: int) -> Frame:
             "atoml": np.asarray([3], dtype=np.int32),
         }
     )
-    frame.meta.update(
-        {
-            "energy": -10.0 - index,
-            "torsion_angle": 30.0 * index,
-            "scan_id": "scan-record",
-            "constraint_index": index,
-        }
-    )
+    frame.meta = {
+        "energy": -10.0 - index,
+        "torsion_angle": 30.0 * index,
+        "scan_id": "scan-record",
+        "constraint_index": index,
+    }
     return frame
 
 
@@ -559,6 +557,21 @@ class TestTHEMolShardDataset:
 
     def test_keys_are_the_shards_group_keys(self, tmp_path: Path) -> None:
         assert THEMolHessian(self._shard(tmp_path)).load().keys() == ("eq-record-0", "eq-record-1")
+
+    def test_the_loaded_shard_carries_its_definitions_manifest(self, tmp_path: Path) -> None:
+        """The loaded dataset answers what it publishes, not only its definition.
+
+        A consumer holding the loaded object and unable to ask it must restate
+        the units at the call site, and a restated unit drifts from the
+        published one: reading a kcal/mol dataset through an eV default scaled
+        every label by 23.06, silently, the result still being a plausible
+        energy (molnex ``ClassIPrepare``, 2026-09-17).
+        """
+        loaded = THEMolHessian(self._shard(tmp_path)).load()
+        # Non-empty first: a definition that declared nothing would let the
+        # identity below hold while pinning no units at all.
+        assert THEMolHessian.manifest.units
+        assert loaded.manifest is THEMolHessian.manifest
 
     def test_keys_are_a_tuple_of_strings(self, tmp_path: Path) -> None:
         """A tuple, not a ``KeysView``: an index into it has to mean something."""
@@ -1028,7 +1041,8 @@ def test_local_shard_role_is_preserved_in_provenance(tmp_path: Path) -> None:
     path = tmp_path / "shard-123"
     _write_hessian(path)
     record = THEMolHessian(tmp_path).load(role="shard-123")[0]
-    assert record[0].meta["source_id"].endswith("#role=shard-123")
+    source_id = getattr(record[0].meta["source_id"], "value", record[0].meta["source_id"])
+    assert source_id.endswith("#role=shard-123")
 
 
 def test_the_scanned_dihedral_is_declared_in_degrees() -> None:

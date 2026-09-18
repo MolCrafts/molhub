@@ -1,5 +1,6 @@
 """Dataset module — protocols and built-in dataset sources."""
 
+from molhub.dataset.bonds import BondMargins, infer_bonds
 from molhub.dataset.csv_dataset import CSVDataset
 from molhub.dataset.definition import (
     DatasetManifest,
@@ -8,7 +9,6 @@ from molhub.dataset.definition import (
     dataset,
 )
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.molrec import MolRecDataset
 from molhub.dataset.neighbor import NeighborDelegate
 from molhub.dataset.omol25 import (
     OMol25,
@@ -16,21 +16,19 @@ from molhub.dataset.omol25 import (
     OMol25Lmdb,
     OMol25Small,
     OMol25SmallFilter,
-    infer_bonds,
 )
 from molhub.dataset.phalkethoh_mm import PhalkethohMMDataset
 from molhub.dataset.protocol import (
     Dataset,
-    FrameCollection,
     InMemoryDataset,
     IterableDataset,
-    Sample,
     SubsetDataset,
     TargetSchema,
     assignment,
 )
 from molhub.dataset.qm9 import QM9
 from molhub.dataset.revmd17 import RevMD17Dataset
+from molhub.dataset.statistic import Distrib, Field, StatisticMixin
 from molhub.dataset.themol import (
     THEMolHessian,
     THEMolHessianRelax,
@@ -49,6 +47,18 @@ from molhub.dataset.universal_class_i import (
 from molhub.dataset.water_les import WaterLESDataset
 from molhub.dataset.zinc_typing import ZincTypingDataset
 
+
+# MolRecDataset imports molpy.io.mrec. Keep that off the package import
+# graph so ProcessPool workers that pickle OMol25Lmdb helpers do not need
+# molrec at import time.
+def __getattr__(name: str):
+    if name == "MolRecDataset":
+        from molhub.dataset.molrec import MolRecDataset as _MolRecDataset
+
+        return _MolRecDataset
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 ThreeBPA = ThreeBPADataset
 MBIS = THEMolMBIS
 Hessian = THEMolHessian
@@ -61,12 +71,13 @@ __all__ = [
     "UnknownDataset",
     "ArtifactHub",
     "Dataset",
-    "FrameCollection",
     "IterableDataset",
-    "Sample",
     "TargetSchema",
     "InMemoryDataset",
     "SubsetDataset",
+    "Distrib",
+    "Field",
+    "StatisticMixin",
     "assignment",
     "CSVDataset",
     "QM9",
@@ -86,6 +97,7 @@ __all__ = [
     "OMol25Lmdb",
     "OMol25Small",
     "OMol25SmallFilter",
+    "BondMargins",
     "infer_bonds",
     "THEMolShardDataset",
     "THEMolHessian",

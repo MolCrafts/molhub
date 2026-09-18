@@ -261,8 +261,14 @@ class TestThreeBPAAgainstRealUpstream:
             ("test_1200K", 2139, 6437539),
         ],
     )
-    def test_every_split_fetches_and_parses(self, tmp_path, monkeypatch, split, frames, size):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        src = ThreeBPADataset(tmp_path / "absent.xyz", tag=split)
-        assert src.path.stat().st_size == size
-        assert len(src) == frames
+    def test_every_split_fetches_and_parses(self, tmp_path, split, frames, size):
+        from molhub.config import config
+
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path
+            src = ThreeBPADataset(tmp_path / "absent.xyz", tag=split)
+            assert src.path.stat().st_size == size
+            assert len(src) == frames
+        finally:
+            config.home_dir = previous

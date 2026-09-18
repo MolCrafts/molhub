@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import tarfile
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +32,8 @@ from tqdm import tqdm
 from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Digest, Locator
@@ -203,7 +205,7 @@ def _parse_xyz(content: str) -> Frame:
 
     frame = Frame()
     frame["atoms"] = atoms_blk
-    frame.meta.update(values)
+    frame.meta = values
     return frame
 
 
@@ -294,7 +296,7 @@ def _load_raw(
     tags=("qm", "energy"),
     units=_QM9_UNITS,
 )
-class QM9:
+class QM9(Dataset, StatisticMixin):
     """Map-style dataset for QM9.
 
     Construction does no IO. :meth:`load` is the fetch-and-parse boundary;
@@ -373,5 +375,5 @@ class QM9:
     def __len__(self) -> int:
         return len(self._require_loaded())
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._require_loaded()[idx],)

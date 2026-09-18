@@ -7,7 +7,7 @@ itself. An exception reachable only through a private module is one callers catc
 as ``Exception``, which catches everything else too.
 
 **Why the absent split table is not a provenance mismatch.**
-``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/`` is derived, never
+``<home>/derived/molcrafts/class1-universal-splits/1/`` is derived, never
 downloaded, and a reader who has never built it is in the ordinary first-run
 state: nothing mismatches, because nothing was ever written.
 :class:`~molhub.conveyor.splits.SplitProvenanceMismatch` means the opposite —

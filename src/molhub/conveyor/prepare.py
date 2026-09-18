@@ -12,9 +12,11 @@ record each.
 Option A — an optional extra plus a lazy import (binding)
 ---------------------------------------------------------
 
-``from molix.store.block import BlockWriter, SamplingUnit`` happens in **exactly
-one place in molhub**: inside :meth:`MolnexBlockWriter.__init__`, the worker that
-adapts a :class:`~molhub.conveyor.encoder.RawUnit` onto molnex's writer. Nothing
+molnex's writer is **not** imported here any more: ``molix.block/1`` was deleted
+on 2026-09-17 (molnex spec ``data-layer-01-consolidation``) as having no producer,
+no consumer and no instance on disk. This stage keeps the writer-shaped seam —
+:class:`BlockWriterLike` / :class:`BlockWriterFactory` — so a caller can bring a
+writer of their own, and defaults to none. Nothing
 in this package imports torch or molix at module scope — not even under
 ``if TYPE_CHECKING`` — so ``import molhub.conveyor.prepare`` succeeds in a base
 install with neither installed, and :class:`PrepareJob` is unit-tested against an
@@ -26,10 +28,10 @@ the source text, and the ``prepare`` extra plus the ``MOLNEX_SRC`` escape hatch
 ruling ``molix-data-dissolution-05-molhub-reception`` (ac-006) already made for
 :mod:`molhub.dataset.neighbor` from one delegate method to a whole package.
 
-The identity drop is deliberate. ``SamplingUnit`` has no identity field, and
-:attr:`RawUnit.identity`'s one job — choosing which writer a unit goes to — is
-finished by the time :meth:`MolnexBlockWriter.append_unit` is called, so the
-adapter passes four fields and drops the fifth. A sealed block therefore records
+The identity drop is deliberate. :attr:`RawUnit.identity`'s one job — choosing
+which writer a unit goes to — is finished by the time the writer's
+``append_unit`` is called, so an adapter passes the payload and drops the
+identity. A sealed block therefore records
 ``key`` (``molecule_id`` / ``scan_id``) only, and a post-hoc split-purity audit
 reads the *ledger*, where each READY record names a root together with its split,
 never the block bytes.
@@ -71,11 +73,12 @@ __all__ = [
     "PreparedBlock",
     "PreparedBlocks",
     "PrepareJob",
-    "MolnexBlockWriter",
 ]
 
 # The format molhub is willing to report as READY evidence, and the manifest
-# that witnesses it (`molnex:src/molix/store/block.py`).
+# that witnesses it. Kept as a string, not an import: the writer that produced
+# this format lived in molnex and was deleted 2026-09-17, and a ledger written
+# before then still names it.
 _BLOCK_FORMAT = "molix.block/1"
 _MANIFEST_NAME = "manifest.json"
 
@@ -97,8 +100,9 @@ class BlockWriterLike(Protocol):
     :class:`~molhub.dataset.hub.ArtifactHub`, so the unit tests can inject a fake
     and the base environment never needs torch.
 
-    Mirrors ``molnex:src/molix/store/block.py`` — ``append_unit`` (:890),
-    ``committed_bytes`` (:880), ``unit_count`` (:875), ``seal`` (:940).
+    Four members — ``append_unit``, ``committed_bytes``, ``unit_count``,
+    ``seal``. The shape came from molnex's deleted ``BlockWriter``; it is now
+    simply what this stage asks of any writer it is given.
     """
 
     def append_unit(self, unit: Any) -> int:
@@ -124,12 +128,11 @@ class BlockWriterLike(Protocol):
 class BlockWriterFactory(Protocol):
     """How a block is opened — the *constructor* seam, not a ``make_*`` wrapper.
 
-    Satisfied by a writer class object itself (``BlockWriter``,
-    :class:`MolnexBlockWriter`, a test fake), which is why the molnex adapter is
-    a class and not a ``create_writer`` function. ``split`` is a constructor
-    argument here because it is one in molnex
-    (``molnex:src/molix/store/block.py:788``): that is what makes split purity
-    structural rather than checked.
+    Satisfied by a writer class object itself (a caller's writer, a test fake),
+    which is why this is a class seam and not a ``create_writer`` function.
+    ``split`` is a constructor argument so that split purity is structural
+    rather than checked: a writer is opened for one split and cannot be handed a
+    unit from another.
     """
 
     def __call__(self, root: Path, *, split: str, provenance: Mapping[str, Any]) -> BlockWriterLike:
@@ -204,7 +207,7 @@ class PrepareJob:
     Args:
         records: The shard's records, in shard order — typically a
             ``THEMolShardDataset``, whose ``__getitem__`` already returns one
-            complete sampling unit per index: a :data:`~molpy.FrameCollection`.
+            complete sampling unit per index: a ``Sequence[Frame]``.
         encoder: The per-shard encoder; its ``task`` labels every unit.
         split_of: Molecular identity -> ``"train"`` / ``"val"`` / ``"test"``.
             A plain mapping, so this class needs no file to be tested; the
@@ -284,7 +287,7 @@ class PrepareJob:
                 ``split_of``.
             BlockFormatError: A sealed block's manifest does not witness what
                 molhub would report.
-            UnsupportedRecordError: A record that is not a FrameCollection.
+            UnsupportedRecordError: A record that is not a ``Sequence[Frame]``.
             IncompleteRecordError: A record that cannot be encoded whole.
         """
         if self._ran:
@@ -411,79 +414,3 @@ class PrepareJob:
         if not isinstance(document, Mapping):
             raise BlockFormatError(f"{path} holds a JSON {type(document).__name__}, not an object.")
         return document
-
-
-class MolnexBlockWriter:
-    """The molnex ``BlockWriter``, adapted to numpy units — the only import site.
-
-    Satisfies :class:`BlockWriterLike` as an instance and
-    :class:`BlockWriterFactory` as a class object, which is why the worker is a
-    class: a bare function returning writers would be exactly the factory shape
-    the design rules forbid.
-
-    The single ``from molix.store.block import BlockWriter, SamplingUnit`` of the
-    whole package lives in this constructor, together with the single ``import
-    torch``; both stay bound as attributes so no other method has to import
-    anything. That is what keeps ``import molhub.conveyor.prepare`` working in an
-    install with neither package.
-
-    ``RawUnit.identity`` is dropped here, deliberately: ``SamplingUnit`` has no
-    identity field, and identity's one job — routing — is already done.
-
-    Args:
-        root: Block directory; molnex creates it and refuses a root that already
-            holds a manifest.
-        split: The one split this block holds.
-        provenance: Opaque provenance; molnex validates key presence only.
-
-    Raises:
-        ImportError: molnex (``molix``) or torch is not importable. Install the
-            ``prepare`` extra and a molnex checkout — see ``pyproject.toml``.
-    """
-
-    def __init__(self, root: str | Path, *, split: str, provenance: Mapping[str, Any]) -> None:
-        import torch
-        from molix.store.block import BlockWriter, SamplingUnit
-
-        self._writer: Any = BlockWriter(root, split=split, provenance=provenance)
-        self._sampling_unit: Any = SamplingUnit
-        self._as_tensor: Any = torch.from_numpy
-
-    def append_unit(self, unit: RawUnit) -> int:
-        """Append one whole :class:`RawUnit` as one molnex ``SamplingUnit``.
-
-        The numpy columns are wrapped, not copied and not converted: the encoder
-        already narrowed them to the dtypes ``molix.block/1`` stores, so
-        ``torch.from_numpy`` shares the buffer and the block's bytes are the
-        encoder's bytes.
-
-        Args:
-            unit: The unit to append.
-
-        Returns:
-            The unit index molnex committed (0-based, sequential).
-        """
-        return int(
-            self._writer.append_unit(
-                self._sampling_unit(
-                    unit.key,
-                    unit.task,
-                    {name: self._as_tensor(column) for name, column in unit.topology.items()},
-                    {name: self._as_tensor(column) for name, column in unit.frames.items()},
-                )
-            )
-        )
-
-    @property
-    def committed_bytes(self) -> int:
-        """Committed column payload in bytes, as molnex counts it."""
-        return int(self._writer.committed_bytes)
-
-    @property
-    def unit_count(self) -> int:
-        """Units committed to this block so far."""
-        return int(self._writer.unit_count)
-
-    def seal(self) -> None:
-        """Seal the block, writing the digest-carrying manifest molhub reads."""
-        self._writer.seal()

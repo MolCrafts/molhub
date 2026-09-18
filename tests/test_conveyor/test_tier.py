@@ -238,11 +238,17 @@ class TestTierStore:
         assert BLOCKS_SUBDIR in str(error.value)
         assert RAW_SUBDIR not in str(error.value)
 
-    def test_the_default_root_is_the_blob_stores(self, tmp_path, monkeypatch):
-        """ac-001: ``$MOLHUB_HOME`` is read in exactly one place in the repo."""
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        store = TierStore(subdir=BLOCKS_SUBDIR, budget_bytes=BLOCK_BYTES, ledger=FakeLedger())
-        assert store.path_for(B00).is_relative_to(tmp_path / "conveyor" / "blocks")
+    def test_the_default_root_follows_config_home(self, tmp_path):
+        """Default root follows the process home, not an env var."""
+        from molhub.config import config
+
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path
+            store = TierStore(subdir=BLOCKS_SUBDIR, budget_bytes=BLOCK_BYTES, ledger=FakeLedger())
+            assert store.path_for(B00).is_relative_to(tmp_path / "conveyor" / "blocks")
+        finally:
+            config.home_dir = previous
 
     def test_the_tier_is_not_under_the_cross_client_files_layout(self, tmp_path):
         """``files/`` is what the TypeScript client reads; a tier is not an artifact."""

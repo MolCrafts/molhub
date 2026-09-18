@@ -57,14 +57,17 @@ class TestCSVDataset:
     def test_numeric_inference(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         tg = ds[0][0].meta["labels.Exp_Tg(K)"]
-        assert isinstance(tg, float)
+        assert isinstance(getattr(tg, "value", tg), float)
         assert tg == pytest.approx(345.15)
 
     def test_string_columns_remain_string(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         frame = ds[0][0]
-        assert isinstance(frame.meta["PSMILES"], str)
-        assert isinstance(frame.meta["meta.reliability"], str)
+        assert isinstance(getattr(frame.meta["PSMILES"], "value", frame.meta["PSMILES"]), str)
+        assert isinstance(
+            getattr(frame.meta["meta.reliability"], "value", frame.meta["meta.reliability"]),
+            str,
+        )
         assert frame.meta["meta.reliability"] == "black"
 
     def test_all_rows_accessible(self, sample_csv_path):
@@ -126,32 +129,56 @@ class TestInferValue:
 
 
 class TestRemoteCsv:
-    def test_url_with_download_disabled_and_no_cache_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        with pytest.raises(FileNotFoundError):
-            CSVDataset("https://example.invalid/missing.csv", download=False)
+    def test_url_with_download_disabled_and_no_cache_raises(self, tmp_path):
+        from molhub.config import config
+
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path
+            with pytest.raises(FileNotFoundError):
+                CSVDataset("https://example.invalid/missing.csv", download=False)
+        finally:
+            config.home_dir = previous
 
     def test_url_is_downloaded_then_parsed(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+        from molhub.config import config
+
+        previous = config.home_dir
         body = b"a,b\n1,x\n2,y\n"
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, body))
-        ds = CSVDataset("https://example.invalid/remote.csv")
-        assert len(ds) == 2
-        assert ds.headers == ["a", "b"]
-        assert ds[1][0].meta["a"] == 2
+        try:
+            config.home_dir = tmp_path
+            ds = CSVDataset("https://example.invalid/remote.csv")
+            assert len(ds) == 2
+            assert ds.headers == ["a", "b"]
+            assert ds[1][0].meta["a"] == 2
+        finally:
+            config.home_dir = previous
 
-    def test_download_honours_molhub_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+    def test_download_honours_config_home(self, tmp_path, monkeypatch):
+        from molhub.config import config
+
+        previous = config.home_dir
         monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, b"a\n1\n"))
-        ds = CSVDataset("https://example.invalid/remote.csv")
-        assert ds.path == tmp_path / "urls" / "remote.csv"
+        try:
+            config.home_dir = tmp_path
+            ds = CSVDataset("https://example.invalid/remote.csv")
+            assert ds.path == tmp_path / "urls" / "remote.csv"
+        finally:
+            config.home_dir = previous
 
     def test_download_never_writes_into_the_shared_files_tree(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
+        from molhub.config import config
+
+        previous = config.home_dir
         monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResponse(200, b"a\n1\n"))
-        CSVDataset("https://example.invalid/remote.csv")
-        assert not (tmp_path / "files").exists()
+        try:
+            config.home_dir = tmp_path
+            CSVDataset("https://example.invalid/remote.csv")
+            assert not (tmp_path / "files").exists()
+        finally:
+            config.home_dir = previous
 
     def test_download_classmethod_skips_existing_file(self, tmp_path, monkeypatch):
         cached = tmp_path / "urls" / "keep.csv"

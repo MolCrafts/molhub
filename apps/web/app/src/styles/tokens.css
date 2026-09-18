@@ -67,7 +67,6 @@
   --mc-motion-base: var(--motion-base, 150ms);
   --mc-motion-slow: var(--motion-slow, 180ms);
   --mc-ease: var(--motion-ease, cubic-bezier(0.2, 0, 0, 1));
-  --ease-standard: var(--mc-ease);
 
   /* Light paper */
   --mc-canvas: var(--molcrafts-cream);

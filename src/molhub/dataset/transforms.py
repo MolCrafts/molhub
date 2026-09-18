@@ -55,10 +55,10 @@ value these transforms would never compute themselves."""
 def _read_targets(sample: Frame) -> dict[str, _MetaValue]:
     """Graph-level targets of *sample*, as plain Python values.
 
-    The result is detached from the frame: ``Frame.meta`` hands back a copy,
-    and a transform must not write back through the sample it reads. molpy
-    ≥0.14 wraps each entry in a ``MetaValue``; unwrap here so every consumer
-    sees the plain scalar / sequence it computes with.
+    The result is detached from the frame: ``Frame.meta`` hands back a copy of
+    ``MetaValue`` wrappers, and a transform must not write back through the
+    sample it reads. Unwrap here so every consumer sees the plain scalar /
+    sequence it computes with.
     """
     return {key: getattr(value, "value", value) for key, value in sample.meta.items()}
 

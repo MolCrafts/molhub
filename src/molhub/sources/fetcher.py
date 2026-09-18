@@ -33,8 +33,8 @@ class Fetcher:
     Args:
         drivers: Drivers to resolve locators with. Defaults to
             :meth:`Drivers.discover`.
-        blobs: Where fetched bytes land. Defaults to a store rooted at
-            ``$MOLHUB_HOME``.
+        blobs: Where fetched bytes land. Defaults to :class:`BlobStore`,
+            rooted at ``config.home_dir``.
     """
 
     def __init__(

@@ -15,23 +15,41 @@ KEY = "dataset:molcrafts/qm9@v2/main"
 
 
 class TestBlobStoreRoot:
-    def test_explicit_root_wins(self, tmp_path, monkeypatch):
+    def test_explicit_root_wins_over_config_home(self, tmp_path):
+        from molhub.config import config
+
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert BlobStore(root=tmp_path / "explicit").root == tmp_path / "explicit"
+        finally:
+            config.home_dir = previous
+
+    def test_default_follows_config_home(self, tmp_path):
+        from molhub.config import config
+
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert BlobStore().root == tmp_path / "from-config"
+        finally:
+            config.home_dir = previous
+
+    def test_molhub_home_env_does_not_move_the_store(self, tmp_path, monkeypatch):
+        from molhub.config import config
+
+        previous = config.home_dir
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "env"))
-        assert BlobStore(root=tmp_path / "explicit").root == tmp_path / "explicit"
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert BlobStore().root == tmp_path / "from-config"
+            assert BlobStore().root != tmp_path / "env"
+        finally:
+            config.home_dir = previous
 
-    def test_molhub_home_env_var(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "env"))
-        assert BlobStore().root == tmp_path / "env"
-
-    def test_defaults_to_user_cache(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MOLHUB_HOME", raising=False)
+    def test_explicit_root_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
-        assert BlobStore().root == tmp_path / ".cache" / "molhub"
-
-    def test_root_is_expanded(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", "~/molhub-cache")
-        monkeypatch.setenv("HOME", str(tmp_path))
-        assert BlobStore().root == tmp_path / "molhub-cache"
+        assert BlobStore(root="~/molhub-cache").root == tmp_path / "molhub-cache"
 
 
 class TestBlobStoreLayout:

@@ -11,7 +11,7 @@ const codeVariants = cva("rounded-control bg-muted font-mono text-foreground", {
   variants: {
     variant: {
       inline: "px-1 py-px font-medium",
-      block: "block w-full overflow-x-auto px-2 py-1.5",
+      block: "block w-full overflow-x-auto px-2 py-row-pad",
     },
     wrap: {
       none: "whitespace-nowrap",

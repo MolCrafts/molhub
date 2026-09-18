@@ -306,9 +306,9 @@ class TierStore:
 
     Args:
         root: The conveyor root. ``None`` defers to
-            :class:`~molhub.sources.blobs.BlobStore`, which owns the
-            ``$MOLHUB_HOME`` rule — this class never reads the variable itself,
-            so the repo resolves it in exactly one place.
+            :class:`~molhub.sources.blobs.BlobStore`, which reads
+            ``config.home_dir`` — this class never reads the process home
+            itself, so the repo resolves it in exactly one place.
         subdir: The one subdirectory this tier owns, slash-separated, e.g.
             ``"conveyor/raw"`` or ``"conveyor/blocks"``. Never under ``files/``.
         budget_bytes: How many bytes may be resident in this tier. Enforced

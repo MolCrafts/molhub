@@ -5,24 +5,24 @@ coordinate plus a role, e.g. ``dataset/molcrafts/qm9@v2/main``. That is what a
 manifest already identifies, so no digest is needed to address the cache and
 none has to be invented when a platform publishes none.
 
-    $MOLHUB_HOME/                default ~/.cache/molhub
+    <home>/                      default ~/.cache/molhub (molhub.config)
       files/<key>/<...>          fetched artifacts, keyed by coordinate + role
       tmp/                       in-flight transfers, same filesystem
 
 The layout is a shared contract: the TypeScript client uses the same directory
-so two clients on one machine share downloads.
+so two clients on one machine share downloads. Python home is
+``config.home_dir``; an explicit *root* still wins.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
+from molhub.config import config
+
 __all__ = ["BlobStore"]
 
-_ENV_VAR = "MOLHUB_HOME"
-_DEFAULT_SUBPATH = (".cache", "molhub")
 _UNSAFE = re.compile(r"[^A-Za-z0-9._@-]+")
 
 
@@ -30,8 +30,8 @@ class BlobStore:
     """Fetched files on local disk, addressed by caller-supplied key.
 
     Args:
-        root: Cache root. Defaults to ``$MOLHUB_HOME``, then
-            ``~/.cache/molhub``.
+        root: Cache root. Defaults to ``config.home_dir``. The first positional
+            argument is *root*; ``BlobStore(home)`` remains valid.
     """
 
     def __init__(self, root: str | Path | None = None) -> None:
@@ -41,9 +41,7 @@ class BlobStore:
     def _resolve_root(root: str | Path | None) -> Path:
         if root is not None:
             return Path(root).expanduser()
-        if configured := os.environ.get(_ENV_VAR):
-            return Path(configured).expanduser()
-        return Path.home().joinpath(*_DEFAULT_SUBPATH)
+        return Path(config.home_dir).expanduser()
 
     @property
     def root(self) -> Path:

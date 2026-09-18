@@ -28,6 +28,7 @@ Usage::
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +36,8 @@ from molpy import Block, Element, Frame
 
 from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Digest, Locator
@@ -157,7 +159,7 @@ def _load_molecule(mol_dir: Path, molecule_id: str) -> Frame:
     frame = Frame()
     frame["atoms"] = atoms_blk
     frame["bonds"] = bonds_blk
-    frame.meta.update({"molecule_id": str(molecule_id)})
+    frame.meta = {"molecule_id": str(molecule_id)}
     return frame
 
 
@@ -174,7 +176,7 @@ def _read_splits(root: Path) -> dict[str, list[str]]:
     return out
 
 
-class ZincTypingDataset:
+class ZincTypingDataset(Dataset, StatisticMixin):
     """Map-style dataset for Espaloma ZINC GAFF 1.81 typing recovery.
 
     Samples are molpy :class:`~molpy.Frame` objects with:
@@ -278,5 +280,5 @@ class ZincTypingDataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._frames[idx],)

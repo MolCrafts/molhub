@@ -1,9 +1,10 @@
-"""Tests for the MolRec source — a molpy ``MolRec`` (.zarr) record as a dataset.
+"""Tests for the MolRec source — a ``*.mrec`` trajectory as a dataset.
 
-A *labeled-configuration record* stores conformers in the record's trajectory
-and teacher labels in the flat ``observables`` map, keyed ``"<teacher>.<name>"``.
+A *labeled-configuration record* stores conformers as trajectory frames and
+teacher labels on those frames, keyed ``"<teacher>.<name>"``. Scalars sit in
+``frame.meta``; forces are atom columns ``"<teacher>.fx"`` / ``fy`` / ``fz``.
 One record may carry several teachers; a :class:`MolRecDataset` is pinned to
-exactly one at construction and exposes that teacher's observables as targets
+exactly one at construction and exposes that teacher's labels as targets
 with the prefix stripped.
 
 The behaviour pinned here is lifted from the deleted molnex
@@ -14,7 +15,7 @@ identity stability. The fixture values are re-expressed as hand-built, exactly
 representable literals (molnex seeded ``numpy.random.default_rng``), so every
 expected number in this file is a literal, not a draw.
 
-Everything is offline: the ``.zarr`` archives are written into ``tmp_path`` by
+Everything is offline: the ``*.mrec`` stores are written into ``tmp_path`` by
 the fixtures below.
 """
 
@@ -26,11 +27,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from molpy import Block, Box, Frame, Trajectory
-
-try:  # molpy >= 0.14 renamed MolRec -> Record
-    from molpy import Record as MolRec
-except ImportError:  # molpy 0.13 still spells it MolRec
-    from molpy import MolRec
+from molpy.io import mrec
 
 from molhub.dataset import Dataset
 from molhub.dataset.molrec import MolRecDataset
@@ -86,7 +83,7 @@ _BOX_EDGE = 20.0
 
 @dataclass(frozen=True)
 class MolRecFixture:
-    """A written ``.zarr`` archive and the number of frames it holds.
+    """A written ``*.mrec`` store and the number of frames it holds.
 
     The values that went into it are the module-level literals above, so a test
     compares against those rather than against whatever came back off disk.
@@ -96,86 +93,95 @@ class MolRecFixture:
     n_frames: int
 
 
-def _frame(elements: tuple[str, ...], xyz: np.ndarray) -> Frame:
+def _plain(value: object) -> object:
+    """Python scalar from a molpy 0.14 ``MetaValue``."""
+    return getattr(value, "value", value)
+
+
+def _frame(
+    elements: tuple[str, ...],
+    xyz: np.ndarray,
+    *,
+    meta: dict[str, float] | None = None,
+    forces: np.ndarray | None = None,
+    teacher: str | None = None,
+) -> Frame:
     frame = Frame()
     block = Block()
-    block.insert("element", np.array(elements, dtype=np.str_))
-    block.insert("x", np.ascontiguousarray(xyz[:, 0], dtype=np.float64))
-    block.insert("y", np.ascontiguousarray(xyz[:, 1], dtype=np.float64))
-    block.insert("z", np.ascontiguousarray(xyz[:, 2], dtype=np.float64))
+    block["element"] = np.array(elements, dtype=np.str_)
+    block["x"] = np.ascontiguousarray(xyz[:, 0], dtype=np.float64)
+    block["y"] = np.ascontiguousarray(xyz[:, 1], dtype=np.float64)
+    block["z"] = np.ascontiguousarray(xyz[:, 2], dtype=np.float64)
+    if forces is not None:
+        if teacher is None:
+            raise ValueError("forces need a teacher prefix")
+        prefix = f"{teacher}."
+        block[f"{prefix}fx"] = np.ascontiguousarray(forces[:, 0], dtype=np.float64)
+        block[f"{prefix}fy"] = np.ascontiguousarray(forces[:, 1], dtype=np.float64)
+        block[f"{prefix}fz"] = np.ascontiguousarray(forces[:, 2], dtype=np.float64)
     frame["atoms"] = block
     frame.box = Box(np.eye(3) * _BOX_EDGE)
+    if meta:
+        frame.meta = dict(meta)
     return frame
 
 
-def _record(frames: list[Frame]) -> MolRec:
-    record = MolRec()
-    record.set_trajectory(Trajectory.from_frames(frames))
-    # molpy >= 0.12 wants the fixed topology the series is a series *of*.
-    record.set_system(frames[0])
-    return record
-
-
-def _add_scalar(record: MolRec, key: str, values: tuple[float, ...]) -> None:
-    record.observables.add_scalar(
-        key,
-        np.asarray(values, dtype=np.float64),
-        unit="eV",
-        axes=["timestep"],
-        time_dependent=True,
-        domain="trajectory",
-    )
+def _write(path: Path, frames: list[Frame]) -> None:
+    mrec.write_trajectory(str(path), Trajectory(frames))
 
 
 @pytest.fixture
 def conformer_record(tmp_path) -> MolRecFixture:
     """Three heterogeneous molecules, ``teacherA`` scalars only (no forces)."""
     frames = [
-        _frame(_CH4_ELEMENTS, _CH4_POS),
-        _frame(_H2O_ELEMENTS, _H2O_POS),
-        _frame(_NH3_ELEMENTS, _NH3_POS),
+        _frame(
+            _CH4_ELEMENTS,
+            _CH4_POS,
+            meta={"teacherA.U0": _U0[0], "teacherA.gap": _GAP[0]},
+        ),
+        _frame(
+            _H2O_ELEMENTS,
+            _H2O_POS,
+            meta={"teacherA.U0": _U0[1], "teacherA.gap": _GAP[1]},
+        ),
+        _frame(
+            _NH3_ELEMENTS,
+            _NH3_POS,
+            meta={"teacherA.U0": _U0[2], "teacherA.gap": _GAP[2]},
+        ),
     ]
-    record = _record(frames)
-    _add_scalar(record, "teacherA.U0", _U0)
-    _add_scalar(record, "teacherA.gap", _GAP)
-    record.method = {"teacherA": {"theory_level": "DFT/PBE", "model_id": "toy"}}
-
-    path = tmp_path / "qm9_rec.zarr"
-    record.write_zarr(str(path))
+    path = tmp_path / "qm9_rec.mrec"
+    _write(path, frames)
     return MolRecFixture(path=path, n_frames=len(frames))
 
 
 @pytest.fixture
 def force_record(tmp_path) -> MolRecFixture:
     """Four frames of one 3-atom system, two teachers, forces on ``teacherA``."""
-    frames = [_frame(_DIMER_ELEMENTS, _H2O_POS + 0.25 * i) for i in range(len(_ENERGY_A))]
-    record = _record(frames)
-    _add_scalar(record, "teacherA.energy", _ENERGY_A)
-    record.observables.add_vector(
-        "teacherA.forces",
-        _FORCES_A,
-        unit="eV/Angstrom",
-        axes=["timestep", "atom", "component"],
-        time_dependent=True,
-        domain="trajectory",
-    )
-    _add_scalar(record, "teacherB.energy", _ENERGY_B)
-    record.method = {
-        "teacherA": {"theory_level": "DFT/PBE", "model_id": "toyA"},
-        "teacherB": {"theory_level": "DFT/B3LYP", "model_id": "toyB"},
-    }
-
-    path = tmp_path / "force_rec.zarr"
-    record.write_zarr(str(path))
+    frames = []
+    for index in range(len(_ENERGY_A)):
+        frames.append(
+            _frame(
+                _DIMER_ELEMENTS,
+                _H2O_POS + 0.25 * index,
+                meta={
+                    "teacherA.energy": _ENERGY_A[index],
+                    "teacherB.energy": _ENERGY_B[index],
+                },
+                forces=_FORCES_A[index],
+                teacher="teacherA",
+            )
+        )
+    path = tmp_path / "force_rec.mrec"
+    _write(path, frames)
     return MolRecFixture(path=path, n_frames=len(_ENERGY_A))
 
 
 @pytest.fixture
 def empty_record(tmp_path) -> MolRecFixture:
-    """A record with a trajectory but no observables at all."""
-    record = _record([_frame(_H2O_ELEMENTS, _H2O_POS)])
-    path = tmp_path / "empty_rec.zarr"
-    record.write_zarr(str(path))
+    """A record with a trajectory but no teacher labels at all."""
+    path = tmp_path / "empty_rec.mrec"
+    _write(path, [_frame(_H2O_ELEMENTS, _H2O_POS)])
     return MolRecFixture(path=path, n_frames=1)
 
 
@@ -235,19 +241,19 @@ class TestMolRecRecordToSample:
     def test_scalar_target_values_are_per_frame(self, conformer_record):
         """Energy tolerance 1e-10 — the write→read path is expected to be exact."""
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i][0].meta["U0"]) for i in range(len(frames))]
+        got = [float(_plain(frames[i][0].meta["U0"])) for i in range(len(frames))]
         for value, want in zip(got, _U0):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_second_scalar_target_is_not_mixed_with_the_first(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i][0].meta["gap"]) for i in range(len(frames))]
+        got = [float(_plain(frames[i][0].meta["gap"])) for i in range(len(frames))]
         for value, want in zip(got, _GAP):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_scalar_target_is_a_plain_float(self, conformer_record):
         frame = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()[0][0]
-        assert isinstance(frame.meta["U0"], float)
+        assert isinstance(_plain(frame.meta["U0"]), float)
 
     def test_repeated_topology_atomic_numbers(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
@@ -320,13 +326,13 @@ class TestMolRecTeacherIsolation:
 
     def test_teacher_a_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherA").load()
-        got = [float(frames[i][0].meta["energy"]) for i in range(len(frames))]
+        got = [float(_plain(frames[i][0].meta["energy"])) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_A):
             assert value == pytest.approx(want, abs=1e-10)
 
     def test_teacher_b_energies(self, force_record):
         frames = MolRecDataset(force_record.path, teacher_id="teacherB").load()
-        got = [float(frames[i][0].meta["energy"]) for i in range(len(frames))]
+        got = [float(_plain(frames[i][0].meta["energy"])) for i in range(len(frames))]
         for value, want in zip(got, _ENERGY_B):
             assert value == pytest.approx(want, abs=1e-10)
 
@@ -385,7 +391,7 @@ class TestMolRecSubset:
 class TestMolRecErrors:
     def test_missing_record_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            MolRecDataset(tmp_path / "absent.zarr", teacher_id="teacherA")
+            MolRecDataset(tmp_path / "absent.mrec", teacher_id="teacherA")
 
     def test_unknown_teacher_raises(self, force_record):
         with pytest.raises(ValueError):

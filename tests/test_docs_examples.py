@@ -4,14 +4,14 @@ Three directives, and what each promises the reader who copies the fence:
 
 ``<!-- test: exec -->``
     Runs verbatim against the environment the reader already has — the
-    **bundled** registry and whatever ``$MOLHUB_HOME`` they happen to have.
+    **bundled** registry and whatever process home they happen to have.
     Nothing here exports ``$MOLHUB_REGISTRY`` for one of these: the
     ``Molhub().resolve("polymer-tg@1")`` fence is a claim about the registry
     that ships inside the wheel, and pointing it at a synthetic directory would
     make it pass by reading a file this repo wrote for it.
 
 ``<!-- test: fixture-home -->``
-    Runs verbatim against a synthetic ``$MOLHUB_HOME`` **and**
+    Runs verbatim against a synthetic process home **and**
     ``$MOLHUB_REGISTRY`` holding one miniature ``dataset:themol/mbis@1`` — two
     published files of three records, the split derivation that assigns them,
     and the shard bytes already in the cache so a fetch is a cache hit and no
@@ -179,7 +179,7 @@ SPLIT_ROWS: tuple[tuple[str, str, str], ...] = (
 
 
 class FixtureHome:
-    """A synthetic ``$MOLHUB_HOME`` + ``$MOLHUB_REGISTRY``, built from nothing.
+    """A synthetic process home + ``$MOLHUB_REGISTRY``, built from nothing.
 
     Everything a ``fixture-home`` fence touches is written here: the two
     published files, the registry manifest declaring their **real** sizes and
@@ -204,8 +204,8 @@ class FixtureHome:
 
     @property
     def env(self) -> dict[str, str]:
-        """The two variables a fence is run with, pointing at this fixture."""
-        return {"MOLHUB_HOME": str(self.home), "MOLHUB_REGISTRY": str(self.registry)}
+        """The registry overlay a fence is run with, pointing at this fixture."""
+        return {"MOLHUB_REGISTRY": str(self.registry)}
 
     def cache_path(self, role: str) -> Path:
         """Where role *role*'s bytes live under this home — the fetcher's key."""
@@ -399,10 +399,17 @@ def test_documented_python_examples(tmp_path: Path) -> None:
                 # The fence's own working directory: `prepare(..., output_dir=
                 # "blocks/")` is a relative path in one of them, and a refusal
                 # that regressed into creating it must not create it in the repo.
+                preamble = (
+                    "from pathlib import Path as _MolhubHome\n"
+                    "from molhub.config import config\n"
+                    f"config.home_dir = _MolhubHome({str(fixture.home)!r})\n"
+                )
+                env = {**os.environ, **fixture.env}
+                env.pop("MOLHUB_HOME", None)
                 result = subprocess.run(
-                    [sys.executable, "-c", fence.code],
+                    [sys.executable, "-c", preamble + fence.code],
                     cwd=fixture.cwd,
-                    env={**os.environ, **fixture.env},
+                    env=env,
                     text=True,
                     capture_output=True,
                     check=False,

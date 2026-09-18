@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -48,7 +49,8 @@ from molpy import Block, Box, Element, Frame
 
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.molhub import Molhub
 
 __all__ = ["COORDINATE", "WaterLESDataset"]
@@ -169,7 +171,7 @@ def _parse_water_extxyz(path: Path) -> list[Frame]:
         box = _lattice(fields)
         if box is not None:
             frame.box = box
-        frame.meta.update({"energy": float(fields["energy"])})
+        frame.meta = {"energy": float(fields["energy"])}
         frames.append(frame)
 
         cursor += 2 + n_atoms
@@ -191,7 +193,7 @@ def _parse_water_extxyz(path: Path) -> list[Frame]:
     # strings back through the molpy unit registry.
     units={"energy": "eV", "forces": "eV/angstrom"},
 )
-class WaterLESDataset:
+class WaterLESDataset(Dataset, StatisticMixin):
     """One split of the WaterLES benchmark, declared on the ``@dataset`` protocol.
 
     Construction does no IO. :meth:`load` is the fetch-and-parse boundary, so
@@ -275,7 +277,7 @@ class WaterLESDataset:
     def __len__(self) -> int:
         return len(self._require_loaded())
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._require_loaded()[idx],)
 
     def _require_loaded(self) -> list[Frame]:

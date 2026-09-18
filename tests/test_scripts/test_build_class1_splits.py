@@ -268,12 +268,16 @@ def generator():
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """``$MOLHUB_HOME`` pointed at an empty molhub home, no derivation in it."""
+def home(tmp_path: Path) -> Path:
+    """Process home pointed at an empty molhub home, no derivation in it."""
+    from molhub.config import config
+
     root = tmp_path / "home"
     root.mkdir()
-    monkeypatch.setenv("MOLHUB_HOME", str(root))
-    return root
+    previous = config.home_dir
+    config.home_dir = root
+    yield root
+    config.home_dir = previous
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ import io
 from pathlib import Path
 
 import pytest
-from molpy import Frame, UnitsError, UnitSystem
+from molpy import Frame, UnitSystem
 
 from molhub.dataset import ArtifactHub, qm9
 from molhub.dataset.qm9 import (
@@ -297,14 +297,6 @@ class TestQM9Units:
     def test_every_unit_parses_through_the_molpy_registry(self):
         """UnitConvert reads these strings back; a typo must fail here."""
         registry = UnitSystem()
-        try:
-            registry.Unit("GHz")
-        except UnitsError:
-            pytest.skip(
-                "this molpy's unit registry predates GHz (added in 0.14; QM9 "
-                "declares rotational constants in it) — drop this skip when "
-                "the molcrafts-molpy pin reaches 0.14"
-            )
         for unit in QM9.manifest.units.values():
             registry.Unit(unit)
 

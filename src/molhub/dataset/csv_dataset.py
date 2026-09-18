@@ -27,13 +27,15 @@ Usage::
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from molpy import Frame
 
 from molhub.dataset.cache import DownloadCache
-from molhub.dataset.protocol import FrameCollection
+from molhub.dataset.protocol import Dataset
+from molhub.dataset.statistic import StatisticMixin
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -86,14 +88,13 @@ def _parse_csv(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
 # ---------------------------------------------------------------------------
 
 
-class CSVDataset:
+class CSVDataset(Dataset, StatisticMixin):
     """Map-style dataset backed by a CSV file (local or remote).
 
     Args:
         path_or_url: Local file path or remote URL to a CSV file.
         cache_dir: Cache root for downloaded CSVs, which land in its ``urls/``
-            subdirectory. Defaults to ``$MOLHUB_HOME``, then the deprecated
-            ``$MOLHUB_CACHE_DIR``, then ``~/.cache/molhub``.
+            subdirectory. Defaults to ``config.home_dir``.
         download: If True (default), download the file when *path_or_url*
             is a remote URL and the file is not already cached.
     """
@@ -147,10 +148,10 @@ class CSVDataset:
     def __len__(self) -> int:
         return len(self._rows)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         row = self._rows[idx]
         frame = Frame()
-        frame.meta.update(row)
+        frame.meta = dict(row)
         return (frame,)
 
     # -- introspection -------------------------------------------------------

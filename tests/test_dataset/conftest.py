@@ -42,3 +42,19 @@ def dissolved_wrapper_names(module: ModuleType) -> list[str]:
     assert path is not None
     source = Path(path).read_text(encoding="utf-8")
     return sorted({match.group() for match in DISSOLVED_WRAPPERS.finditer(source)})
+
+
+def rows_of(dataset, table: str):
+    """The per-row lengths ``molix.data.BaseDataset.nrows_of`` would read.
+
+    molhub does not depend on molnex, so that routing is mirrored here rather
+    than imported: a declared ``counted_tables`` column first, the measuring
+    ``count_rows`` verb second. A test asserting on the result is asserting
+    that this container meets the protocol — not that it has some method.
+    """
+    import numpy as np
+
+    declared = getattr(type(dataset), "counted_tables", None) or {}
+    if table in declared:
+        return np.asarray(getattr(dataset, declared[table]))
+    return np.asarray(dataset.count_rows(table))

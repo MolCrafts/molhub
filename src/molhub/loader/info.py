@@ -186,7 +186,7 @@ class DatasetInfo:
         license: The license label the manifest records, or ``""``.
         features: What one record carries, in name order.
         splits: The declared splits with their counts and provenance.
-        record_type: What one record *is* — always ``"FrameCollection"``.
+        record_type: What one record *is* — always ``"Sequence[Frame]"``.
         download_size: Every declared byte of the artifact: what a full
             download costs, in bytes.
     """

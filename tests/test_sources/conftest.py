@@ -69,8 +69,12 @@ class FakeSource:
 
 
 @pytest.fixture
-def molhub_home(tmp_path, monkeypatch):
-    """Point $MOLHUB_HOME at an empty temporary directory."""
+def molhub_home(tmp_path):
+    """Point the process home at an empty temporary directory and restore it."""
+    from molhub.config import config
+
     home = tmp_path / "molhub-home"
-    monkeypatch.setenv("MOLHUB_HOME", str(home))
-    return home
+    previous = config.home_dir
+    config.home_dir = home
+    yield home
+    config.home_dir = previous

@@ -16,7 +16,7 @@ Global identity
     identity (zero uuid overlap with hessian/mbis) — do not key splits on it.
 
 Outputs (in the artifact directory ``DerivedLayout`` files this coordinate
-under, ``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/``):
+under, ``<home>/derived/molcrafts/class1-universal-splits/1/``):
     identity_splits.csv.gz        identity,split          one row per molecule
     hessian_uuid_splits.csv.gz    uuid,identity,split     per hessian molecule
     mbis_uuid_splits.csv.gz       uuid,identity,split     per mbis molecule
@@ -41,8 +41,8 @@ written.
 Deterministic and re-runnable: same inputs + seed -> byte-identical outputs.
 
 Usage:
-    MOLHUB_HOME=/path/to/molhub-home \
-    python -m molhub.scripts.build_class1_splits [--fetch] [--seed 20260814]
+    python -m molhub.scripts.build_class1_splits --molhub-home /path/to/molhub-home \\
+        [--fetch] [--seed 20260814]
 """
 
 from __future__ import annotations
@@ -52,7 +52,6 @@ import csv
 import gzip
 import hashlib
 import json
-import os
 import random
 import sys
 import time
@@ -60,6 +59,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 
+from molhub.config import config
 from molhub.conveyor import DerivedLayout, THEMolUnitEncoder
 from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
@@ -338,7 +338,8 @@ def main(
     parser.add_argument(
         "--molhub-home",
         type=Path,
-        default=Path(os.environ.get("MOLHUB_HOME", Path.home() / ".cache" / "molhub")),
+        default=None,
+        help="Cache root. Defaults to the process home (config.home_dir).",
     )
     parser.add_argument(
         "--fetch",
@@ -347,7 +348,12 @@ def main(
     )
     args = parser.parse_args(argv)
 
-    home = args.molhub_home
+    home = (
+        Path(args.molhub_home).expanduser()
+        if args.molhub_home is not None
+        else Path(config.home_dir)
+    )
+    config.home_dir = home
     registry = registry if registry is not None else Registry.load()
     hub = hub if hub is not None else Molhub(registry, fetcher=Fetcher(blobs=BlobStore(home)))
     indexes = ThemolIndexes(registry=registry, hub=hub, home=home)

@@ -26,6 +26,7 @@ from molhub.dataset.definition import UnknownDataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import Dataset, SubsetDataset, assignment
 from molhub.loader.builder import DatasetBuilder
+from molhub.loader.datamodule import DataModule
 from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
 from molhub.loader.mapstyle import UnknownRecordKey
 from molhub.loader.materialize import prepare
@@ -38,6 +39,7 @@ __all__ = [
     "load",
     "assignment",
     "prepare",
+    "DataModule",
     "SubsetDataset",
     "UnknownDataset",
     "AmbiguousRevision",
@@ -96,7 +98,7 @@ def load(
 
     Returns:
         A map-style :class:`~molhub.dataset.protocol.Dataset`, or a walk
-        under *streaming*. Records are :data:`~molpy.FrameCollection`.
+        under *streaming*. Records are ``Sequence[Frame]``.
 
     Raises:
         UnknownDataset: If this molhub has no reader for *name*.

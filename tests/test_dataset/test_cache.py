@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from molhub.dataset.cache import DownloadCache
-from molhub.sources import BlobStore, FileTransfer, RemoteFile
+from molhub.sources import FileTransfer, RemoteFile
 from molhub.sources.errors import BadStatus
 
 
@@ -33,13 +33,6 @@ class _FakeTransfer:
         return dest
 
 
-@pytest.fixture
-def no_cache_env(monkeypatch):
-    """Neither the current nor the deprecated root variable is set."""
-    monkeypatch.delenv("MOLHUB_HOME", raising=False)
-    monkeypatch.delenv("MOLHUB_CACHE_DIR", raising=False)
-
-
 class TestDownloadCache:
     def test_the_fake_satisfies_the_seam_it_stands_in_for(self):
         """A fake that drifts from the declared seam proves nothing about it."""
@@ -47,49 +40,52 @@ class TestDownloadCache:
 
     # -- root resolution -----------------------------------------------------
 
-    def test_explicit_root_wins_over_every_env_var(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
-        assert DownloadCache(tmp_path / "explicit").root == tmp_path / "explicit"
+    def test_explicit_root_wins_over_config_home(self, tmp_path):
+        from molhub.config import config
 
-    def test_molhub_home_wins_over_the_deprecated_var(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
-        assert DownloadCache().root == tmp_path / "home"
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert DownloadCache(tmp_path / "explicit").root == tmp_path / "explicit"
+        finally:
+            config.home_dir = previous
 
-    def test_deprecated_var_is_used_only_when_molhub_home_is_unset(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MOLHUB_HOME", raising=False)
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
-        with pytest.warns(DeprecationWarning):
-            assert DownloadCache().root == tmp_path / "legacy"
+    def test_default_root_follows_config_home(self, tmp_path):
+        from molhub.config import config
 
-    def test_deprecated_var_warns_and_names_its_replacement(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MOLHUB_HOME", raising=False)
+        previous = config.home_dir
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert DownloadCache().root == tmp_path / "from-config"
+        finally:
+            config.home_dir = previous
+
+    def test_molhub_cache_dir_does_not_change_the_root(self, tmp_path, monkeypatch):
+        from molhub.config import config
+
+        previous = config.home_dir
         monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
-        with pytest.warns(DeprecationWarning, match="MOLHUB_HOME"):
+        try:
+            config.home_dir = tmp_path / "from-config"
+            assert DownloadCache().root == tmp_path / "from-config"
+        finally:
+            config.home_dir = previous
+
+    def test_molhub_cache_dir_does_not_warn(self, tmp_path, monkeypatch, recwarn):
+        from molhub.config import config
+
+        previous = config.home_dir
+        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
+        try:
+            config.home_dir = tmp_path / "from-config"
             DownloadCache()
-
-    def test_molhub_home_does_not_warn(self, tmp_path, monkeypatch, recwarn):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", str(tmp_path / "legacy"))
-        DownloadCache()
+        finally:
+            config.home_dir = previous
         assert [w for w in recwarn if issubclass(w.category, DeprecationWarning)] == []
 
-    def test_defaults_to_the_user_cache_directory(self, tmp_path, monkeypatch, no_cache_env):
+    def test_explicit_root_tilde_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
-        assert DownloadCache().root == tmp_path / ".cache" / "molhub"
-
-    def test_root_is_the_blob_store_root(self, tmp_path, monkeypatch):
-        """One root rule, owned by BlobStore — not a second copy of it."""
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path / "home"))
-        assert DownloadCache().root == BlobStore().root
-
-    def test_tilde_is_expanded_in_the_deprecated_var(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MOLHUB_HOME", raising=False)
-        monkeypatch.setenv("MOLHUB_CACHE_DIR", "~/molhub")
-        monkeypatch.setenv("HOME", str(tmp_path))
-        with pytest.warns(DeprecationWarning):
-            assert DownloadCache().root == tmp_path / "molhub"
+        assert DownloadCache("~/molhub").root == tmp_path / "molhub"
 
     # -- filename_for --------------------------------------------------------
 

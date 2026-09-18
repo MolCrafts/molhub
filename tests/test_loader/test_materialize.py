@@ -48,11 +48,9 @@ Shapes picked here, because a test cannot call them otherwise:
 
 from __future__ import annotations
 
-import importlib
 import inspect
 import json
 import shutil
-import sys
 import traceback
 from collections.abc import Mapping
 from pathlib import Path
@@ -453,15 +451,22 @@ class TestBlockExport:
                 provenance=PROVENANCE,
             )
 
-    # -- ac-005: fail closed without molnex --------------------------------
+    # -- ac-005: fail closed with no writer --------------------------------
+    #
+    # There used to be a default: an adapter onto molnex's ``molix.block/1``
+    # writer, resolved by importing it, with ``MOLNEX_SRC`` as the escape hatch
+    # for a source checkout. That format was deleted (molnex spec
+    # ``data-layer-01-consolidation``) as having no producer, no consumer and no
+    # instance on disk, so the tests for *how the default was resolved* went with
+    # it. What survives is the property those tests were protecting: asked to
+    # prepare with no writer, this refuses, says something actionable, and
+    # writes nothing.
 
-    def test_without_molnex_the_default_writer_is_an_import_error(
+    def test_no_writer_is_refused(
         self, verified_torsion_registry, torsion_hub, output_dir: Path
     ) -> None:
-        """No fake here on purpose: this is the default factory, in an install
-        that has neither molix nor torch — which is the environment ac-005 is
-        about, so nothing is simulated."""
-        with pytest.raises(ImportError):
+        """``writer_factory`` has no default; omitting it is an error, not a guess."""
+        with pytest.raises(ValueError):
             molhub.prepare(
                 "themol/torsion-scan",
                 output_dir=output_dir,
@@ -470,11 +475,11 @@ class TestBlockExport:
                 provenance=PROVENANCE,
             )
 
-    def test_the_import_error_names_the_prepare_extra(
+    def test_the_refusal_names_the_way_out(
         self, verified_torsion_registry, torsion_hub, output_dir: Path
     ) -> None:
-        """A bare ``ModuleNotFoundError: No module named 'torch'`` is not an answer."""
-        with pytest.raises(ImportError) as raised:
+        """A bare ``ValueError: None`` is not an answer; name ``writer_factory``."""
+        with pytest.raises(ValueError) as raised:
             molhub.prepare(
                 "themol/torsion-scan",
                 output_dir=output_dir,
@@ -482,27 +487,13 @@ class TestBlockExport:
                 hub=torsion_hub,
                 provenance=PROVENANCE,
             )
-        assert "prepare" in str(raised.value)
+        assert "writer_factory" in str(raised.value)
 
-    def test_the_import_error_names_the_source_escape_hatch(
+    def test_no_partial_block_directory_is_written(
         self, verified_torsion_registry, torsion_hub, output_dir: Path
     ) -> None:
-        """molnex is not on PyPI, so the extra alone cannot install it."""
-        with pytest.raises(ImportError) as raised:
-            molhub.prepare(
-                "themol/torsion-scan",
-                output_dir=output_dir,
-                registry=verified_torsion_registry,
-                hub=torsion_hub,
-                provenance=PROVENANCE,
-            )
-        assert "MOLNEX_SRC" in str(raised.value)
-
-    def test_without_molnex_no_partial_block_directory_is_written(
-        self, verified_torsion_registry, torsion_hub, output_dir: Path
-    ) -> None:
-        """The wrap fires at writer-factory resolution, before any mkdir."""
-        with pytest.raises(ImportError):
+        """The refusal fires at writer-factory resolution, before any mkdir."""
+        with pytest.raises(ValueError):
             molhub.prepare(
                 "themol/torsion-scan",
                 output_dir=output_dir,
@@ -753,10 +744,9 @@ class TestCheapRefusalsPrecedeTheSplitTable:
         output_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """No molnex means no export, whichever split it would have been."""
-        monkeypatch.delenv("MOLNEX_SRC", raising=False)
+        """No writer means no export, whichever split it would have been."""
         self._without_derivation(molhub_home)
-        with pytest.raises(ImportError):
+        with pytest.raises(ValueError):
             molhub.prepare(
                 "themol/torsion-scan",
                 output_dir=output_dir,
@@ -764,100 +754,3 @@ class TestCheapRefusalsPrecedeTheSplitTable:
                 hub=torsion_hub,
                 provenance=PROVENANCE,
             )
-
-
-class TestMolnexSourceOverride:
-    """``MOLNEX_SRC`` is named in the refusal, so it has to be honoured.
-
-    molnex is not on PyPI: the ``prepare`` extra can only install torch, and the
-    documented way to supply the other half is a source checkout pointed at by
-    ``MOLNEX_SRC`` — which is what the refusal already tells the reader to set,
-    and what ``tests/test_dataset/test_neighbor.py`` sets to reach the real
-    thing. Nothing on the ``prepare`` path reads it: ``import_module`` looks
-    down :data:`sys.path`, so a reader who follows the instruction gets the same
-    refusal a second time and no way to tell why.
-
-    The stub checkout below raises a marker on import. If ``MOLNEX_SRC`` is
-    genuinely consulted, that marker is what comes back — a real failure from the
-    checkout the reader named — instead of "no module named molix".
-    """
-
-    @pytest.fixture
-    def molnex_src(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        """A ``src/`` directory holding a ``molix`` that announces itself and dies.
-
-        ``sys.path`` is replaced with a copy so that whatever the resolution
-        inserts is thrown away with the fixture, and every ``molix`` module the
-        attempt left behind is dropped afterwards — an import that raises is
-        already removed from :data:`sys.modules`, but a partially imported
-        package's parents are not.
-        """
-        root = tmp_path / "molnex" / "src"
-        (root / "molix").mkdir(parents=True)
-        (root / "molix" / "__init__.py").write_text(
-            'raise RuntimeError("MOLNEX_SRC_MARKER")\n', encoding="utf-8"
-        )
-        monkeypatch.setenv("MOLNEX_SRC", str(root))
-        monkeypatch.setattr(sys, "path", list(sys.path))
-        yield root
-        for name in [key for key in sys.modules if key == "molix" or key.startswith("molix.")]:
-            del sys.modules[name]
-        importlib.invalidate_caches()
-
-    def test_the_writer_is_looked_for_under_molnex_src(
-        self,
-        verified_torsion_registry,
-        torsion_hub: LandingHub,
-        output_dir: Path,
-        molnex_src: Path,
-    ) -> None:
-        """The marker is the checkout's own voice: it can only be heard from there."""
-        with pytest.raises(Exception) as raised:
-            molhub.prepare(
-                "themol/torsion-scan",
-                output_dir=output_dir,
-                registry=verified_torsion_registry,
-                hub=torsion_hub,
-                provenance=PROVENANCE,
-            )
-        assert "MOLNEX_SRC_MARKER" in _chain(raised.value)
-
-    def test_the_attempt_writes_no_partial_block_directory(
-        self,
-        verified_torsion_registry,
-        torsion_hub: LandingHub,
-        output_dir: Path,
-        molnex_src: Path,
-    ) -> None:
-        """A checkout that fails to import is still fail-closed, not half-done."""
-        with pytest.raises(Exception):
-            molhub.prepare(
-                "themol/torsion-scan",
-                output_dir=output_dir,
-                registry=verified_torsion_registry,
-                hub=torsion_hub,
-                provenance=PROVENANCE,
-            )
-        assert not output_dir.exists()
-
-    def test_without_molnex_src_the_refusal_still_names_it(
-        self,
-        verified_torsion_registry,
-        torsion_hub: LandingHub,
-        output_dir: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """With nothing to consult, the message is the one already landed — and it
-        is now telling the truth, because setting the variable does something."""
-        monkeypatch.delenv("MOLNEX_SRC", raising=False)
-        with pytest.raises(ImportError) as raised:
-            molhub.prepare(
-                "themol/torsion-scan",
-                output_dir=output_dir,
-                registry=verified_torsion_registry,
-                hub=torsion_hub,
-                provenance=PROVENANCE,
-            )
-        message = str(raised.value)
-        assert "MOLNEX_SRC" in message
-        assert "molhub[prepare]" in message

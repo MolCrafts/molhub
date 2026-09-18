@@ -7,8 +7,14 @@ gated card and checkpoints — login/agree there if you need the card;
 
 :class:`OMol25Lmdb` reads those files with :class:`~molhub.io.lmdb.Lmdb`
 and yields molpy frames; :meth:`OMol25Lmdb.record` and
-:meth:`OMol25Lmdb.atom_counts` are the raw-row surface for callers that
+:meth:`OMol25Lmdb.cache` are the raw-row surface for callers that
 index or subsample without building frames.
+:class:`OMol25` defaults to the official 4M train. Official val is a
+pinned tarball; domain views are in-memory :meth:`OMol25.assignment`
+projections of that val, wrapped by the caller in
+:class:`~molhub.dataset.protocol.SubsetDataset`. ``omol-elem-refs`` is a
+Manifest file role fetched with :meth:`~molhub.dataset.hub.ArtifactHub.fetch`
+— hosted, not fitted, and not an :class:`OMol25` role.
 :class:`OMol25Dataset` is the packed-NPZ form used by tests.
 :class:`OMol25Small` filters either source down to Neutral singlet organics
 with inferred bonds. Missing energy or forces refuse.
@@ -21,18 +27,26 @@ consumers convert (e.g. :class:`~molhub.dataset.transforms.UnitConvert`).
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from tarfile import TarFile
 from typing import Any, Protocol
 
 import numpy as np
-from molpy import Block, Element, Frame
+from molpy import Block, Frame
 
+from molhub.cache import CountSidecar
 from molhub.coordinate import Coordinate
+from molhub.dataset.bonds import (
+    _checked_numbers,
+    _element_tables,
+    infer_bonds,
+)
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin, frame_field
 from molhub.io.lmdb import Lmdb
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
@@ -57,10 +71,13 @@ MANIFEST = Manifest(
     coordinate=Coordinate.parse(COORDINATE),
     title="OMol25 — Open Molecules 2025 energy and forces",
     description=(
-        "ωB97M-V/def2-TZVPD single points with total energy (eV) and forces (eV/Å). "
-        "Files are *.aselmdb tarballs. val-neutral is the small Neutral validation "
-        "split; 4m is the published 4-million training subsample. Not the 100M All "
-        "dump."
+        "ωB97M-V/def2-TZVPD single points with total energy (eV) and forces (eV/Å); "
+        "positions Å. Files are *.aselmdb tarballs. 4m is the published 4-million "
+        "training subsample; val is official general validation; val-neutral is the "
+        "small Neutral smoke tarball, never protocol val. Domain views are "
+        "assignment() projections of official val. omol-elem-refs hosts the combined "
+        "element table YAML as a Manifest file role; it is not fitted here. Not the "
+        "100M All dump."
     ),
     license="CC-BY-4.0",
     doi="10.48550/arXiv.2505.08762",
@@ -87,9 +104,42 @@ MANIFEST = Manifest(
             ),
             size=19_983_081_456,
         ),
+        "val": Artifact(
+            role="val",
+            filename="val.tar.gz",
+            format="aselmdb-tar",
+            locators=(
+                Locator.parse(
+                    "https://dl.fbaipublicfiles.com/opencatalystproject/data/omol/250514/val.tar.gz"
+                ),
+            ),
+            size=21_293_980_744,
+        ),
+        "omol-elem-refs": Artifact(
+            role="omol-elem-refs",
+            filename="uma_v1_hof_lin_refs.yaml",
+            format="yaml",
+            locators=(
+                Locator.parse(
+                    "https://raw.githubusercontent.com/facebookresearch/fairchem/"
+                    "41d36dc6bf8ced6348dc73e6aaf54d0527ebd8c9/configs/allscaip/"
+                    "element_refs/uma_v1_hof_lin_refs.yaml"
+                ),
+            ),
+            size=11_549,
+        ),
     },
     targets=TargetDeclaration(graph_level=("energy",), atom_level=("forces",)),
 )
+
+_TARBALL_ROLES: tuple[str, ...] = ("4m", "val", "val-neutral")
+_ASSIGNMENT_DATA_IDS: dict[str, frozenset[str]] = {
+    "val_metal_complexes": frozenset({"metal_complexes"}),
+    "val_electrolytes": frozenset({"elytes"}),
+    "val_biomolecules": frozenset({"biomolecules"}),
+    "val_spice": frozenset({"spice"}),
+    "val_neutralorganics": frozenset({"ani2x", "orbnet_denali", "geom_orca6", "trans1x", "rgd"}),
+}
 
 _REQUIRED = ("n_atoms", "Z", "pos", "energy", "forces", "charge", "spin")
 _ALLOWED_Z = np.array([1, 6, 7, 8, 9, 15, 16, 17, 35, 53], dtype=np.int64)
@@ -109,97 +159,12 @@ _EXCLUDE_DOMAINS = frozenset(
         "ani-1xbb",
     }
 )
-_BOND_SCALE = 1.2
-_MIN_BOND = 0.4
-_MAX_Z = 118
-# Pairwise geometry is computed in row blocks of this size so bond inference
-# never materialises a full (N, N, 3) tensor for large frames.
-_PAIR_BLOCK = 512
-
-_SYMBOLS: np.ndarray | None = None
-_COVALENT: np.ndarray | None = None
-
-
-def _element_tables() -> tuple[np.ndarray, np.ndarray]:
-    """Symbols and covalent radii (Å) indexed by Z, built once per process.
-
-    Replaces per-atom ``Element(z)`` construction on the frame-decode hot
-    path with two vectorised table lookups.
-    """
-    global _SYMBOLS, _COVALENT
-    if _SYMBOLS is None or _COVALENT is None:
-        symbols = np.empty(_MAX_Z + 1, dtype="U3")
-        radii = np.zeros(_MAX_Z + 1, dtype=np.float64)
-        symbols[0] = ""
-        for z in range(1, _MAX_Z + 1):
-            element = Element(z)
-            symbols[z] = element.symbol
-            radii[z] = float(element.covalent)
-        _SYMBOLS, _COVALENT = symbols, radii
-    return _SYMBOLS, _COVALENT
-
-
-def _checked_numbers(numbers: np.ndarray) -> np.ndarray:
-    numbers = np.asarray(numbers, dtype=np.int64).reshape(-1)
-    if numbers.size and (int(numbers.min()) < 1 or int(numbers.max()) > _MAX_Z):
-        raise ValueError(
-            f"atomic numbers outside 1..{_MAX_Z}: min={int(numbers.min())} max={int(numbers.max())}"
-        )
-    return numbers
-
-
-def infer_bonds(numbers: np.ndarray, pos: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Covalent bonds from pairwise distances against covalent-radius sums.
-
-    A pair ``i < j`` is bonded when
-    ``_MIN_BOND ≤ |r_j − r_i| ≤ _BOND_SCALE · (R_i + R_j)`` with ``R`` the
-    covalent radius. Fully vectorised; rows are processed in blocks so large
-    frames never allocate a full ``(N, N, 3)`` displacement tensor.
-
-    Args:
-        numbers: Atomic numbers ``(N,)``.
-        pos: Positions ``(N, 3)`` in Å.
-
-    Returns:
-        ``(atomi, atomj)`` int64 arrays of upper-triangle bonded pairs,
-        ordered by ``atomi`` then ``atomj``.
-    """
-    numbers = _checked_numbers(numbers)
-    pos = np.asarray(pos, dtype=np.float64)
-    _, radii = _element_tables()
-    r = radii[numbers]
-    n = int(numbers.shape[0])
-    atomi_parts: list[np.ndarray] = []
-    atomj_parts: list[np.ndarray] = []
-    min_sq = _MIN_BOND * _MIN_BOND
-    for start in range(0, n, _PAIR_BLOCK):
-        stop = min(start + _PAIR_BLOCK, n)
-        diff = pos[start:stop, None, :] - pos[None, :, :]
-        # Both bounds are positive, so squared distances decide bonding
-        # without a square root over the full pair matrix.
-        dist_sq = np.einsum("ijk,ijk->ij", diff, diff)
-        limit = _BOND_SCALE * (r[start:stop, None] + r[None, :])
-        hit = (dist_sq >= min_sq) & (dist_sq <= limit * limit)
-        # Upper triangle only: column index must exceed the global row index.
-        cols = np.arange(n)[None, :]
-        rows = np.arange(start, stop)[:, None]
-        hit &= cols > rows
-        i_local, j = np.nonzero(hit)
-        atomi_parts.append(i_local + start)
-        atomj_parts.append(j)
-    if not atomi_parts:
-        empty = np.empty(0, dtype=np.int64)
-        return empty, empty.copy()
-    return (
-        np.concatenate(atomi_parts).astype(np.int64),
-        np.concatenate(atomj_parts).astype(np.int64),
-    )
 
 
 class _MapStyle(Protocol):
     def __len__(self) -> int: ...
 
-    def __getitem__(self, idx: int) -> FrameCollection: ...
+    def __getitem__(self, idx: int) -> Sequence[Frame]: ...
 
     @property
     def source_id(self) -> str: ...
@@ -236,14 +201,12 @@ def _frame_from_record(record: dict[str, Any]) -> Frame:
         }
     )
     charge = extra.get("charge", record.get("charge", 0) or 0)
-    frame.meta.update(
-        {
-            "energy": float(energy),
-            "charge": int(charge),
-            "spin": int(extra.get("spin", 1)),
-            "domain": str(extra.get("data_id", "")),
-        }
-    )
+    frame.meta = {
+        "energy": float(energy),
+        "charge": int(charge),
+        "spin": int(extra.get("spin", 1)),
+        "domain": str(extra.get("data_id", "")),
+    }
     return frame
 
 
@@ -253,10 +216,20 @@ def _atom_ptr(n_atoms: np.ndarray) -> np.ndarray:
     return ptr
 
 
+_frame_field = frame_field
+
+
+def _payload_dtype_name(value: object) -> str:
+    dtype = np.asarray(value).dtype
+    if np.issubdtype(dtype, np.floating):
+        return "float64"
+    return "int32"
+
+
 def _count_table_atoms(path: str) -> dict[int, int]:
     """Per-row atom counts of one ``*.aselmdb`` file — raw decode, no frames.
 
-    Module-level so :meth:`OMol25Lmdb.atom_counts` can fan it out over a
+    Module-level so :meth:`OMol25Lmdb.cache` can fan it out over a
     process pool; each worker opens its own read-only environment.
     """
     table = Lmdb(path)
@@ -267,6 +240,16 @@ def _count_table_atoms(path: str) -> dict[int, int]:
         }
     finally:
         table.close()
+
+
+def _unwrap(value: Any) -> Any:
+    """A molpy ``MetaValue``'s payload, or *value* when it is already plain.
+
+    The default of the ``getattr`` **is the value itself**. Passing a constant
+    instead silently substitutes that constant for every unwrapped scalar,
+    which is how an open-shell frame with ``spin=3`` read back as ``spin=1``.
+    """
+    return getattr(value, "value", value)
 
 
 class OMol25SmallFilter:
@@ -289,24 +272,31 @@ class OMol25SmallFilter:
         if not np.isin(numbers, _ALLOWED_Z).all():
             return "element"
         meta = frame.meta
-        if int(meta.get("charge", 0)) != 0:
+        # molpy 0.14 ``Frame.meta`` values are ``MetaValue`` wrappers; int()
+        # of the wrapper raises. Unwrap like ``_frame_field`` / ``_bonded``:
+        # the getattr default must be **the value itself**, so an unwrapped
+        # int or str survives. With a constant default instead, a plain
+        # ``spin=3`` reads back as 1 and an open-shell frame is silently kept.
+        charge = _unwrap(meta.get("charge", 0))
+        if int(charge) != 0:
             return "charge"
-        if int(meta.get("spin", 1)) != 1:
+        spin = _unwrap(meta.get("spin", 1))
+        if int(spin) != 1:
             return "spin"
-        domain = str(meta.get("domain", "")).strip().lower()
+        domain = str(_unwrap(meta.get("domain", ""))).strip().lower()
         if domain and domain in _EXCLUDE_DOMAINS:
             return "domain"
         return None
 
 
-class OMol25Dataset:
+class OMol25Dataset(Dataset, StatisticMixin):
     """Map-style view of a packed OMol25 NPZ (native eV / eV·Å⁻¹).
 
     Required arrays: ``n_atoms`` ``(C,)``, ``Z`` ``(N,)``, ``pos`` ``(N, 3)``,
     ``energy`` ``(C,)``, ``forces`` ``(N, 3)``, ``charge`` ``(C,)``,
     ``spin`` ``(C,)``. Optional ``domain`` ``(C,)``.
 
-    Each sample is a length-1 :data:`~molpy.FrameCollection`. Energy lives in
+    Each sample is a length-1 ``Sequence[Frame]``. Energy lives in
     ``frame.meta``; forces are ``fx`` / ``fy`` / ``fz``. No bonds.
 
     Args:
@@ -378,11 +368,12 @@ class OMol25Dataset:
     def __len__(self) -> int:
         return int(self._energy.shape[0])
 
-    def atom_counts(self) -> np.ndarray:
-        """Per-row atom counts ``(C,)`` — already packed, no decode needed."""
-        return self._n_atoms.copy()
+    #: The packed NPZ already holds the atom count per row, so the count is a
+    #: declaration rather than a method: nothing is decoded and nothing is
+    #: cached, because there is nothing expensive to cache.
+    counted_tables = {"atoms": "_n_atoms"}
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         if idx < 0:
             idx += len(self)
         if idx < 0 or idx >= len(self):
@@ -403,26 +394,25 @@ class OMol25Dataset:
         atoms["fz"] = forces[:, 2].copy()
         frame = Frame()
         frame["atoms"] = atoms
-        frame.meta.update(
-            {
-                "energy": float(self._energy[idx]),
-                "charge": int(self._charge[idx]),
-                "spin": int(self._spin[idx]),
-                "domain": str(self._domain[idx]),
-                "source_record_id": str(idx),
-                "molecule_id": str(idx),
-            }
-        )
+        frame.meta = {
+            "energy": float(self._energy[idx]),
+            "charge": int(self._charge[idx]),
+            "spin": int(self._spin[idx]),
+            "domain": str(self._domain[idx]),
+            "source_record_id": str(idx),
+            "molecule_id": str(idx),
+        }
         return (frame,)
 
 
-class OMol25Lmdb:
+class OMol25Lmdb(Dataset, StatisticMixin):
     """One extracted OMol25 ``*.aselmdb`` directory as molpy frames.
 
     Each sample is a length-1 collection. Energy is ``frame.meta['energy']``
-    in eV; forces are ``fx``/``fy``/``fz`` in eV/Å. No bonds.
+    in eV; forces are ``fx``/``fy``/``fz`` in eV/Å; positions ``x``/``y``/``z``
+    are Å. No bonds.
 
-    :meth:`record` and :meth:`atom_counts` expose the raw-row surface so
+    :meth:`record` and :meth:`cache` expose the raw-row surface so
     indexing, subsampling and reference-energy fits never pay the molpy
     Frame construction, and never reach into private state.
 
@@ -437,6 +427,7 @@ class OMol25Lmdb:
             ``*.aselmdb`` file under *root*.
     """
 
+    ADAPTER_SCHEMA_VERSION = 1
     TARGET_SCHEMA = TargetSchema(
         graph_level=frozenset({"energy"}),
         atom_level=frozenset({"forces"}),
@@ -446,6 +437,8 @@ class OMol25Lmdb:
     def __init__(self, root: str | Path, *, max_rows: int | None = None) -> None:
         self.max_rows = int(max_rows) if max_rows is not None else None
         self.root = Path(root).expanduser().resolve()
+        self._parent_role: str | None = None
+        self._parent_size: int | None = None
         paths: list[Path] = []
         tables: list[Lmdb | None] = []
         parts: list[np.ndarray] = []
@@ -523,27 +516,34 @@ class OMol25Lmdb:
         table_idx, row_id = (int(v) for v in self._index[idx])
         return self._table(table_idx).get(row_id)
 
-    def atom_counts(self, *, workers: int = 0) -> np.ndarray:
-        """Per-row atom counts ``(len(self),)``, cached on disk beside *root*.
+    def count_rows(self, table: str = "atoms", *, workers: int = 0) -> np.ndarray:
+        """Measure the per-row length of *table*, ``(N,)`` int64.
 
-        Decodes only the raw records (never molpy frames or element symbols),
-        so a full pass over the 4M training split is bounded by LMDB decode
-        alone; with *workers* the per-file scans run in parallel processes.
-        The result is written atomically next to the extracted files and
-        reused by every later run over the same row count.
+        A verb, and an expensive one: an ASE-style LMDB has to decode a record
+        to learn its length, about 15 minutes over four million rows. So the
+        vector is measured once and kept in a
+        :class:`~molhub.cache.CountSidecar` keyed by the shard files
+        themselves — a second run, or another process, reads a ``.npy``
+        instead of the database. That is why this is a method and not a
+        ``counted_tables`` declaration: there is something to cache.
 
         Args:
-            workers: Process count for the scan. ``0`` or ``1`` scans
-                sequentially in-process.
+            table: Frame block name. Only ``atoms`` is counted.
+            workers: Processes to measure with. ``0`` or ``1`` is sequential.
 
         Returns:
-            int64 atom counts aligned with this view's row order.
+            The per-row lengths.
+
+        Raises:
+            ValueError: *table* is not a block this container counts.
         """
-        cache = self.root / f".molhub-n-atoms-{len(self)}.npy"
-        if cache.is_file():
-            counts = np.load(cache)
-            if counts.shape == (len(self),):
-                return counts.astype(np.int64, copy=False)
+        if table != "atoms":
+            raise ValueError(f"OMol25 LMDB counts only the atoms table, got {table!r}")
+        sidecar = CountSidecar(self._paths, "graph.natoms")
+        cached = sidecar.load(n_rows=len(self))
+        if cached is not None:
+            return np.asarray(cached, dtype=np.int64)
+
         counts = np.empty(len(self), dtype=np.int64)
         if workers and int(workers) > 1:
             with ProcessPoolExecutor(max_workers=int(workers)) as pool:
@@ -554,23 +554,17 @@ class OMol25Lmdb:
         else:
             for i in range(len(self)):
                 counts[i] = int(np.asarray(self.record(i)["numbers"]).reshape(-1).shape[0])
-        try:
-            tmp = cache.with_suffix(".npy.tmp")
-            with tmp.open("wb") as sink:
-                np.save(sink, counts)
-            tmp.replace(cache)
-        except OSError:
-            # A read-only extract cannot cache; the scan result is still valid.
-            pass
+        sidecar.save(counts)
         return counts
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         frame = _frame_from_record(self.record(idx))
         table_idx, row_id = (int(v) for v in self._index[idx if idx >= 0 else idx + len(self)])
         record_id = f"{table_idx}:{row_id}"
-        frame.meta["source_record_id"] = record_id
-        if "molecule_id" not in frame.meta:
-            frame.meta["molecule_id"] = record_id
+        meta = {key: getattr(value, "value", value) for key, value in frame.meta.items()}
+        meta["source_record_id"] = record_id
+        meta.setdefault("molecule_id", record_id)
+        frame.meta = meta
         return (frame,)
 
 
@@ -579,8 +573,10 @@ class OMol25Lmdb:
     namespace="fairchem",
     version="1",
     description=(
-        "OMol25 ωB97M-V/def2-TZVPD energy and forces. "
-        "Roles val-neutral and 4m; not the 100M All dump."
+        "OMol25 ωB97M-V/def2-TZVPD energy (eV) and forces (eV/Å); positions Å. "
+        "Tarball roles 4m, val, val-neutral; domain views are assignment() "
+        "projections of official val. omol-elem-refs is a Manifest file role, "
+        "not fitted. Not the 100M All dump."
     ),
     license="CC-BY-4.0",
     homepage="https://huggingface.co/facebook/OMol25",
@@ -588,20 +584,26 @@ class OMol25Lmdb:
     tags=("omol25", "energy", "forces", "dft"),
     units={"energy": "eV", "forces": "eV/angstrom"},
 )
-class OMol25:
-    """One published OMol25 split, fetched and read through :class:`OMol25Lmdb`.
+class OMol25(Dataset, StatisticMixin):
+    """One published OMol25 tarball split, fetched and read through :class:`OMol25Lmdb`.
 
     Construction does no IO. :meth:`load` is the download-and-extract
     boundary; after it, indexing delegates to the underlying LMDB view.
+    Frames keep published DFT totals: energy eV, forces eV/Å, positions Å.
+    Domain views of official val are :meth:`assignment` projections, wrapped
+    by the caller in :class:`~molhub.dataset.protocol.SubsetDataset`.
+    ``omol-elem-refs`` is a Manifest file role, not an :class:`OMol25` role
+    and not fitted here.
 
     Args:
-        role: Manifest role, ``val-neutral`` or ``4m``.
+        role: Tarball role: ``4m`` (default), ``val``, or ``val-neutral``.
         max_rows: Index at most this many LMDB rows. Smoke uses a small cap
-            so the full catalog is not scanned.
+            so the full catalog is not scanned. Domain views require a
+            fully indexed official val; *max_rows* is not for that.
         hub: Defaults to :class:`~molhub.molhub.Molhub`.
 
     Raises:
-        ValueError: *role* is not a published artifact role.
+        ValueError: *role* is not a published tarball role.
     """
 
     COORDINATE = COORDINATE
@@ -610,13 +612,15 @@ class OMol25:
     def __init__(
         self,
         *,
-        role: str = "val-neutral",
+        role: str = "4m",
         max_rows: int | None = None,
         hub: ArtifactHub | None = None,
     ) -> None:
-        if role not in MANIFEST.artifacts:
+        if role not in _TARBALL_ROLES:
             raise ValueError(
-                f"Unknown OMol25 role {role!r}. Available: {sorted(MANIFEST.artifacts)}"
+                f"Unknown OMol25 role {role!r}. "
+                f"Tarball roles: {', '.join(_TARBALL_ROLES)}. "
+                f"Assignment names: {', '.join(_ASSIGNMENT_DATA_IDS)}."
             )
         self.role = role
         self.max_rows = int(max_rows) if max_rows is not None else None
@@ -657,7 +661,49 @@ class OMol25:
         if not roots:
             raise FileNotFoundError(f"Fetched {self.role} but found no *.aselmdb under {dest}")
         self._view = OMol25Lmdb(roots[0], max_rows=self.max_rows)
+        self._view._parent_role = self.role
+        published_size = MANIFEST.artifacts[self.role].size
+        self._view._parent_size = int(published_size) if published_size is not None else None
         return self
+
+    def assignment(self) -> dict[str, list[int]]:
+        """Map official-val domain names to parent indices.
+
+        The predicate is ``record["data"]["data_id"]`` membership in the
+        pinned sets (the same string stored as ``frame.meta["domain"]``).
+        Multi-id views keep parent order. Indices are built in memory from
+        :meth:`record`; nothing is persisted.
+
+        Returns:
+            Name → parent indices for ``val_metal_complexes``,
+            ``val_electrolytes``, ``val_biomolecules``, ``val_spice``, and
+            ``val_neutralorganics``.
+
+        Raises:
+            RuntimeError: :meth:`load` has not been called.
+            TypeError: This role is not official val, or ``max_rows`` capped
+                the index.
+        """
+        view = self._require_loaded()
+        if self.max_rows is not None:
+            raise TypeError(
+                "OMol25.assignment() needs a fully indexed official val; "
+                f"max_rows={self.max_rows} is set."
+            )
+        if self.role != "val":
+            raise TypeError(
+                f"OMol25 role {self.role!r} has no published assignment. "
+                "Domain views are assignment() projections of official val."
+            )
+        views: dict[str, list[int]] = {name: [] for name in _ASSIGNMENT_DATA_IDS}
+        for idx in range(len(view)):
+            extra = view.record(idx).get("data") or {}
+            data_id = str(extra.get("data_id", ""))
+            for name, members in _ASSIGNMENT_DATA_IDS.items():
+                if data_id in members:
+                    views[name].append(idx)
+                    break
+        return views
 
     def _require_loaded(self) -> OMol25Lmdb:
         if self._view is None:
@@ -668,14 +714,22 @@ class OMol25:
         """Raw decoded LMDB record — see :meth:`OMol25Lmdb.record`."""
         return self._require_loaded().record(idx)
 
-    def atom_counts(self, *, workers: int = 0) -> np.ndarray:
-        """Per-row atom counts — see :meth:`OMol25Lmdb.atom_counts`."""
-        return self._require_loaded().atom_counts(workers=workers)
+    def count_rows(self, table: str = "atoms", *, workers: int = 0) -> np.ndarray:
+        """Measure the per-row length of *table*, through the view this wraps.
+
+        Args:
+            table: Frame block name. Only ``atoms`` is counted.
+            workers: Processes to measure with when the view has to scan.
+
+        Returns:
+            The per-row lengths.
+        """
+        return self._require_loaded().count_rows(table, workers=workers)
 
     def __len__(self) -> int:
         return len(self._require_loaded())
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return self._require_loaded()[idx]
 
 
@@ -693,7 +747,7 @@ class OMol25:
     tags=("omol25", "energy", "forces", "small-molecule", "class-i"),
     units={"energy": "eV", "forces": "eV/angstrom"},
 )
-class OMol25Small:
+class OMol25Small(Dataset, StatisticMixin):
     """Filtered, bonded view of an :class:`OMol25Dataset` — native units.
 
     Frames keep the published eV / eV·Å⁻¹ labels untouched; converting is
@@ -784,9 +838,10 @@ class OMol25Small:
         if atomi.shape[0] == 0:
             return None
         frame["bonds"] = Block({"atomi": atomi, "atomj": atomj})
-        meta = frame.meta
+        meta = {key: getattr(value, "value", value) for key, value in frame.meta.items()}
         meta["source_record_id"] = str(meta.get("source_record_id") or record_id)
         meta["molecule_id"] = str(meta.get("molecule_id") or record_id)
+        frame.meta = meta
         return frame
 
     @property
@@ -796,7 +851,7 @@ class OMol25Small:
     def __len__(self) -> int:
         return len(self._require_loaded())
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._require_loaded()[idx],)
 
 

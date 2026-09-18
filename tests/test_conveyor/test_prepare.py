@@ -141,17 +141,15 @@ def _frame(
             "bond_number": np.asarray(order, dtype=np.int64),
         }
     )
-    frame.meta.update(
-        {
-            "molecule_id": molecule_id,
-            "source_record_id": molecule_id,
-            "mapped_nonisomeric_smiles": smiles,
-            "mapped_isomeric_smiles": smiles,
-            "source_id": "dataset:themol/hessian-relax@1#role=shard-000",
-            "total_charge": 0,
-            "energy": -0.5 * step,
-        }
-    )
+    frame.meta = {
+        "molecule_id": molecule_id,
+        "source_record_id": molecule_id,
+        "mapped_nonisomeric_smiles": smiles,
+        "mapped_isomeric_smiles": smiles,
+        "source_id": "dataset:themol/hessian-relax@1#role=shard-000",
+        "total_charge": 0,
+        "energy": -0.5 * step,
+    }
     return frame
 
 

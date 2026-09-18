@@ -11,10 +11,9 @@ a user typed has no coordinate, therefore no manifest entry, therefore no key
 is not a stage on the way to something else: as long as the public API accepts
 raw URLs, URL-addressed caching is the honest answer for them.
 
-Both caches share one root, so a user who sets ``$MOLHUB_HOME`` gets one
-directory rather than two::
+Both caches share the process home (``config.home_dir``)::
 
-    $MOLHUB_HOME/                default ~/.cache/molhub
+    ~/.cache/molhub/             default process home
       files/<key>/…              BlobStore — the cross-client layout contract
       tmp/                       BlobStore — in-flight transfers
       urls/<filename>            this cache
@@ -23,27 +22,20 @@ directory rather than two::
 TypeScript client neither reads nor writes it, and nothing here may be written
 into ``files/``, which both clients read.
 
-The root itself comes from :class:`BlobStore`, so the resolution rule lives in
-exactly one place. ``$MOLHUB_CACHE_DIR`` is **deprecated**; it is consulted
-only when ``$MOLHUB_HOME`` is unset — so caches written by earlier versions are
-not orphaned — and using it raises a :class:`DeprecationWarning`.
+The root itself is ``config.home_dir`` when *root* is omitted. An explicit
+*root* still wins. This class does not call :class:`BlobStore` to resolve home.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import warnings
 from pathlib import Path
 
-from molhub.sources import BlobStore, FileTransfer, HttpsSource, RemoteFile
+from molhub.config import config
+from molhub.sources import FileTransfer, HttpsSource, RemoteFile
 
 __all__ = ["DownloadCache"]
 
-# BlobStore owns this variable and the rule behind it. It is read here only to
-# answer "did the user configure a root?" — never to resolve one.
-_HOME_ENV_VAR = "MOLHUB_HOME"
-_LEGACY_ENV_VAR = "MOLHUB_CACHE_DIR"
 _URL_SUBDIR = "urls"
 _UNSAFE = re.compile(r"[^A-Za-z0-9._@-]+")
 
@@ -58,8 +50,7 @@ class DownloadCache:
 
     Args:
         root: Cache root, shared with :class:`BlobStore`; downloads land in its
-            ``urls/`` subdirectory. Defaults to ``$MOLHUB_HOME``, then the
-            deprecated ``$MOLHUB_CACHE_DIR``, then ``~/.cache/molhub``.
+            ``urls/`` subdirectory. Defaults to ``config.home_dir``.
         transfer: Anything satisfying
             :class:`~molhub.sources.source.FileTransfer`. A URL is already
             located, so nothing here resolves or claims a scheme. Defaults to
@@ -79,24 +70,13 @@ class DownloadCache:
 
     @staticmethod
     def _resolve_root(root: str | Path | None) -> Path:
-        """Resolve the cache root, deferring to :class:`BlobStore` for the rule.
+        """Resolve the cache root from *root* or ``config.home_dir``.
 
-        ``$MOLHUB_CACHE_DIR`` is a deprecated fallback for users who configured
-        it before the two caches shared a root; ``$MOLHUB_HOME`` always wins.
+        An explicit *root* wins. This method does not call :class:`BlobStore`.
         """
         if root is not None:
             return Path(root).expanduser()
-        legacy = os.environ.get(_LEGACY_ENV_VAR)
-        if legacy and not os.environ.get(_HOME_ENV_VAR):
-            warnings.warn(
-                f"${_LEGACY_ENV_VAR} is deprecated and will stop being read. "
-                f"Set ${_HOME_ENV_VAR} instead — it is the one cache root, shared "
-                "with the artifact store and the TypeScript client.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            return Path(legacy).expanduser()
-        return BlobStore().root
+        return Path(config.home_dir).expanduser()
 
     @property
     def root(self) -> Path:

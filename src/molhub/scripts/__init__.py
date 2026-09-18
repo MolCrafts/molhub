@@ -3,7 +3,7 @@
 Some artifacts molhub reads are not published by anyone: they are *derived*, on
 the machine that wants them. ``class1-universal-splits@1`` is the one that
 matters today — every THEMol split view and every prepared block is routed by
-it, and it lives under ``$MOLHUB_HOME/derived/`` because no platform serves it.
+it, and it lives under ``<home>/derived/`` because no platform serves it.
 
 A derivation the product requires is part of the product. A generator that lived
 only in the repository checkout would mean a pip-installed molhub could not open

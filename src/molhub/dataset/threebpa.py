@@ -27,6 +27,7 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +36,8 @@ from molpy import Block, Element, Frame
 from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Locator
@@ -131,7 +133,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.meta.update({"energy": energy})
+        frame.meta = {"energy": energy}
         frames.append(frame)
 
         i += 2 + natoms
@@ -156,7 +158,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
     # the molpy unit registry, which knows `angstrom` and not `Å`.
     units={"energy": "eV", "forces": "eV/angstrom"},
 )
-class ThreeBPADataset:
+class ThreeBPADataset(Dataset, StatisticMixin):
     """Map-style dataset for one 3BPA extended-XYZ split.
 
     Each sample is a :class:`molpy.Frame` with an ``atoms`` block
@@ -228,5 +230,5 @@ class ThreeBPADataset:
     def __len__(self) -> int:
         return len(self._frames)
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         return (self._frames[idx],)

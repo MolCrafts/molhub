@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -27,7 +28,8 @@ from molpy import Block, Element, Frame
 from molhub.coordinate import Coordinate
 from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import FrameCollection, TargetSchema
+from molhub.dataset.protocol import Dataset, TargetSchema
+from molhub.dataset.statistic import StatisticMixin
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Digest, Locator
@@ -114,7 +116,7 @@ _MOLECULES: dict[str, str] = {
     # kcal/(mol·Å) forces. Rescaling is UnitConvert's job, opted into by name.
     units={"energy": "kcal/mol", "forces": "kcal/mol/angstrom"},
 )
-class RevMD17Dataset:
+class RevMD17Dataset(Dataset, StatisticMixin):
     """Map-style dataset for one revised-MD17 molecule.
 
     Construction does no IO. :meth:`load` is the fetch-and-parse boundary;
@@ -252,7 +254,7 @@ class RevMD17Dataset:
         assert self._coords is not None
         return int(self._coords.shape[0])
 
-    def __getitem__(self, idx: int) -> FrameCollection:
+    def __getitem__(self, idx: int) -> Sequence[Frame]:
         self._require_loaded()
         assert self._coords is not None
         assert self._forces is not None and self._energies is not None
@@ -271,5 +273,5 @@ class RevMD17Dataset:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.meta.update({"energy": float(self._energies[idx])})
+        frame.meta = {"energy": float(self._energies[idx])}
         return (frame,)

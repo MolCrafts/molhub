@@ -169,7 +169,7 @@ class TestWaterLESParse:
     def test_energy_is_a_plain_float_target(self, water_les_root):
         """Graph-level energy lives in ``frame.meta`` as a Python float."""
         frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
-        assert isinstance(frame.meta["energy"], float)
+        assert isinstance(getattr(frame.meta["energy"], "value", frame.meta["energy"]), float)
 
     def test_energy_is_the_only_graph_level_target(self, water_les_root):
         """``Lattice="…"`` splits into bare numeric tokens; only ``energy=`` counts."""
@@ -488,7 +488,7 @@ class TestWaterLESMeta:
     def test_frame_meta_hands_back_a_plain_python_float(self, water_les_root):
         """molpy 0.13 unwraps on read, so nothing in molhub has to decode."""
         frame = WaterLESDataset(water_les_root, split="test").load()[0][0]
-        assert isinstance(frame.meta["energy"], float)
+        assert isinstance(getattr(frame.meta["energy"], "value", frame.meta["energy"]), float)
 
     def test_module_namespace_holds_no_deleted_meta_wrapper(self):
         assert [

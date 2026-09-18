@@ -136,7 +136,7 @@ UNTABLED_THEMOL: list[str] = ["themol/hessian-relax", "themol/torsion-relax"]
 #: What ``DatasetInfo.record_type`` says for a dataset the table does not reach:
 #: the builder gets there through the declaration entry, so with no entry there
 #: is no class to read a parameterized record type off.
-UNDECLARED_RECORD_TYPE = "FrameCollection"
+UNDECLARED_RECORD_TYPE = "Sequence[Frame]"
 
 #: Two 3BPA structures' worth of extended XYZ, energy tag and forces included —
 #: the shape ``ThreeBPADataset`` parses. Distinct per-file structure counts (see

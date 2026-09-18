@@ -82,40 +82,24 @@ Reference:
 
 from __future__ import annotations
 
-import os
-import sys
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
-from importlib import import_module, invalidate_caches
 from pathlib import Path
+
+from molpy import Frame
 
 from molhub.conveyor import DEFAULT_BUDGET_BYTES
 from molhub.conveyor.encoder import THEMolUnitEncoder
 from molhub.conveyor.errors import UnsupportedRecordError
-from molhub.conveyor.prepare import (
-    BlockWriterFactory,
-    MolnexBlockWriter,
-    PreparedBlocks,
-    PrepareJob,
-)
+from molhub.conveyor.prepare import BlockWriterFactory, PreparedBlocks, PrepareJob
 from molhub.conveyor.splits import _SplitTable
 from molhub.coordinate import Coordinate
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.protocol import Sample
 from molhub.dataset.themol import THEMOL_UNITS
 from molhub.registry import Registry
 
 __all__ = ["SplitRouting", "BlockExport", "prepare"]
 
-# What the default writer needs before it can open anything, molnex first: it is
-# the half `MOLNEX_SRC` selects, so a checkout that is present and broken has to
-# be able to say so rather than being pre-empted by the absence of torch — which
-# `pip install 'molhub[prepare]'` fixes and the message names anyway.
-_WRITER_MODULES = ("molix.store.block", "torch")
-
-# The documented escape hatch for the half that is not on PyPI: a molnex source
-# checkout's `src/` directory.
-_MOLNEX_SRC = "MOLNEX_SRC"
 
 # The block format this layer writes, named in the refusal above so a reader
 # knows where the missing column routes have to be added. Mirrored from
@@ -147,7 +131,7 @@ class SplitRouting:
         table: The identity-keyed split assignment, provenance-verified.
     """
 
-    def __init__(self, records: Iterable[Sample], *, table: _SplitTable) -> None:
+    def __init__(self, records: Iterable[Sequence[Frame]], *, table: _SplitTable) -> None:
         self._records = records
         self._table = table
         self._assignments: dict[str, str] = {}
@@ -163,13 +147,13 @@ class SplitRouting:
         """
         return self._assignments
 
-    def __iter__(self) -> Iterator[Sample]:
+    def __iter__(self) -> Iterator[Sequence[Frame]]:
         """Yield every record, resolving its molecule's split first."""
         for record in self._records:
             self._resolve(record)
             yield record
 
-    def _resolve(self, record: Sample) -> None:
+    def _resolve(self, record: Sequence[Frame]) -> None:
         """Record the split of *record*'s molecule, when the table assigns one."""
         smiles = self._smiles(record)
         if smiles is None:
@@ -185,10 +169,10 @@ class SplitRouting:
             return
 
     @staticmethod
-    def _smiles(record: Sample) -> str | None:
+    def _smiles(record: Sequence[Frame]) -> str | None:
         """The mapped SMILES of *record*, or ``None`` when it carries none.
 
-        Every record is a FrameCollection; the first frame states the mapped
+        Every record is a ``Sequence[Frame]``; the first frame states the mapped
         SMILES. A record with none is left for the encoder to refuse, which is
         where that diagnosis already lives.
         """
@@ -196,7 +180,7 @@ class SplitRouting:
         if not frames:
             return None
         meta = getattr(frames[0], "meta", None) or {}
-        value = meta.get(_SMILES)
+        value = getattr(meta.get(_SMILES), "value", meta.get(_SMILES))
         return value if isinstance(value, str) and value else None
 
 
@@ -233,7 +217,7 @@ class BlockExport:
 
     def __init__(
         self,
-        records: Iterable[Sample],
+        records: Iterable[Sequence[Frame]],
         *,
         split_of: Mapping[str, str],
         task: str,
@@ -358,50 +342,28 @@ class BlockExport:
         back untouched, so asking twice costs one dictionary lookup.
 
         Args:
-            factory: The caller's own writer, or ``None`` to resolve molnex's.
+            factory: The caller's writer. There is no default.
 
         Returns:
             The factory blocks will be opened with.
 
         Raises:
-            ImportError: If *factory* is ``None`` and molnex or torch cannot be
-                imported. Anything else the checkout raises on import is left
-                alone: a broken checkout's own failure is the answer.
+            ValueError: *factory* is ``None``. ``prepare`` used to default to
+                molnex's ``molix.block/1`` writer; that format was deleted on
+                2026-09-17 (molnex spec ``data-layer-01-consolidation``) as
+                having no producer, no consumer and no instance on disk — no
+                block was ever written, here or there. Rather than default to a
+                target that cannot exist, this refuses and names the one thing
+                the caller can do.
         """
         if factory is not None:
             return factory
-        BlockExport._admit_molnex_source()
-        try:
-            for module in _WRITER_MODULES:
-                import_module(module)
-        except ImportError as error:
-            raise ImportError(
-                f"prepare writes molnex 'molix.block/1' blocks and this environment cannot "
-                f"import them ({error}). Install the publishable half with the 'prepare' "
-                "extra (pip install 'molhub[prepare]'), and molnex itself from a source "
-                "checkout — it is not on PyPI — or point MOLNEX_SRC at its 'src' directory. "
-                "Passing writer_factory= a writer of your own is the other way out; nothing "
-                "was written."
-            ) from error
-        return MolnexBlockWriter
-
-    @staticmethod
-    def _admit_molnex_source() -> None:
-        """Put ``$MOLNEX_SRC`` at the front of :data:`sys.path`, once.
-
-        The refusal above tells the reader to set this variable, so it has to do
-        something. The entry is **not** removed afterwards: the writer imports
-        molnex again when it opens its first block, and a path restored on the
-        way out would resolve the probe and fail the write. Inserting only when
-        it is absent keeps a repeated export from growing :data:`sys.path`, and
-        the import caches are invalidated because the checkout may have appeared
-        after this process started.
-        """
-        source = os.environ.get(_MOLNEX_SRC)
-        if not source or source in sys.path:
-            return
-        sys.path.insert(0, source)
-        invalidate_caches()
+        raise ValueError(
+            "prepare has no default writer. It used to open molnex's "
+            "'molix.block/1' blocks, and that format was deleted (molnex spec "
+            "data-layer-01-consolidation) because nothing produced or read one. "
+            "Pass writer_factory= a writer of your own; nothing was written."
+        )
 
 
 def prepare(

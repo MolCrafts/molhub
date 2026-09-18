@@ -141,17 +141,15 @@ def _frame(
     if bonds is not None:
         frame["bonds"] = Block({name: np.asarray(value) for name, value in bonds.items()})
 
-    frame.meta.update(
-        {
-            "molecule_id": molecule_id,
-            "source_record_id": molecule_id,
-            "mapped_nonisomeric_smiles": smiles,
-            "mapped_isomeric_smiles": smiles,
-            "source_id": "dataset:themol/hessian@1#role=shard-000",
-            "total_charge": 0,
-            **dict(targets or {}),
-        }
-    )
+    frame.meta = {
+        "molecule_id": molecule_id,
+        "source_record_id": molecule_id,
+        "mapped_nonisomeric_smiles": smiles,
+        "mapped_isomeric_smiles": smiles,
+        "source_id": "dataset:themol/hessian@1#role=shard-000",
+        "total_charge": 0,
+        **dict(targets or {}),
+    }
     return frame
 
 

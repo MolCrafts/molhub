@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 from molpy import Block, Frame
 
+from molhub.coordinate import Coordinate
+from molhub.dataset.definition import DatasetManifest
 from molhub.dataset.protocol import (
     Dataset,
     InMemoryDataset,
@@ -141,6 +143,27 @@ class TestSubsetDataset:
         sub = SubsetDataset(base, [0])
         with pytest.raises(IndexError):
             sub[1]
+
+    def test_manifest_reads_through_to_the_parent(self):
+        """A subset publishes the parent's data, so it declares the parent's units.
+
+        Read through rather than copied, for the same reason ``source_id`` is
+        derived: a consumer that cannot ask a dataset what its numbers mean ends
+        up restating the unit at the call site, and a restated unit drifts.
+        """
+        base = InMemoryDataset([_make_frame([1])], name="base")
+        declared = DatasetManifest(
+            coordinate=Coordinate(kind="dataset", namespace="t", name="d", version="1"),
+            units={"energy": "kcal/mol"},
+        )
+        base.manifest = declared
+        assert SubsetDataset(base, [0]).manifest is declared
+
+    def test_manifest_refuses_when_the_parent_declares_nothing(self):
+        """A hand-built dataset of Frames declares nothing; there is none to invent."""
+        base = InMemoryDataset([_make_frame([1])], name="base")
+        with pytest.raises(AttributeError):
+            SubsetDataset(base, [0]).manifest
 
 
 # ---------------------------------------------------------------------------
