@@ -32,6 +32,7 @@ from typing import Any, Callable, overload
 import numpy as np
 from molpy import Block, Element, Frame
 
+from molhub.cache import CountSidecar
 from molhub.dataset.definition import DatasetManifest, dataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import Dataset, TargetSchema
@@ -167,8 +168,7 @@ class THEMolShardDataset(Dataset, StatisticMixin):
         self._reader = reader
         self._pid: int | None = None
         self._handle: Any | None = None
-        with _open_h5(self.path) as handle:
-            self._keys = tuple(handle.keys())
+        self._keys = self._index_keys()
 
     def __len__(self) -> int:
         return len(self._keys)
@@ -176,7 +176,7 @@ class THEMolShardDataset(Dataset, StatisticMixin):
     def keys(self) -> tuple[str, ...]:
         """The shard's HDF5 group keys, in the order the file lists them.
 
-        Indexed once at construction, so this costs no read. It is public
+        Read once per shard and cached, so this costs no read. It is public
         because a record's key is the only thing that joins a shard to a split
         table keyed by record uuid, and a caller that had to reach for
         ``_keys`` would be depending on the same fact less honestly.
@@ -185,6 +185,83 @@ class THEMolShardDataset(Dataset, StatisticMixin):
             One key per record, positionally aligned with ``self[i]``.
         """
         return self._keys
+
+    def _index_keys(self) -> tuple[str, ...]:
+        """The shard's group keys, from a sidecar when one exists.
+
+        Listing them is not free on a shard with tens of thousands of root
+        groups on a parallel filesystem: the torsion-scan shard's 83 951 keys
+        took 194 s on a cold page cache (measured 2026-09-20), and every
+        process that constructs this dataset — the trainer, each calibration
+        subprocess — paid it again. The keys are a property of an immutable
+        shard, so they are cached in a :class:`~molhub.cache.CountSidecar`
+        keyed by the file's own size and mtime.
+
+        Returns:
+            One key per record, in file order.
+        """
+        sidecar = CountSidecar([self.path], "themol.record_keys")
+        cached = sidecar.load(n_rows=None)
+        if cached is not None:
+            return tuple(str(key) for key in cached)
+        with _open_h5(self.path) as handle:
+            keys = tuple(handle.keys())
+        sidecar.save(np.asarray(keys, dtype=np.str_))
+        return keys
+
+    def molecule_index(self) -> np.ndarray:
+        """Per-row molecule identity as a group index, ``(N,)`` int64.
+
+        One row of a THEMol shard is one *scan*, and a molecule contributes as
+        many scans as it has scanned dihedrals — so a split that shuffles rows
+        puts the same molecule on both sides. This is the vector that prevents
+        that: rows sharing a value are the same molecule, and a caller holds
+        out whole groups.
+
+        Identity is the record's ``mapped_nonisomeric_smiles``, which makes
+        this **coarser** than the ``molecule_id`` a decoded frame carries —
+        that one is a uuid5 of the *isomeric* SMILES, so two stereoisomers get
+        two ids. Coarser is the direction a split wants: stereoisomers share a
+        topology and therefore share every Class-I parameter, so training on
+        one while validating on the other is leakage by another name. This can
+        only merge groups a split must not separate, never split one it must
+        not.
+
+        It is also the cheap way to ask. Reading ``molecule_id`` means decoding
+        a whole record — for a torsion scan, 24 frames and a SMILES parse each;
+        this reads one small string per group and builds nothing. The result is
+        cached in a :class:`~molhub.cache.CountSidecar`, because the first pass
+        is bounded by reading the shard off a parallel filesystem once (the
+        83 951-scan torsion shard: 245 s warm, and the group keys alone took
+        194 s on a cold page cache).
+
+        Returns:
+            Group index per row, positionally aligned with ``self[i]``; values
+            are ``0..n_molecules-1`` in first-appearance order.
+
+        Raises:
+            ValueError: A record carries no ``mapped_nonisomeric_smiles``, so
+                its molecule cannot be named and no honest grouping exists.
+        """
+        sidecar = CountSidecar([self.path], "themol.molecule_group")
+        cached = sidecar.load(n_rows=len(self))
+        if cached is not None:
+            return np.asarray(cached, dtype=np.int64)
+
+        groups = np.empty(len(self), dtype=np.int64)
+        seen: dict[str, int] = {}
+        handle = self._h5()
+        for row, key in enumerate(self._keys):
+            group = handle[key]
+            if "mapped_nonisomeric_smiles" not in group:
+                raise ValueError(
+                    f"THEMol record {key} carries no mapped_nonisomeric_smiles, so "
+                    f"its molecule cannot be identified for a group-aware split."
+                )
+            smiles = _read_string(group["mapped_nonisomeric_smiles"])
+            groups[row] = seen.setdefault(smiles, len(seen))
+        sidecar.save(groups)
+        return groups
 
     @overload
     def __getitem__(self, index: int) -> Sequence[Frame]: ...

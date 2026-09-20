@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pickle
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import h5py
@@ -89,6 +89,23 @@ def _write_two_record_hessian(path: Path, keys: Sequence[str]) -> None:
         for key in keys:
             group = handle.create_group(key)
             _identity(group, WATER, [1, 8, 1])
+            group.create_dataset("coords", data=_water_coords())
+            group.create_dataset("hessian", data=np.eye(9, dtype=np.float64))
+
+
+def _write_molecule_shard(path: Path, smiles_per_key: Mapping[str, str | None]) -> None:
+    """Write one equilibrium record per key, each naming its own molecule.
+
+    ``None`` writes a record with **no** ``mapped_nonisomeric_smiles`` at all,
+    which is the only way to reach ``molecule_index``'s refusal.
+    """
+    with h5py.File(path, "w") as handle:
+        for key, smiles in smiles_per_key.items():
+            group = handle.create_group(key)
+            if smiles is None:
+                group.create_dataset("atomic_numbers", data=np.asarray([1, 8, 1], dtype=np.int32))
+            else:
+                _identity(group, smiles, [1, 8, 1])
             group.create_dataset("coords", data=_water_coords())
             group.create_dataset("hessian", data=np.eye(9, dtype=np.float64))
 
@@ -585,6 +602,51 @@ class TestTHEMolShardDataset:
         read = [shard[index][0].meta["source_record_id"] for index in range(len(shard))]
         assert read == ["eq-record-0", "eq-record-1"]
         assert read == list(shard.keys())
+
+    def test_keys_are_read_from_the_sidecar_on_a_second_construction(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The second construction opens no HDF5 file.
+
+        Listing the group keys is what made constructing this dataset
+        expensive — 194 s for the torsion-scan shard's 83 951 keys on a cold
+        page cache — and every process paid it again. Denying the second
+        construction any HDF5 access is the only way to assert the cache is
+        what answered.
+        """
+        shard = self._shard(tmp_path)
+        assert THEMolHessian(shard).load().keys() == self.KEYS
+
+        def _refuse(_path: Path) -> object:
+            raise AssertionError("the second construction must not open the shard")
+
+        monkeypatch.setattr("molhub.dataset.themol._open_h5", _refuse)
+        assert THEMolHessian(shard).load().keys() == self.KEYS
+
+    def test_molecule_index_groups_rows_by_molecule(self, tmp_path: Path) -> None:
+        """Rows sharing a molecule share a group, in first-appearance order.
+
+        One row is one scan and a molecule has as many scans as scanned
+        dihedrals, so a row-wise split puts the same molecule on both sides.
+        The A/B/A order matters: a vector that merely enumerated rows, or
+        sorted the molecules, would pass on A/B and fail here.
+        """
+        path = tmp_path / "shard-000.h5"
+        _write_molecule_shard(path, {"r0": WATER, "r1": BUTANE, "r2": WATER})
+        index = THEMolHessian(path).load().molecule_index()
+        assert index.tolist() == [0, 1, 0]
+        assert index.dtype == np.int64
+
+    def test_molecule_index_refuses_a_record_that_names_no_molecule(self, tmp_path: Path) -> None:
+        """No SMILES, no grouping — and no quiet fallback to the row number.
+
+        A per-row fallback would look like a valid index and would leak every
+        unnamed molecule across the split.
+        """
+        path = tmp_path / "shard-000.h5"
+        _write_molecule_shard(path, {"r0": WATER, "r1": None})
+        with pytest.raises(ValueError, match="mapped_nonisomeric_smiles"):
+            THEMolHessian(path).load().molecule_index()
 
 
 class TestTHEMolHessian:

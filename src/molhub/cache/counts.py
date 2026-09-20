@@ -94,7 +94,7 @@ class CountSidecar:
         """Where this vector is stored."""
         return self.root / f"{self.key}.npy"
 
-    def load(self, *, n_rows: int) -> np.ndarray | None:
+    def load(self, *, n_rows: int | None) -> np.ndarray | None:
         """The cached vector, or ``None`` when there is no usable one.
 
         A file whose length disagrees with *n_rows* is treated as absent
@@ -102,8 +102,15 @@ class CountSidecar:
         the one that was measured, and a silently short vector would mis-size
         every batch built from it.
 
+        ``n_rows=None`` skips that check, for the one vector that cannot be
+        checked against anything: a row *index* — the record keys of a shard —
+        does not match a known row count, it **is** the row count. Its
+        staleness is already covered by the key, which hashes the shard's size
+        and mtime.
+
         Args:
-            n_rows: Number of rows the caller expects.
+            n_rows: Number of rows the caller expects, or ``None`` when the
+                vector's own length is the answer.
 
         Returns:
             The vector, or ``None`` on a miss, a length mismatch, or an
@@ -116,7 +123,9 @@ class CountSidecar:
             counts = np.load(path)
         except (OSError, ValueError):
             return None
-        if counts.ndim != 1 or int(counts.shape[0]) != int(n_rows):
+        if counts.ndim != 1:
+            return None
+        if n_rows is not None and int(counts.shape[0]) != int(n_rows):
             return None
         return counts
 
