@@ -209,6 +209,56 @@ class THEMolShardDataset(Dataset, StatisticMixin):
         sidecar.save(np.asarray(keys, dtype=np.str_))
         return keys
 
+    def element_mask(self) -> np.ndarray:
+        """Elements each row carries, as a bitmask, ``(N,)`` int64.
+
+        Bit *z* is set when the row contains element *z*. One integer per row, so
+        a caller can ask "which elements does this subset of rows use?" with a
+        bitwise OR instead of decoding records.
+
+        This exists because an element that a caller's *sample* never saw is the
+        quietest way to corrupt a label. Fitting an atomic-reference table
+        ``eps[Z]`` on a subsample leaves ``eps = 0`` for every element outside it,
+        and a molecule holding one of those keeps its whole absolute-energy
+        offset — order 1e6 kcal/mol — inside what is supposed to be a residual.
+        Measured 2026-09-20: a table fitted on 80 THEMol records missed iodine,
+        which the held-out molecules carry, and the validation mean went to
+        217 162 kcal/mol against a median of 35.6. A coverage check needs the
+        element sets, and this is the cheap way to have them.
+
+        Read straight from each group's ``atomic_numbers`` — no frame is built.
+        Cached in a :class:`~molhub.cache.CountSidecar`, like the other two
+        per-row vectors.
+
+        Returns:
+            Bitmask per row, positionally aligned with ``self[i]``.
+
+        Raises:
+            ValueError: A record carries an element with ``Z >= 64``, which does
+                not fit one integer. THEMol tops out at iodine (53); a shard that
+                does not is refused rather than silently truncated.
+        """
+        sidecar = CountSidecar([self.path], "themol.element_mask")
+        cached = sidecar.load(n_rows=len(self))
+        if cached is not None:
+            return np.asarray(cached, dtype=np.int64)
+
+        masks = np.zeros(len(self), dtype=np.int64)
+        handle = self._h5()
+        for row, key in enumerate(self._keys):
+            numbers = np.asarray(handle[key]["atomic_numbers"], dtype=np.int64).reshape(-1)
+            if numbers.size and int(numbers.max()) >= 64:
+                raise ValueError(
+                    f"THEMol record {key} carries element Z={int(numbers.max())}; "
+                    f"element_mask packs Z < 64 into one int64 and will not truncate."
+                )
+            mask = 0
+            for z in np.unique(numbers):
+                mask |= 1 << int(z)
+            masks[row] = mask
+        sidecar.save(masks)
+        return masks
+
     def molecule_index(self) -> np.ndarray:
         """Per-row molecule identity as a group index, ``(N,)`` int64.
 

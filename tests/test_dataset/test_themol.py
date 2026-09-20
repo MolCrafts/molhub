@@ -623,6 +623,36 @@ class TestTHEMolShardDataset:
         monkeypatch.setattr("molhub.dataset.themol._open_h5", _refuse)
         assert THEMolHessian(shard).load().keys() == self.KEYS
 
+    def test_element_mask_sets_one_bit_per_element_the_row_carries(self, tmp_path: Path) -> None:
+        """A row's elements, as a bitmask — the cheap input to a coverage check.
+
+        Water is H and O, so bits 1 and 8; butane is H and C, so bits 1 and 6.
+        Bit-per-element rather than a list because the only question asked of it
+        is "which elements does this *set* of rows use?", which is one OR.
+        """
+        path = tmp_path / "shard-000.h5"
+        _write_molecule_shard(path, {"water": WATER, "butane": BUTANE})
+        masks = THEMolHessian(path).load().element_mask()
+        assert masks.dtype == np.int64
+        assert masks.tolist() == [(1 << 1) | (1 << 8), (1 << 1) | (1 << 8)]
+
+    def test_element_mask_refuses_an_element_too_wide_for_one_integer(self, tmp_path: Path) -> None:
+        """Z >= 64 does not fit the bitmask, so it raises instead of truncating.
+
+        A truncated mask reads as "this row has no such element", which is the
+        exact false negative a coverage check exists to prevent.
+        """
+        path = tmp_path / "shard-000.h5"
+        with h5py.File(path, "w") as handle:
+            group = handle.create_group("heavy")
+            _identity(group, WATER, [1, 8, 1])
+            group.create_dataset("coords", data=_water_coords())
+            group.create_dataset("hessian", data=np.eye(9, dtype=np.float64))
+            del group["atomic_numbers"]
+            group.create_dataset("atomic_numbers", data=np.asarray([92], dtype=np.int32))
+        with pytest.raises(ValueError, match="Z=92"):
+            THEMolHessian(path).load().element_mask()
+
     def test_molecule_index_groups_rows_by_molecule(self, tmp_path: Path) -> None:
         """Rows sharing a molecule share a group, in first-appearance order.
 
