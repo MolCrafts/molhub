@@ -6,7 +6,7 @@ description: >
 runs:
   using: composite
   steps:
-    - uses: ./.github/actions/setup-partners
+    - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
       with:
         repository: MolCrafts/molhub-registry
         path: .registry-source

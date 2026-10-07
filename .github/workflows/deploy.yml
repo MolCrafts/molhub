@@ -15,10 +15,9 @@ on:
 
 permissions:
   contents: read
-  deployments: write
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -27,11 +26,14 @@ jobs:
     if: github.repository_owner == 'MolCrafts' && vars.MOLHUB_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      deployments: write
     env:
       API_URL: ${{ vars.MOLHUB_API_URL }}
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-node
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
       - name: Require a provisioned D1 database id
         run: |
           if grep -q '00000000-0000-0000-0000-000000000000' apps/api/wrangler.jsonc; then
