@@ -1,20 +1,15 @@
-name: Deploy Submission API
+name: deploy
 
+# Upstream only: a push to master deploys the submission API Worker (D1
+# migrations first), then smokes /health. Skipped until MOLHUB_API_URL is set
+# and wrangler.jsonc names a provisioned D1 database.
 on:
   push:
-    branches: [main, master]
-    paths:
-      - "apps/api/**"
-      - "packages/typescript/**"
-      - "spec/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/api-deploy.yml"
+    branches: [master, main]
   workflow_dispatch:
     inputs:
       write_smoke:
         description: "Create one persistent staging smoke submission"
-        required: false
         type: boolean
         default: false
 
@@ -23,57 +18,43 @@ permissions:
   deployments: write
 
 concurrency:
-  group: molhub-api-production
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  api:
+    name: deploy / api
+    if: github.repository_owner == 'MolCrafts' && vars.MOLHUB_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      API_URL: ${{ vars.MOLHUB_API_URL }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
-      - name: Test and dry-run the Worker
-        run: |
-          npm run lint --workspace @molcrafts/molhub-api
-          npm run typecheck --workspace @molcrafts/molhub-api
-          npm run test --workspace @molcrafts/molhub-api
-          npm run deploy:dry --workspace @molcrafts/molhub-api
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node
       - name: Require a provisioned D1 database id
         run: |
           if grep -q '00000000-0000-0000-0000-000000000000' apps/api/wrangler.jsonc; then
             echo "::error::Provision D1 and replace the placeholder database_id before deployment."
             exit 1
           fi
-      - name: Apply remote D1 migrations
-        uses: cloudflare/wrangler-action@v4
+      - run: npm run deploy:dry --workspace @molcrafts/molhub-api
+      - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/api
           command: d1 migrations apply molhub-submissions --remote
-      - name: Deploy the Worker
-        uses: cloudflare/wrangler-action@v4
+      - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          gitHubToken: ${{ github.token }}
           workingDirectory: apps/api
           command: deploy
-      - name: Smoke health
-        env:
-          API_URL: ${{ vars.MOLHUB_API_URL }}
-        run: |
-          test -n "$API_URL"
-          curl --fail-with-body --retry 4 --retry-all-errors "$API_URL/health" | grep '"status":"ok"'
+      - run: curl --fail-with-body --retry 4 --retry-all-errors "$API_URL/health" | grep '"status":"ok"'
       - name: Smoke create and status in the configured staging API
-        if: inputs.write_smoke == true
-        env:
-          API_URL: ${{ vars.MOLHUB_API_URL }}
+        if: inputs.write_smoke
         run: |
           NAME="deployment-smoke-${GITHUB_RUN_ID}"
           RESPONSE=$(curl --fail-with-body --request POST "$API_URL/v1/submissions" \

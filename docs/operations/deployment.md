@@ -27,3 +27,25 @@ Worker tests and `deploy:dry` before deployment. Smoke `/health`, create, and st
 Rollback the Worker with Cloudflare deployment rollback and redeploy the previous immutable Web build.
 Rotate a secret by writing the replacement, updating the matching GitHub webhook/client, testing, then
 revoking the old credential. Never put secrets in repository variables or `.dev.vars` commits.
+
+## CI and release
+
+| workflow | feature branch (fork or upstream) | dev / master, or a PR into one | upstream only |
+|---|---|---|---|
+| `lint.yml` | `lint / python` (ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
+| `test.yml` | `test / python`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / browser` (Playwright Inspector), `test / package` | — |
+| `docs.yml` | `docs / build` (`npm run docs:check`) | same | master: `docs / deploy` (docs site), `docs / web` (MolHub Web; also on molhub-registry's `registry-published`) |
+| `deploy.yml` | — | — | master: `deploy / api` (D1 migrations, Worker, `/health`) |
+| `nightly.yml` | — | — | weekly: `nightly / molpy` (newest MolPy), `nightly / coverage` |
+| `release.yml` | — | — | `v*` tag: `release / build`, `release / publish` (PyPI, npm); `workflow_dispatch` is a dry run anywhere |
+
+A pull request from a branch of the same repository skips the jobs its push
+already ran. Every job that needs the registry validates and builds
+`molhub-registry` at `dev` (or its branch of the same name) with this
+checkout's tools. Each deploy is skipped until its repository variable
+(`CLOUDFLARE_DOCS_PROJECT`, `CLOUDFLARE_PAGES_PROJECT`, `MOLHUB_API_URL`) is
+set; the Cloudflare credentials are the `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` secrets.
+
+To release, bump the Python and npm versions, merge to master, and push a
+`v*` tag; write the GitHub Release from `.github/RELEASE_TEMPLATE.md`.

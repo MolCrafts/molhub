@@ -1,89 +1,93 @@
-name: Docs
+name: docs
 
+# docs / build (strict Zensical + TypeDoc, every Python and TypeScript snippet
+# executed) runs in every context. Upstream only, on master: docs / deploy
+# publishes it, and docs / web publishes MolHub Web; molhub-registry's deploy
+# also asks for docs / web after it publishes a new snapshot. Each deploy is
+# skipped until its Cloudflare project variable exists.
 on:
-  pull_request:
-    paths:
-      - "docs/**"
-      - "src/**"
-      - "scripts/check-docs-*"
-      - "tests/test_docs_examples.py"
-      - "zensical.toml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "package.json"
-      - "package-lock.json"
-      - "typedoc.json"
-      - "packages/typescript/src/**"
-      - ".github/workflows/docs.yml"
   push:
-    branches: [main, master]
-    paths:
-      - "docs/**"
-      - "src/**"
-      - "scripts/check-docs-*"
-      - "tests/test_docs_examples.py"
-      - "zensical.toml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "package.json"
-      - "package-lock.json"
-      - "typedoc.json"
-      - "packages/typescript/src/**"
-      - ".github/workflows/docs.yml"
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
   workflow_dispatch:
+  repository_dispatch:
+    types: [registry-published]
 
 permissions:
   contents: read
-  deployments: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) }}
 
 jobs:
   build:
+    name: docs / build
+    if: github.event_name != 'repository_dispatch' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: npm ci
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: uv sync --extra dev
+      - uses: ./.github/actions/setup-node
       - run: npm run docs:check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: molhub-docs-${{ github.sha }}
           path: site/
           if-no-files-found: error
+          retention-days: 14
 
   deploy:
-    if: github.event_name != 'pull_request'
+    name: docs / deploy
     needs: build
+    if: github.repository_owner == 'MolCrafts' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_DOCS_PROJECT != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: docs-deploy
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: molhub-docs-${{ github.sha }}
           path: site
-      - name: Require the Docs Pages project
-        env:
-          PROJECT: ${{ vars.CLOUDFLARE_DOCS_PROJECT }}
-        run: |
-          if [ -z "$PROJECT" ]; then
-            echo "::error::CLOUDFLARE_DOCS_PROJECT is unset."
-            exit 1
-          fi
-      - name: Publish immutable docs build
-        uses: cloudflare/wrangler-action@v4
+      - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: >-
-            pages deploy site
-            --project-name=${{ vars.CLOUDFLARE_DOCS_PROJECT }}
-            --branch=${{ github.ref_name }}
+          gitHubToken: ${{ github.token }}
+          command: pages deploy site --project-name=${{ vars.CLOUDFLARE_DOCS_PROJECT }} --branch=${{ github.ref_name }}
+
+  web:
+    name: docs / web
+    if: github.repository_owner == 'MolCrafts' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.MOLHUB_API_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: web-deploy
+      cancel-in-progress: false
+    env:
+      PUBLIC_MOLHUB_API_URL: ${{ vars.MOLHUB_API_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-registry
+      - run: npm run test --workspace @molcrafts/molhub-web
+      - run: npm run typecheck --workspace @molcrafts/molhub-web
+      - run: npm run build --workspace @molcrafts/molhub-web
+      - run: test -s apps/web/dist/client/index.html
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ github.token }}
+          command: pages deploy apps/web/dist/client --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=${{ github.ref_name }}

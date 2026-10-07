@@ -26,11 +26,13 @@ class TestBlobStoreRoot:
     def test_defaults_to_user_cache(self, tmp_path, monkeypatch):
         monkeypatch.delenv("MOLHUB_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         assert BlobStore().root == tmp_path / ".cache" / "molhub"
 
     def test_root_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_HOME", "~/molhub-cache")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         assert BlobStore().root == tmp_path / "molhub-cache"
 
 
@@ -41,7 +43,7 @@ class TestBlobStoreLayout:
 
     def test_key_becomes_a_directory_path(self, store, tmp_path):
         relative = store.path_for(KEY).relative_to(tmp_path)
-        assert str(relative) == "files/dataset_molcrafts/qm9@v2/main"
+        assert relative.as_posix() == "files/dataset_molcrafts/qm9@v2/main"
 
     def test_layout_is_exact_not_prefixed(self, store, tmp_path):
         """The TS client mirrors this string; only equality is acceptable."""

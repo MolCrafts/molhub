@@ -209,7 +209,7 @@ class TestManifestRejection:
 
     def test_error_carries_the_file_path(self, tmp_path):
         path = tmp_path / "broken.yaml"
-        path.write_text("schema_version: 1\n")
+        path.write_text("schema_version: 1\n", encoding="utf-8")
         with pytest.raises(InvalidManifest, match="broken.yaml"):
             Manifest.from_path(path)
 

@@ -8,7 +8,7 @@
 <p><strong>Unified access to molecular benchmark datasets, with one-click upload to public data repositories.</strong></p>
 
 <p>
-  <a href="https://github.com/MolCrafts/molhub/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molhub/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
+  <a href="https://github.com/MolCrafts/molhub/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molhub/test.yml?style=flat-square&logo=githubactions&logoColor=white&label=test" alt="test"></a>
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-18432B?style=flat-square" alt="License">
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square" alt="Ruff"></a>
 </p>

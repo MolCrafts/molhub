@@ -141,10 +141,11 @@ class TestExtensibility:
         added.parent.mkdir(parents=True)
         added.write_text(
             (registry_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml")
-            .read_text()
+            .read_text(encoding="utf-8")
             .replace("namespace: molcrafts", "namespace: someone-else")
             .replace("name: qm9", "name: mydata")
-            .replace("version: v2", "version: 1")
+            .replace("version: v2", "version: 1"),
+            encoding="utf-8",
         )
 
         fake = FakeSource(bodies=bodies)

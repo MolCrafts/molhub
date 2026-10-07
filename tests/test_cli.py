@@ -147,7 +147,10 @@ class TestCacheVerify:
         # published. Stripping every digest in the file would leave `exclude`
         # with no cross-check at all, and the manifest would not load.
         manifest = registry_dir / "dataset" / "molcrafts" / "qm9" / "v2.yaml"
-        manifest.write_text(manifest.read_text().replace(f'    digest: "md5:{MAIN_MD5}"\n', ""))
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(f'    digest: "md5:{MAIN_MD5}"\n', ""),
+            encoding="utf-8",
+        )
         self._cache(tmp_path, b"anything at all")
         result = runner.invoke(
             app, ["cache", "verify", "--home", str(tmp_path), "--registry", str(registry_dir)]
@@ -160,7 +163,7 @@ class TestBrokenRegistry:
     def test_a_malformed_manifest_is_a_clean_error(self, tmp_path):
         bad = tmp_path / "dataset" / "molcrafts" / "x" / "1.yaml"
         bad.parent.mkdir(parents=True)
-        bad.write_text("schema_version: 1\n")
+        bad.write_text("schema_version: 1\n", encoding="utf-8")
         result = runner.invoke(app, ["search", "--registry", str(tmp_path)])
         assert result.exit_code != 0
         assert "Traceback" not in result.stdout

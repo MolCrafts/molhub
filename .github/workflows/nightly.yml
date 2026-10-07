@@ -1,0 +1,39 @@
+name: nightly
+
+# Upstream only, weekly: the test suite against the newest MolPy (pre-releases
+# included) without moving the supported bound, and coverage to Codecov.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  molpy:
+    name: nightly / molpy
+    if: github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: |
+          uv sync --extra dev
+          uv pip install --upgrade --prerelease=allow molcrafts-molpy
+          uv pip freeze | grep '^molcrafts-molpy=='
+      - run: uv run --no-sync ty check src/
+      - run: uv run --no-sync pytest -q
+
+  coverage:
+    name: nightly / coverage
+    if: github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: uv sync --extra dev
+      - run: uv run pytest -q --cov=src/molhub --cov-report=xml
+      - uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.xml

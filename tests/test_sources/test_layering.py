@@ -21,7 +21,7 @@ _MODULE_FILES = sorted(_PACKAGE_ROOT.rglob("*.py"))
 
 def _imported_modules(path: Path) -> set[str]:
     """Every module name imported by *path*, flattened."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -52,7 +52,7 @@ class TestSelfHostedSourceIsNotSpecialCased:
 
     @pytest.mark.parametrize("module", ["fetcher.py", "source.py"])
     def test_no_scheme_literal_comparison(self, module):
-        tree = ast.parse((_PACKAGE_ROOT / module).read_text())
+        tree = ast.parse((_PACKAGE_ROOT / module).read_text(encoding="utf-8"))
         literals: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Compare):
@@ -71,7 +71,7 @@ class TestSelfHostedSourceIsNotSpecialCased:
 
     def test_fetcher_holds_no_driver_class_reference(self):
         """Selection goes through Drivers; the fetcher names no concrete driver."""
-        source = (_PACKAGE_ROOT / "fetcher.py").read_text()
+        source = (_PACKAGE_ROOT / "fetcher.py").read_text(encoding="utf-8")
         for concrete in ("MolHubSource", "ZenodoSource", "FigshareSource", "HttpsSource"):
             assert concrete not in source
 

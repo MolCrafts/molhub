@@ -123,12 +123,12 @@ class TestLoadExclusionList:
         p = tmp_path / "exclude.txt"
         header = "\n".join(f"header {i}" for i in range(9))
         body = "\n".join(f"{i} 0.0 0.0" for i in (21725, 87037, 59827))
-        p.write_text(f"{header}\n{body}\ntrailer\n")
+        p.write_text(f"{header}\n{body}\ntrailer\n", encoding="utf-8")
         assert _load_exclusion_list(p) == {21725, 87037, 59827}
 
     def test_empty_file_yields_empty_set(self, tmp_path):
         p = tmp_path / "exclude.txt"
-        p.write_text("")
+        p.write_text("", encoding="utf-8")
         assert _load_exclusion_list(p) == set()
 
 
@@ -230,7 +230,7 @@ def _build_qm9_root(root: Path, indices: list[int], excluded: list[int] | None =
 
     header = "\n".join(f"header {n}" for n in range(9))
     body = "\n".join(f"{n} 0.0" for n in (excluded or []))
-    (root / "qm9_exclude.txt").write_text(f"{header}\n{body}\ntrailer\n")
+    (root / "qm9_exclude.txt").write_text(f"{header}\n{body}\ntrailer\n", encoding="utf-8")
 
 
 class TestQM9EndToEnd:
