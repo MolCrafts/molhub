@@ -77,6 +77,7 @@ class TestDownloadCache:
 
     def test_defaults_to_the_user_cache_directory(self, tmp_path, monkeypatch, no_cache_env):
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         assert DownloadCache().root == tmp_path / ".cache" / "molhub"
 
     def test_root_is_the_blob_store_root(self, tmp_path, monkeypatch):
@@ -88,6 +89,7 @@ class TestDownloadCache:
         monkeypatch.delenv("MOLHUB_HOME", raising=False)
         monkeypatch.setenv("MOLHUB_CACHE_DIR", "~/molhub")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         with pytest.warns(DeprecationWarning):
             assert DownloadCache().root == tmp_path / "molhub"
 

@@ -51,7 +51,7 @@ class TestFigshareUploader:
         from molhub.uploader import FigshareUploader
 
         test_file = tmp_path / "test.txt"
-        test_file.write_text("hello figshare")
+        test_file.write_text("hello figshare", encoding="utf-8")
 
         u = FigshareUploader(token="test")
 
@@ -95,7 +95,7 @@ class TestFigshareUploader:
         from molhub.uploader import FigshareUploader
 
         test_file = tmp_path / "dataset.txt"
-        test_file.write_text("molecular data")
+        test_file.write_text("molecular data", encoding="utf-8")
 
         u = FigshareUploader(token="test")
 

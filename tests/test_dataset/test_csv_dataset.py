@@ -100,7 +100,7 @@ class TestCSVDataset:
 
     def test_empty_csv(self, tmp_path):
         p = tmp_path / "empty.csv"
-        p.write_text("")
+        p.write_text("", encoding="utf-8")
         ds = CSVDataset(str(p))
         assert len(ds) == 0
         assert ds.headers == []
@@ -156,7 +156,7 @@ class TestRemoteCsv:
     def test_download_classmethod_skips_existing_file(self, tmp_path, monkeypatch):
         cached = tmp_path / "urls" / "keep.csv"
         cached.parent.mkdir(parents=True, exist_ok=True)
-        cached.write_text("already,here\n")
+        cached.write_text("already,here\n", encoding="utf-8")
 
         def _boom(*a, **k):
             raise AssertionError("should not re-download a cached file")
@@ -164,4 +164,4 @@ class TestRemoteCsv:
         monkeypatch.setattr(urllib.request, "urlopen", _boom)
         got = CSVDataset.download("https://example.invalid/keep.csv", cache_dir=tmp_path)
         assert got == cached
-        assert got.read_text() == "already,here\n"
+        assert got.read_text(encoding="utf-8") == "already,here\n"

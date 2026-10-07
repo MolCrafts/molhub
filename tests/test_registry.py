@@ -27,6 +27,7 @@ class TestRegistrySourceResolution:
     def test_tilde_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_REGISTRY", "~/idx")
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         assert RegistrySource.resolve().root == tmp_path / "idx"
 
     def test_path_for_follows_the_layout(self, tmp_path):
@@ -51,7 +52,8 @@ class TestRegistryLoading:
         """Skipping a bad entry would silently hide a dataset; worse than failing."""
         (registry_dir / "dataset" / "molcrafts" / "bad" / "v1.yaml").parent.mkdir(parents=True)
         (registry_dir / "dataset" / "molcrafts" / "bad" / "v1.yaml").write_text(
-            "schema_version: 1\n"
+            "schema_version: 1\n",
+            encoding="utf-8",
         )
         with pytest.raises(InvalidManifest):
             Registry.load(registry_dir)
@@ -107,7 +109,7 @@ class TestRegistrySearch:
         ]:
             path = root / kind / "molcrafts" / name / f"{version}.yaml"
             path.parent.mkdir(parents=True)
-            path.write_text(manifest_yaml(kind=kind, name=name, version=version))
+            path.write_text(manifest_yaml(kind=kind, name=name, version=version), encoding="utf-8")
         return Registry.load(root)
 
     def test_no_filter_returns_everything(self, registry):

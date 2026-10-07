@@ -50,7 +50,7 @@ class TestSchemaIsWellFormed:
 
     def test_it_is_self_contained(self, schema):
         """No remote $refs — a consumer must be able to use it offline."""
-        text = SCHEMA_PATH.read_text()
+        text = SCHEMA_PATH.read_text(encoding="utf-8")
         assert '$ref: "http' not in text
 
 
