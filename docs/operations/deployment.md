@@ -30,17 +30,23 @@ revoking the old credential. Never put secrets in repository variables or `.dev.
 
 ## CI and release
 
-| workflow | feature branch (fork or upstream) | dev / master, or a PR into one | upstream only |
+`test / tier` picks the tier. The fast tier runs on a feature-branch push to
+MolCrafts; the full tier on every push to a fork (proven before its pull
+request), on `dev`, `master` and `main` on MolCrafts, on pull requests, tags
+and dispatches.
+
+| workflow | fast tier | full tier | upstream only |
 |---|---|---|---|
 | `lint.yml` | `lint / python` (ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
-| `test.yml` | `test / python`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / browser` (Playwright Inspector), `test / package` | — |
+| `test.yml` | `test / tier`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / browser` (Playwright Inspector), `test / package` | — |
 | `docs.yml` | `docs / build` (`npm run docs:check`) | same | master: `docs / deploy` (docs site), `docs / web` (MolHub Web; also on molhub-registry's `registry-published`) |
 | `deploy.yml` | — | — | master: `deploy / api` (D1 migrations, Worker, `/health`) |
 | `nightly.yml` | — | — | weekly: `nightly / molpy` (newest MolPy), `nightly / coverage` |
-| `release.yml` | — | — | `v*` tag: `release / build`, `release / publish` (PyPI, npm); `workflow_dispatch` is a dry run anywhere |
+| `release.yml` | — | — | `v*` tag: `release / guard`, lint + test (full), `release / build`, `release / pypi`, `release / npm`; `workflow_dispatch` is a dry run anywhere |
 
-A pull request from a branch of the same repository skips the jobs its push
-already ran. Every job that needs the registry validates and builds
+A pull request inside a fork is skipped: its push already ran the full tier.
+The shared setup actions come from `MolCrafts/molcrafts-ci/actions/*@master`.
+Every job that needs the registry validates and builds
 `molhub-registry` at `dev` (or its branch of the same name) with this
 checkout's tools. Each deploy is skipped until its repository variable
 (`CLOUDFLARE_DOCS_PROJECT`, `CLOUDFLARE_PAGES_PROJECT`, `MOLHUB_API_URL`) is

@@ -1,30 +1,31 @@
 name: lint
 
-# Same jobs in every context (feature branch or dev/master, fork or
-# upstream); see "CI and release" in docs/operations/deployment.md. A PR from
-# a branch of the same repository skips what its push already ran.
+# Same jobs in every context (feature branch or dev/master/main, fork or
+# upstream); see "CI and release" in docs/operations/deployment.md.
 on:
   push:
     branches: ["**"]
   pull_request:
     branches: [dev, master, main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' && !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) }}
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   python:
     name: lint / python
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # A pull request inside a fork was already run by its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-python
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
       - run: uv sync --extra dev
       - run: uv run ruff check src/ tests/ scripts/
       - run: uv run ruff format --check src/ tests/ scripts/
@@ -34,12 +35,12 @@ jobs:
   # dependency audit.
   node:
     name: lint / node
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-node
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
       - uses: ./.github/actions/setup-registry
       - run: npm run security:audit
       - run: npm run contract:check

@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   molpy:
     name: nightly / molpy
@@ -17,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-python
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
       - run: |
           uv sync --extra dev
           uv pip install --upgrade --prerelease=allow molcrafts-molpy
@@ -31,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup-python
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
       - run: uv sync --extra dev
       - run: uv run pytest -q --cov=src/molhub --cov-report=xml
       - uses: codecov/codecov-action@v7
