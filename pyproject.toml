@@ -42,7 +42,7 @@ dev = [
   # ty reads types out of packages that ship no
   # py.typed (molpy does not), which is the only way a checker can see the
   # `Frame.metadata` -> `Frame.meta` class of upstream rename; mypy treats
-  # molpy as Any and sees nothing. Gate it (tox lint / ci.yml / pre-commit)
+  # molpy as Any and sees nothing. Gate it (tox lint / lint.yml / pre-commit)
   # CI gates `ty check src/`; keep a lower bound because ty is still 0.0.x and
   # diagnostics can move between releases.
   "ty>=0.0.69",
@@ -87,7 +87,12 @@ line-length = 100
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+# PLW1514 (a preview rule; explicit-preview-rules keeps every other preview
+# rule off): text-mode I/O names its encoding. Unnamed, Python decodes with
+# the locale -- cp1252 on Windows.
+preview = true
+explicit-preview-rules = true
+select = ["E", "F", "W", "I", "PLW1514"]
 ignore = [
   "E402",
   "E741",

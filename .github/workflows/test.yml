@@ -1,0 +1,104 @@
+name: test
+
+# Contexts (see "CI and release" in docs/operations/deployment.md):
+#   feature branch push (fork or upstream)  test / python, test / node
+#   dev / master / main, or a PR into one    + Python 3.13/3.14, macOS and
+#                                              Windows, test / browser,
+#                                              test / package
+# A PR from a branch of the same repository skips what its push already ran.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) }}
+
+jobs:
+  python:
+    name: test / python
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+
+  python-full:
+    name: test / python (${{ matrix.os }}, ${{ matrix.python }})
+    if: github.event_name != 'push' || contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.12" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --extra dev --python ${{ matrix.python }}
+      - run: uv run pytest -q
+
+  # Every workspace's tests, the cross-SDK CLI and cache parity, and the
+  # publishable outputs (SDK, Worker dry run, prerendered Web).
+  node:
+    name: test / node
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: uv sync --extra dev
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-registry
+      - run: npm run build --workspace @molcrafts/molhub
+      - run: npm run test --workspaces --if-present
+      - run: npm run cli:parity
+      - run: npm run cache:parity
+      - run: npm run deploy:dry --workspace @molcrafts/molhub-api
+      - run: npm run build --workspace @molcrafts/molhub-web
+      - run: test -s apps/web/dist/client/index.html
+
+  # The Inspector in a real Chromium against the prerendered site.
+  browser:
+    name: test / browser
+    if: github.event_name != 'push' || contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-registry
+      - run: npm run build --workspace @molcrafts/molhub-web
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e --workspace @molcrafts/molhub-web
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: inspector-browser-${{ github.sha }}
+          path: apps/web/test-results/
+          retention-days: 14
+
+  # What the wheel and the npm tarball ship.
+  package:
+    name: test / package
+    if: github.event_name != 'push' || contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-node
+      - run: npm run package:audit

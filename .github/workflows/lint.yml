@@ -1,0 +1,48 @@
+name: lint
+
+# Same jobs in every context (feature branch or dev/master, fork or
+# upstream); see "CI and release" in docs/operations/deployment.md. A PR from
+# a branch of the same repository skips what its push already ran.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) }}
+
+jobs:
+  python:
+    name: lint / python
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
+      - run: uv sync --extra dev
+      - run: uv run ruff check src/ tests/ scripts/
+      - run: uv run ruff format --check src/ tests/ scripts/
+      - run: uv run ty check src/
+
+  # Contract sync, biome and tsc in every workspace, and the production
+  # dependency audit.
+  node:
+    name: lint / node
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-registry
+      - run: npm run security:audit
+      - run: npm run contract:check
+      - run: npm run build --workspace @molcrafts/molhub
+      - run: npm run lint --workspaces --if-present
+      - run: npm run typecheck --workspaces --if-present

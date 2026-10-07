@@ -1,0 +1,33 @@
+name: setup-node
+description: >
+  Node (.nvmrc when the repository has one, else node-version) with the npm
+  workspace installed: `npm ci` against a lockfile, `npm install` without one.
+inputs:
+  node-version:
+    description: Node version when the repository has no .nvmrc
+    default: "22"
+  working-directory:
+    description: Directory holding package.json
+    default: "."
+  registry-url:
+    description: npm registry to authenticate against (release only)
+    default: ""
+  install:
+    description: Install the dependencies ("false" sets up Node only)
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ hashFiles('.nvmrc') == '' && inputs.node-version || '' }}
+        node-version-file: ${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}
+        registry-url: ${{ inputs.registry-url }}
+        # npm's cache is keyed on the lockfile; without one there is nothing to key on.
+        cache: ${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) != '' && 'npm' || '' }}
+        package-manager-cache: ${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory)) != '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+    - if: inputs.install == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: if [ -f package-lock.json ]; then npm ci; else npm install; fi

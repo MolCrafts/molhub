@@ -1,0 +1,21 @@
+name: setup-registry
+description: >
+  The approved manifest database (partner MolCrafts/molhub-registry), validated
+  and built with this checkout's registry tools. Exports MOLHUB_REGISTRY_JSON
+  and PUBLIC_MOLHUB_REGISTRY_REVISION for the Web build. Needs setup-node.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-partners
+      with:
+        repository: MolCrafts/molhub-registry
+        path: .registry-source
+    - shell: bash
+      run: |
+        set -euo pipefail
+        src="$GITHUB_WORKSPACE/.registry-source"
+        npm run registry:layout -- "$src"
+        npm run registry:validate -- "$src/artifacts"
+        npm run registry:build -- "$src/artifacts" "$src/dist"
+        echo "MOLHUB_REGISTRY_JSON=$src/dist/registry.json" >> "$GITHUB_ENV"
+        echo "PUBLIC_MOLHUB_REGISTRY_REVISION=$(git -C "$src" rev-parse HEAD)" >> "$GITHUB_ENV"

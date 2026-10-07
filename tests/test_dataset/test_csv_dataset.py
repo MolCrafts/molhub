@@ -25,7 +25,7 @@ _SAMPLE_CSV = """PSMILES,labels.Exp_Tg(K),meta.source,meta.reliability
 
 @pytest.fixture
 def sample_csv_path():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".csv", delete=False) as f:
         f.write(_SAMPLE_CSV)
     yield Path(f.name)
     f.name and Path(f.name).unlink(missing_ok=True)

@@ -51,7 +51,7 @@ _SPLITS: frozenset[str] = frozenset({"train_300K", "test_300K", "test_600K", "te
 def _parse_extxyz(path: Path) -> list[Frame]:
     """Parse an extended-XYZ file shipped with the 3BPA benchmark."""
     frames: list[Frame] = []
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     i = 0
     while i < len(lines):
         natoms = int(lines[i].strip())

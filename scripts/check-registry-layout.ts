@@ -28,6 +28,7 @@ const exactFiles = new Set([
 ]);
 const allowedPatterns = [
 	/^\.github\/workflows\/[^/]+\.ya?ml$/,
+	/^\.github\/actions\/[^/]+\/action\.ya?ml$/,
 	/^artifacts\/(dataset|model|plugin)\/[^/]+\/[^/]+\/[^/]+\.yaml$/,
 ];
 

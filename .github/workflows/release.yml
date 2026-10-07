@@ -1,59 +1,71 @@
-name: Release SDKs
+name: release
 
+# A `v*` tag on MolCrafts runs every gate, builds the Python distribution and
+# the @molcrafts/molhub tarball, and publishes both (PyPI and npm trusted
+# publishing). workflow_dispatch is a dry run anywhere: the same gates and
+# artifacts, nothing uploaded. Write the GitHub Release notes from
+# .github/RELEASE_TEMPLATE.md.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish after auditing (false only builds artifacts)"
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: release / build
+    if: github.event_name == 'workflow_dispatch' || github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - run: npm run security:audit
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-python
       - run: uv sync --extra dev
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-registry
+      - run: npm run security:audit
       - run: npm run check
       - run: uv run pytest -q
       - run: npm run docs:check
       - run: npm run package:audit
-      - name: Build isolated release artifacts
-        run: |
+      - run: |
           mkdir -p dist/python dist/npm
           uv build --out-dir dist/python
           npm pack --workspace @molcrafts/molhub --pack-destination dist/npm
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: molhub-release-${{ github.sha }}
           path: dist/
           if-no-files-found: error
-      - name: Publish Python distribution
-        if: github.event_name == 'release' || inputs.publish == true
-        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish:
+    name: release / publish
+    needs: build
+    if: github.event_name == 'push' && github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: molhub-release-${{ github.sha }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/python/
-      - name: Publish TypeScript distribution
-        if: github.event_name == 'release' || inputs.publish == true
+      # npm >= 11.5 (Node 24) publishes through the OIDC id-token when
+      # NPM_TOKEN is unset.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - run: npm publish dist/npm/*.tgz --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --workspace @molcrafts/molhub --access public --provenance

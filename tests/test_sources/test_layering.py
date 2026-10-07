@@ -21,7 +21,7 @@ _MODULE_FILES = sorted(_PACKAGE_ROOT.rglob("*.py"))
 
 def _imported_modules(path: Path) -> set[str]:
     """Every module name imported by *path*, flattened."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
