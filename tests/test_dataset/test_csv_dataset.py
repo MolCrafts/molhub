@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from molpy import Frame
 
-from molhub.dataset import CSVDataset, MapDataset, Targets
+from molhub.dataset import CSVDataset, MapDataset
 from molhub.dataset.csv_dataset import _infer_value
 
 from ..test_sources.conftest import FakeResponse
@@ -47,7 +47,7 @@ class TestCSVDataset:
 
     def test_metadata_contains_columns(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
-        meta = Targets(ds[0]).read()
+        meta = ds[0].meta
         assert "PSMILES" in meta
         assert "labels.Exp_Tg(K)" in meta
         assert "meta.source" in meta
@@ -55,21 +55,21 @@ class TestCSVDataset:
 
     def test_numeric_inference(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
-        meta = Targets(ds[0]).read()
+        meta = ds[0].meta
         # Tg value should be inferred as float
         assert isinstance(meta["labels.Exp_Tg(K)"], float)
         assert meta["labels.Exp_Tg(K)"] == pytest.approx(345.15)
 
     def test_string_columns_remain_string(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
-        meta = Targets(ds[0]).read()
+        meta = ds[0].meta
         assert isinstance(meta["PSMILES"], str)
         assert isinstance(meta["meta.reliability"], str)
         assert meta["meta.reliability"] == "black"
 
     def test_all_rows_accessible(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
-        tgs = [Targets(ds[i]).read()["labels.Exp_Tg(K)"] for i in range(len(ds))]
+        tgs = [ds[i].meta["labels.Exp_Tg(K)"] for i in range(len(ds))]
         assert tgs == pytest.approx([345.15, 358.15, 344.15, 473.15, 473.15])
 
     def test_headers(self, sample_csv_path):
@@ -138,7 +138,7 @@ class TestRemoteCsv:
         ds = CSVDataset("https://example.invalid/remote.csv")
         assert len(ds) == 2
         assert ds.headers == ["a", "b"]
-        assert Targets(ds[1]).read()["a"] == 2
+        assert ds[1].meta["a"] == 2
 
     def test_download_honours_molhub_home(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))

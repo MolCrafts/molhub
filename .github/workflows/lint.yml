@@ -17,6 +17,16 @@ concurrency:
   group: lint-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
 
+# molhub is built against its partners (.github/partners.env) at the commits
+# scripts/partners.py resolves -- molpy's and molrs's dev, or their branches
+# named like this one -- checked out as siblings, the layout the
+# [tool.uv.sources] path dependencies expect. The git hooks resolve them the
+# same way (`partners.py run`), so a local gate and CI judge one commit.
+env:
+  # uv builds molrs through maturin's PEP 517 hook; this makes that cargo
+  # build --locked as well.
+  MATURIN_PEP517_ARGS: --locked
+
 jobs:
   python:
     name: lint / python
@@ -26,6 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          toolchain-dir: ../molrs
+          cache: molrs-python
+          workspaces: ../molrs/molrs-python -> ../target
+      - run: python3 scripts/partners.py check
+      - run: uv lock --check
       - run: uv sync --extra dev
       - run: uv run ruff check src/ tests/ scripts/
       - run: uv run ruff format --check src/ tests/ scripts/

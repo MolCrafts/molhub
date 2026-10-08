@@ -21,7 +21,6 @@ import numpy as np
 from molpy import Block, Frame
 
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
@@ -61,8 +60,7 @@ class RevMD17Dataset:
 
     Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.meta`` (read it with
-    :class:`molhub.dataset.Targets`).
+    and ``energy`` in ``frame.meta``.
 
     Coordinates are in ångström, energies in kcal/mol and forces in
     kcal/(mol·Å), as distributed.
@@ -172,7 +170,4 @@ class RevMD17Dataset:
         atoms_blk["fy"] = forces[:, 1].astype(np.float64)
         atoms_blk["fz"] = forces[:, 2].astype(np.float64)
 
-        frame = Frame()
-        frame["atoms"] = atoms_blk
-        Targets(frame).write({"energy": float(self._energies[idx])})
-        return frame
+        return Frame({"atoms": atoms_blk}, meta={"energy": float(self._energies[idx])})

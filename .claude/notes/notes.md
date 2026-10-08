@@ -103,20 +103,21 @@ digest 强校验由 `HttpsSource` + `Fetcher` 实现，回归测试锁定 202、
 molpy 是 pre-1.0，且在小版本间移动公开 API。0.3 → 0.9 把 `Frame`/`Block`/
 `Element` 从 `molpy.core.*` 搬到顶层，并把 `Frame.metadata` 改名 `Frame.meta`。
 原先 `molcrafts-molpy>=0.3.0` 的开放下界让这次破坏性升级悄悄进了 lock，
-origin/master 一度不可导入且 CI 未覆盖。依赖已收紧为 `>=0.12,<0.13`。
+origin/master 一度不可导入且 CI 未覆盖。依赖已收紧为 `>=0.16,<0.17`。
 
-**0.12 的 metadata 契约有两个静默陷阱**，全部封装在 `molhub.dataset.meta`：
+dev 分支上不再对 PyPI：`.github/partners.env` 让 molpy 与 molrs 跟踪各自的
+`dev`，`[tool.uv.sources]` 指向兄弟目录 `../molpy`、`../molrs/molrs-python`，
+CI 与 git hooks 都经 `scripts/partners.py` 解析到同一提交。`uv.lock` 提交且为
+universal lock（跨架构开发）。
 
-1. `Frame.meta` 每次读取返回**新 dict**，原地 `update`/`clear` 写进临时对象后被
-   丢弃，**不报错**。必须整体赋值 `frame.meta = {...}`。
-2. 值必须是 `MetaValue(dtype, value)`，裸 Python 值被拒；dtype 字符串是
-   `f64/f32/i64/i32/u64/bool/string`——字符串标签是 `string` 而非 `str`。
+molrs 0.16 起 `Frame.meta` 是**实时、写穿**的 `FrameMeta` 映射：读出即裸 Python
+值（向量为 tuple），原地 `frame.meta[k] = v` / `del` / `update` 都生效，写入裸值
+即可（dtype 自动推断；需固定 dtype 时用 `mp.core.MetaValue`）。0.12 的两个
+静默陷阱随之消失，原先封装它们的 `molhub.dataset.meta`（`Targets` /
+`MetaCodec`）已删除，调用方直接用 `frame.meta`，构造时用
+`Frame({"atoms": blk}, meta={...})`。
 
-调用方一律走 `Targets(frame).write({...})` / `.read()`，不直接碰 `MetaValue`。
-`MetaCodec` 单独承担值↔`MetaValue` 的编解码，可注入替换。`test_meta.py` 里有一条回归测试专门锁定陷阱 1：若 molpy 哪天改成
-可原地修改，那条测试会失败，届时可重新评估这层封装。
-
-另注：`len(Block)` 是**列数**，行数是 `Block.nrows`；`len(Frame)` 是 block 个数。
+另注：`len(Block)` 是**列数**，行数是 `Block.n_rows`；`len(Frame)` 是 block 个数。
 
 ## 多语言绑定：规格先行
 

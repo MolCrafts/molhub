@@ -33,7 +33,6 @@ import numpy as np
 from molpy import Block, Element, Frame
 
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
@@ -94,10 +93,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
         atoms_blk["fy"] = np.array(fys, dtype=np.float64)
         atoms_blk["fz"] = np.array(fzs, dtype=np.float64)
 
-        frame = Frame()
-        frame["atoms"] = atoms_blk
-        Targets(frame).write({"energy": energy})
-        frames.append(frame)
+        frames.append(Frame({"atoms": atoms_blk}, meta={"energy": energy}))
 
         i += 2 + natoms
     return frames
@@ -108,8 +104,7 @@ class ThreeBPADataset:
 
     Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.meta`` (read it with
-    :class:`molhub.dataset.Targets`).
+    and ``energy`` in ``frame.meta``.
 
     Args:
         path: Path to the ``.xyz`` file. When nothing usable is there, the

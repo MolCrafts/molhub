@@ -1,7 +1,7 @@
 name: nightly
 
-# Upstream only, weekly: the test suite against the newest MolPy (pre-releases
-# included) without moving the supported bound, and coverage to Codecov.
+# Upstream only, weekly: coverage to Codecov. molhub tracks its partners' dev
+# on every push (.github/partners.env), so no job tests a newer molpy here.
 on:
   schedule:
     - cron: "17 5 * * 1"
@@ -14,21 +14,12 @@ concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
-jobs:
-  molpy:
-    name: nightly / molpy
-    if: github.repository_owner == 'MolCrafts'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
-      - run: |
-          uv sync --extra dev
-          uv pip install --upgrade --prerelease=allow molcrafts-molpy
-          uv pip freeze | grep '^molcrafts-molpy=='
-      - run: uv run --no-sync ty check src/
-      - run: uv run --no-sync pytest -q
+env:
+  # uv builds molrs through maturin's PEP 517 hook; this makes that cargo
+  # build --locked as well.
+  MATURIN_PEP517_ARGS: --locked
 
+jobs:
   coverage:
     name: nightly / coverage
     if: github.repository_owner == 'MolCrafts'
@@ -36,6 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          toolchain-dir: ../molrs
+          cache: molrs-python
+          workspaces: ../molrs/molrs-python -> ../target
       - run: uv sync --extra dev
       - run: uv run pytest -q --cov=src/molhub --cov-report=xml
       - uses: codecov/codecov-action@v7

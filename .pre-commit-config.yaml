@@ -1,8 +1,22 @@
-# Managed by prek: `prek install`
-# CI parity: same shell commands as .github/workflows/lint.yml and test.yml (no tox wrapper).
-# tox remains in [project.optional-dependencies] dev for optional local isolation.
+# Managed by prek: `prek install` (installs both hook types).
+# CI parity: every job in .github/workflows/{lint,test}.yml has a hook here
+# running the same command.
+#
+#   pre-commit  file hygiene, ruff (format + lint) in place; ty in CI's
+#               sibling layout.
+#   pre-push    the commit hooks again on --all-files, the partners and lock
+#               checks, the unit suite, and the Node checks.
+#
+# ty, the lock check, the unit suite and the Node checks run in CI's sibling
+# layout (`scripts/partners.py run`): a copy of this working tree next to
+# molpy and molrs at the commits scripts/partners.py resolves (their dev, or
+# their branches named like this one), never the developer's own ../molpy or
+# ../molrs. They build molrs; scripts/hook-run.sh hands them to
+# $MOLCRAFTS_HOOK_RUNNER (a compute node on the MolCrafts cluster) when set and
+# runs them in place otherwise. Never --no-verify.
 
 default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -21,19 +35,81 @@ repos:
       - id: check-toml
       - id: check-json
 
+  # Match the ruff uv.lock resolves, so `uv run ruff` (lint.yml) agrees with
+  # these hooks.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff-format
+        files: ^(src|tests|scripts)/
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^(src|tests|scripts)/
+
   - repo: local
     hooks:
-      - id: ci-lint
-        name: "CI lint (same as lint.yml)"
-        entry: bash -c 'uv sync --extra dev && uv run ruff check src/ tests/ scripts/ && uv run ruff format --check src/ tests/ scripts/ && uv run ty check src/ && npm run check'
+      # lint.yml `lint / python`. Whole-tree (not per-file): a type error is
+      # usually raised by the *caller* of the file you edited.
+      - id: ty
+        name: "ty check src/ against the resolved partners (lint.yml)"
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked
+          uv run --extra dev ty check src/
+        language: system
+        pass_filenames: false
+        files: '\.py$|^pyproject\.toml$|^uv\.lock$|^\.github/partners\.env$'
+
+      # A commit checks its staged files only. Re-run the commit-time hooks
+      # above over the whole tree, so an untouched file cannot carry a defect.
+      - id: all-files
+        name: commit hooks on --all-files
+        entry: prek run --all-files --hook-stage pre-commit --show-diff-on-failure
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit, pre-push]
+        stages: [pre-push]
 
-      - id: ci-test
-        name: "CI test (same as test.yml)"
-        entry: bash -c 'uv sync --extra dev && uv run pytest --cov=src/molhub --cov-report=xml -v'
+      # lint.yml: every partner resolves, every path dependency resolves
+      # inside the layout CI checks out, and uv.lock matches pyproject.toml
+      # against the resolved partners.
+      - id: partners
+        name: partners resolve; path sources resolve in CI; uv.lock is current
+        entry: >-
+          bash -c 'python3 scripts/partners.py check &&
+          scripts/hook-run.sh python3 scripts/partners.py run -- uv lock --check'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # test.yml `test / python`: the same command, in CI's layout.
+      - id: pytest
+        name: pytest against the resolved partners (test.yml)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked
+          uv run --extra dev pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # lint.yml `lint / node` and test.yml `test / node` (contract, biome,
+      # tsc, every workspace's tests, the CLI and cache parity against the
+      # Python CLI), in CI's layout, with the registry snapshot
+      # .github/actions/setup-registry builds (molhub-registry's dev).
+      - id: node
+        name: "Node checks against the resolved partners (lint.yml, test.yml)"
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked
+          bash -c 'set -euo pipefail;
+          npm ci --no-audit --no-fund;
+          rm -rf .registry-source;
+          git clone -q --depth=1 --branch dev https://github.com/MolCrafts/molhub-registry.git .registry-source;
+          npm run registry:build -- .registry-source/artifacts .registry-source/dist;
+          MOLHUB_REGISTRY_JSON="$PWD/.registry-source/dist/registry.json" npm run check'
         language: system
         pass_filenames: false
         always_run: true

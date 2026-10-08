@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from molpy import Frame
 
-from molhub.dataset import ArtifactHub, Targets
+from molhub.dataset import ArtifactHub
 from molhub.dataset.qm9 import (
     COORDINATE,
     QM9Dataset,
@@ -78,21 +78,21 @@ class TestParseXyz:
 
     def test_all_fifteen_targets_present(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert set(Targets(frame).read()) == set(QM9Dataset.ALL_TARGETS)
+        assert set(frame.meta) == set(QM9Dataset.ALL_TARGETS)
 
     def test_tag_and_index_are_not_targets(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
-        assert "tag" not in Targets(frame).read()
-        assert "index" not in Targets(frame).read()
+        assert "tag" not in frame.meta
+        assert "index" not in frame.meta
 
     def test_target_values(self):
-        meta = Targets(_parse_xyz(_SAMPLE_XYZ)).read()
+        meta = _parse_xyz(_SAMPLE_XYZ).meta
         assert meta["A"] == pytest.approx(157.7118)
         assert meta["U0"] == pytest.approx(-40.47893)
         assert meta["Cv"] == pytest.approx(6.469)
 
     def test_star_caret_exponent_is_rewritten(self):
-        meta = Targets(_parse_xyz(_STARCARET_XYZ)).read()
+        meta = _parse_xyz(_STARCARET_XYZ).meta
         assert meta["A"] == pytest.approx(1e-3)
 
 
@@ -100,17 +100,17 @@ class TestFilterTargets:
     def test_keeps_only_requested(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset({"U0", "gap"}))
-        assert set(Targets(frame).read()) == {"U0", "gap"}
+        assert set(frame.meta) == {"U0", "gap"}
 
     def test_kept_values_survive(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset({"U0"}))
-        assert Targets(frame).read()["U0"] == pytest.approx(-40.47893)
+        assert frame.meta["U0"] == pytest.approx(-40.47893)
 
     def test_empty_keep_set_drops_everything(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
         _filter_targets(frame, frozenset())
-        assert Targets(frame).read() == {}
+        assert frame.meta == {}
 
     def test_atoms_block_untouched(self):
         frame = _parse_xyz(_SAMPLE_XYZ)
@@ -244,7 +244,7 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=[1, 2, 3, 4], excluded=[2, 4])
         src = QM9Dataset(tmp_path, download=False)
         assert len(src) == 2
-        assert sorted(Targets(src[i]).read()["U0"] for i in range(len(src))) == [-3.0, -1.0]
+        assert sorted(src[i].meta["U0"] for i in range(len(src))) == [-3.0, -1.0]
 
     def test_empty_exclusion_list_keeps_everything(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1, 2, 3], excluded=[])
@@ -265,7 +265,7 @@ class TestQM9EndToEnd:
 
         def _sample() -> list[float]:
             src = QM9Dataset(tmp_path, total=5, download=False)
-            return [Targets(src[i]).read()["U0"] for i in range(len(src))]
+            return [src[i].meta["U0"] for i in range(len(src))]
 
         first, second = _sample(), _sample()
         assert len(first) == 5
@@ -279,7 +279,7 @@ class TestQM9EndToEnd:
         _build_qm9_root(tmp_path, indices=[1, 2])
         src = QM9Dataset(tmp_path, targets=["U0"], download=False)
         for i in range(len(src)):
-            assert set(Targets(src[i]).read()) == {"U0"}
+            assert set(src[i].meta) == {"U0"}
 
     def test_is_map_dataset(self, tmp_path):
         _build_qm9_root(tmp_path, indices=[1])

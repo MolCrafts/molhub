@@ -37,14 +37,24 @@ and dispatches.
 
 | workflow | fast tier | full tier | upstream only |
 |---|---|---|---|
-| `lint.yml` | `lint / python` (ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
+| `lint.yml` | `lint / python` (partners, lock, ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
 | `test.yml` | `test / tier`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / package` | — |
 | `docs.yml` | `docs / build` (`npm run docs:check`) | same | master: `docs / deploy` (docs site), `docs / web` (MolHub Web; also on molhub-registry's `registry-published`) |
 | `deploy.yml` | — | — | master: `deploy / api` (D1 migrations, Worker, `/health`) |
-| `nightly.yml` | — | — | weekly: `nightly / molpy` (newest MolPy), `nightly / coverage` |
+| `nightly.yml` | — | — | weekly: `nightly / coverage` |
 | `release.yml` | — | — | `v*` tag: `release / guard`, lint + test (full), `release / build`, `release / pypi`, `release / npm`; `workflow_dispatch` is a dry run anywhere |
 
 A pull request inside a fork is skipped: its push already ran the full tier.
+CI builds molhub against its partners, never against published releases or a
+developer's own sibling checkouts: `.github/partners.env` names them (molpy and
+molrs on `dev`), and `scripts/partners.py` resolves each to that branch, or to
+the partner's branch named like the one being built. The partners are checked
+out as siblings (`../molpy`, `../molrs`), the layout the `[tool.uv.sources]`
+path dependencies expect, and molrs is built from source. The git hooks run ty
+and the unit suite in the same layout (`scripts/partners.py run`), so a local
+gate and CI judge the same partner commits. `uv.lock` is committed and
+universal; relock in that layout with
+`python3 scripts/partners.py run -- bash -c 'uv lock && cp uv.lock "$PARTNERS_SOURCE"/'`.
 The shared setup actions come from `MolCrafts/molcrafts-ci/actions/*@master`.
 Every job that needs the registry validates and builds
 `molhub-registry` at `dev` (or its branch of the same name) with this
