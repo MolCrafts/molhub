@@ -2,9 +2,9 @@ name: release
 
 # A `v*` tag on MolCrafts: guard -> lint + the full test tier -> build (docs
 # check, package audit, the Python distribution and the @molcrafts/molhub
-# tarball) -> PyPI and npm (trusted publishing). A dispatch is the dry run,
-# on any branch, fork or upstream: the same gates and artifacts, nothing
-# uploaded. Write the GitHub Release notes from .github/RELEASE_TEMPLATE.md.
+# tarball) -> PyPI and npm (trusted publishing: release.yml and the `pypi` /
+# `npm` environments). A dispatch is the dry run, on any branch, fork or
+# upstream: the same gates and artifacts, nothing uploaded, no environment. Write the GitHub Release notes from .github/RELEASE_TEMPLATE.md.
 on:
   push:
     tags: ["v*"]
@@ -82,6 +82,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'pypi' || '' }}
     permissions:
       id-token: write
     steps:
@@ -94,13 +95,14 @@ jobs:
           packages-dir: dist/python/
           skip-existing: true
 
-  # npm >= 11.5 (Node 24) publishes through the OIDC id-token when NPM_TOKEN
-  # is unset.
+  # npm >= 11.5 (Node 24) publishes through the OIDC id-token when
+  # NODE_AUTH_TOKEN is empty (setup-node's registry-url exports a placeholder).
   npm:
     name: release / npm
     needs: build
     if: github.event_name == 'push' && github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'npm' || '' }}
     permissions:
       id-token: write
     steps:
@@ -115,4 +117,4 @@ jobs:
           install: "false"
       - run: npm publish dist/npm/*.tgz --access public --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ""
