@@ -48,7 +48,6 @@ jobs:
   python:
     name: lint / python
     needs: context
-    # A pull request inside a fork was already run by its push.
     if: needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
     steps:

@@ -51,7 +51,6 @@ jobs:
   build:
     name: docs / build
     needs: context
-    # A pull request inside a fork was already run by its push.
     if: github.event_name != 'repository_dispatch' && needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -78,7 +77,7 @@ jobs:
   deploy:
     name: docs / deploy
     needs: [context, build]
-    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_DOCS_PROJECT != ''
+    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.CLOUDFLARE_DOCS_PROJECT != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -102,7 +101,7 @@ jobs:
   web:
     name: docs / web
     needs: context
-    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.MOLHUB_API_URL != ''
+    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.MOLHUB_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
