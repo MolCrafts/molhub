@@ -24,9 +24,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: deploy / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      cancel: ${{ steps.context.outputs.cancel }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
   api:
     name: deploy / api
-    if: github.repository_owner == 'MolCrafts' && vars.MOLHUB_API_URL != ''
+    needs: context
+    if: needs.context.outputs.upstream == 'true' && vars.MOLHUB_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

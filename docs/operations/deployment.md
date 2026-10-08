@@ -30,7 +30,10 @@ revoking the old credential. Never put secrets in repository variables or `.dev.
 
 ## CI and release
 
-`test / tier` picks the tier. The fast tier runs on a feature-branch push to
+Each workflow's first job, `<file> / context`, runs
+[`MolCrafts/molcrafts-ci/actions/ci-context`](https://github.com/MolCrafts/molcrafts-ci/tree/master/actions/ci-context),
+and every other job gates on its outputs (tier, upstream, pull request
+dedup). The fast tier runs on a feature-branch push to
 MolCrafts; the full tier on every push to a fork (proven before its pull
 request), on `dev`, `master` and `main` on MolCrafts, on pull requests, tags
 and dispatches.
@@ -38,7 +41,7 @@ and dispatches.
 | workflow | fast tier | full tier | upstream only |
 |---|---|---|---|
 | `lint.yml` | `lint / python` (partners, lock, ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
-| `test.yml` | `test / tier`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / package` | — |
+| `test.yml` | `test / context`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / package` | — |
 | `docs.yml` | `docs / build` (`npm run docs:check`) | same | master: `docs / deploy` (docs site), `docs / web` (MolHub Web; also on molhub-registry's `registry-published`) |
 | `deploy.yml` | — | — | master: `deploy / api` (D1 migrations, Worker, `/health`) |
 | `nightly.yml` | — | — | weekly: `nightly / coverage` |
