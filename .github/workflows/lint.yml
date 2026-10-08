@@ -31,10 +31,24 @@ env:
   MATURIN_PEP517_ARGS: --locked
 
 jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: lint / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      cancel: ${{ steps.context.outputs.cancel }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
   python:
     name: lint / python
-    # A pull request inside a fork was already run by its push.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,7 +71,8 @@ jobs:
   # dependency audit.
   node:
     name: lint / node
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

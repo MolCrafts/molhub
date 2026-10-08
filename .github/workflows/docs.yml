@@ -34,10 +34,24 @@ env:
   MATURIN_PEP517_ARGS: --locked
 
 jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: docs / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      cancel: ${{ steps.context.outputs.cancel }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
   build:
     name: docs / build
-    # A pull request inside a fork was already run by its push.
-    if: github.event_name != 'repository_dispatch' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts')
+    needs: context
+    if: github.event_name != 'repository_dispatch' && needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -62,8 +76,8 @@ jobs:
 
   deploy:
     name: docs / deploy
-    needs: build
-    if: github.repository_owner == 'MolCrafts' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_DOCS_PROJECT != ''
+    needs: [context, build]
+    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.CLOUDFLARE_DOCS_PROJECT != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -86,7 +100,8 @@ jobs:
 
   web:
     name: docs / web
-    if: github.repository_owner == 'MolCrafts' && github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/master","refs/heads/main"]'), github.ref) && vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.MOLHUB_API_URL != ''
+    needs: context
+    if: needs.context.outputs.upstream == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.CLOUDFLARE_PAGES_PROJECT != '' && vars.MOLHUB_API_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
