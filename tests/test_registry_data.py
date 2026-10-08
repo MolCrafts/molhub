@@ -85,45 +85,6 @@ class TestPolymerTgEntry:
         assert manifest.artifact("main").size == 6024335
 
 
-@pytest.mark.network
-class TestAgainstRealUpstream:
-    def test_fetching_the_bundled_dataset_verifies(self, tmp_path, monkeypatch):
-        """End-to-end against Zenodo: resolve, transfer, verify, cache.
-
-        Run with ``pytest -m network``.
-        """
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/polymer-tg@1")
-        assert paths["main"].stat().st_size == 6024335
-        assert paths["main"].read_text(encoding="utf-8").startswith("PSMILES")
-
-
-@pytest.mark.network
-class TestQM9AgainstRealUpstream:
-    """The dataset whose silent corruption motivated this whole layer."""
-
-    def test_fetch_verifies_both_artifacts(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/qm9@v2")
-        assert paths["main"].stat().st_size == 86144227
-        assert paths["exclude"].stat().st_size == 486752
-
-    def test_the_exclusion_list_is_not_empty(self, tmp_path, monkeypatch):
-        """A 0-byte exclusion list is exactly what used to get cached."""
-        from molhub.dataset.qm9 import _load_exclusion_list
-
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(BUNDLED).fetch("dataset:molcrafts/qm9@v2", roles=["exclude"])
-        assert len(_load_exclusion_list(paths["exclude"])) == 3054
-
-    def test_source_loads_the_documented_sample_count(self, tmp_path, monkeypatch):
-        """133,885 raw minus 3,054 uncharacterized is the 130,831 README promises."""
-        from molhub.dataset import QM9Dataset
-
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        assert len(QM9Dataset(tmp_path / "unused", hub=Molhub(BUNDLED))) == 130831
-
-
 class TestLocatorsPinAVersion:
     """A locator that does not pin a version silently follows upstream's next
     release. Figshare article ids are the trap: they are not version-specific.

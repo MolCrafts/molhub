@@ -45,8 +45,6 @@ apps/web/.generated/
 apps/web/dist/
 apps/web/.rsbuild/
 apps/web/.tanstack/
-apps/web/test-results/
-apps/web/playwright-report/
 apps/api/.wrangler/
 .registry-source/
 .docs-ts-*/

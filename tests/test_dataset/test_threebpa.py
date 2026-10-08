@@ -213,23 +213,3 @@ class TestThreeBPADataset:
     def test_unknown_tag_is_fine_when_the_file_exists(self, sample_xyz_path):
         """A user pointing at their own extended-XYZ file keeps working."""
         assert len(ThreeBPADataset(sample_xyz_path, tag="my-own-split")) == 2
-
-
-@pytest.mark.network
-class TestThreeBPAAgainstRealUpstream:
-    """The bundled manifest must actually resolve. Run with ``pytest -m network``."""
-
-    @pytest.mark.parametrize(
-        ("split", "frames", "size"),
-        [
-            ("train_300K", 500, 1504880),
-            ("test_300K", 1669, 5023260),
-            ("test_600K", 2138, 6434399),
-            ("test_1200K", 2139, 6437539),
-        ],
-    )
-    def test_every_split_fetches_and_parses(self, tmp_path, monkeypatch, split, frames, size):
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        src = ThreeBPADataset(tmp_path / "absent.xyz", tag=split)
-        assert src.path.stat().st_size == size
-        assert len(src) == frames

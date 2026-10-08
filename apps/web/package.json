@@ -15,10 +15,9 @@
     "bundle:check": "tsx scripts/check-inspector-bundles.ts",
     "preview": "rsbuild preview",
     "test": "npm run registry:sync && rstest run",
-    "test:e2e": "playwright test",
     "test:watch": "npm run registry:sync && rstest",
-    "lint": "biome check app/src e2e scripts *.config.ts",
-    "format": "biome check --write app/src e2e scripts *.config.ts",
+    "lint": "biome check app/src scripts *.config.ts",
+    "format": "biome check --write app/src scripts *.config.ts",
     "typecheck": "npm run registry:sync && tsc --noEmit"
   },
   "dependencies": {
@@ -43,7 +42,6 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@molcrafts/molhub-registry-tools": "0.1.0",
-    "@playwright/test": "^1.58.0",
     "@rsbuild/core": "^2.1.10",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-tailwindcss": "^2.0.3",

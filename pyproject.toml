@@ -77,10 +77,6 @@ molhub = ["schema/*.yaml", "registry_data/**/*.yaml"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 python_files = ["test_*"]
-# Network tests are opt-in: CI must not go red because an upstream data
-# repository is slow. Run them with `pytest -m network`.
-addopts = "-m 'not network'"
-markers = ["network: touches a real upstream source"]
 
 [tool.ruff]
 line-length = 100

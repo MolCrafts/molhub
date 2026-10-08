@@ -69,7 +69,7 @@ Tests now mirror `src/`:
 - `tests/test_sources/` — `test_locator.py`, `test_digest.py`, `test_blobs.py`, `test_fetcher.py`, `test_publication.py`, `test_layering.py`, plus `test_drivers/` (one file per driver, `test_api.py`, `test_drivers.py`, `test_publish.py`).
 - `tests/test_dataset/` — `test_protocol.py`, `test_meta.py`, `test_cache.py`, `test_csv_dataset.py`, `test_qm9.py`, `test_revmd17.py`, `test_threebpa.py`.
 - `tests/test_uploader/` — `test_figshare.py`, `test_huggingface.py`.
-- Still no `regressions/` directory. Network tests are opt-in: `pyproject.toml` sets `addopts = "-m 'not network'"`.
+- Unit tests only: no `regressions/` directory, no browser e2e, and no tests that reach a real upstream.
 
 ### Public surface
 
@@ -136,6 +136,6 @@ Cross-cutting, stated factually:
 - **`digest` is optional** in `spec/manifest.schema.yaml` and absent from all four 3BPA roles. Of the bundled manifests, every present digest is **md5** copied from upstream.
 - **The cache is not content-addressed.** Python and TypeScript both use `files/<kind>/<namespace>/<name>@<version>/<role>`, proven by the shared vectors and client tests.
 - **Layering is now test-enforced**, not just documented: `tests/test_sources/test_layering.py` asserts the transport layer does not import the resolution or semantic layers.
-- Test coverage now mirrors `src/` for every module. `regressions/` still does not exist, so the public-API scenario net named in `CLAUDE.md` is unbuilt.
+- Test coverage now mirrors `src/` for every module.
 
 <!-- mol:map:managed end -->

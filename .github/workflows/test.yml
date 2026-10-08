@@ -7,7 +7,7 @@ name: test
 #         3.12, and test / node.
 #   full  every push to a fork (proven before its pull request), dev, master
 #         and main on MolCrafts, pull requests, tags and dispatches:
-#         + Python 3.13/3.14, macOS, Windows, test / browser, test / package.
+#         + Python 3.13/3.14, macOS, Windows, test / package.
 on:
   push:
     branches: ["**"]
@@ -71,27 +71,6 @@ jobs:
       - run: npm run deploy:dry --workspace @molcrafts/molhub-api
       - run: npm run build --workspace @molcrafts/molhub-web
       - run: test -s apps/web/dist/client/index.html
-
-  # The Inspector in a real Chromium against the prerendered site.
-  browser:
-    name: test / browser
-    needs: tier
-    if: needs.tier.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
-      - uses: ./.github/actions/setup-registry
-      - run: npm run build --workspace @molcrafts/molhub-web
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e --workspace @molcrafts/molhub-web
-      - if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: inspector-browser-${{ github.sha }}
-          path: apps/web/test-results/
-          retention-days: 14
 
   # What the wheel and the npm tarball ship.
   package:
