@@ -110,7 +110,7 @@ digest 的条目报告 skipped 而不是伪造成功。
 
 - runtime-checkable `MapDataset` / `IterableDataset`；
 - `TargetSchema` 区分 graph-level 与 atom-level；
-- `Targets(frame)` 是读取/写入 `Frame.meta` 的唯一公共适配；
+- graph-level target 直接存于 molpy 的实时映射 `frame.meta`（裸 Python 值），不另设适配层；
 - `InMemoryDataset` / `SubsetDataset`；
 - `QM9Dataset`、`RevMD17Dataset`、`ThreeBPADataset`、`CSVDataset`。
 

@@ -14,7 +14,7 @@ import pytest
 
 import molhub
 from molhub.coordinate import Coordinate
-from molhub.dataset import ArtifactHub, MapDataset, RevMD17Dataset, Targets
+from molhub.dataset import ArtifactHub, MapDataset, RevMD17Dataset
 from molhub.dataset.revmd17 import _MOLECULES, COORDINATE
 from molhub.manifest import Manifest
 
@@ -199,16 +199,16 @@ class TestRevMD17DatasetAccess:
 
     def test_energy_lands_in_frame_meta(self, npz_root):
         src = RevMD17Dataset(npz_root, download=False)
-        assert Targets(src[0]).read()["energy"] == pytest.approx(-10.0)
-        assert Targets(src[2]).read()["energy"] == pytest.approx(-12.0)
+        assert src[0].meta["energy"] == pytest.approx(-10.0)
+        assert src[2].meta["energy"] == pytest.approx(-12.0)
 
     def test_energy_is_a_plain_float(self, npz_root):
         src = RevMD17Dataset(npz_root, download=False)
-        assert isinstance(Targets(src[0]).read()["energy"], float)
+        assert isinstance(src[0].meta["energy"], float)
 
     def test_frames_are_independent(self, npz_root):
         src = RevMD17Dataset(npz_root, download=False)
-        assert Targets(src[0]).read()["energy"] != Targets(src[1]).read()["energy"]
+        assert src[0].meta["energy"] != src[1].meta["energy"]
 
 
 class TestRevMD17DatasetId:

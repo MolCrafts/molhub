@@ -63,11 +63,10 @@ mypy 抓不住。**（诚实的边界：`frame.meta.update(...)` 那条静默失
 
 ## 3. molpy 版本跟踪策略
 
-依赖已收紧为 `molcrafts-molpy>=0.12,<0.13`。molpy 是 pre-1.0 且在小版本间搬公开
-API（0.3 → 0.9 搬了 `Frame`/`Block`/`Element` 并重命名了 `metadata`）。
-
-待决：谁在 molpy 发新小版本时负责验证并抬上界？是否需要一个定期跑 molpy
-最新版的 CI 任务，让不兼容尽早以红灯出现而不是等用户撞上。
+已决：依赖为 `molcrafts-molpy>=0.16,<0.17`；dev 分支经 `.github/partners.env`
+跟踪 molpy、molrs 的 `dev`（`scripts/partners.py` + `[tool.uv.sources]` 兄弟目录），
+每次推送都对伙伴的最新 dev 构建测试，不兼容立即红灯。发布时把 `<NAME>_REF`
+改为对应 tag 并抬上界。
 
 ## 4. 按裸 URL 寻址的缓存要不要继续存在
 

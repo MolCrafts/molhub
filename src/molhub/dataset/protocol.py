@@ -29,9 +29,8 @@ Sample = Frame
 
 The ``atoms`` block carries per-atom data (``element``, ``x``, ``y``, ``z``,
 ``number``, and optionally ``fx``, ``fy``, ``fz`` for forces).
-Graph-level targets (e.g. energy) live in ``frame.meta`` as typed
-``MetaValue`` entries; read them as plain Python values with
-:class:`molhub.dataset.Targets`.
+Graph-level targets (e.g. energy) live in ``frame.meta``, a live mapping of
+plain Python values.
 """
 
 

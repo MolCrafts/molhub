@@ -25,7 +25,6 @@ from molpy import Block, Element, Frame
 from tqdm import tqdm
 
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.meta import Targets
 from molhub.dataset.protocol import TargetSchema
 from molhub.molhub import Molhub
 
@@ -118,16 +117,13 @@ def _parse_xyz(content: str) -> Frame:
             continue
         values[key] = float(metadata[key])
 
-    frame = Frame()
-    frame["atoms"] = atoms_blk
-    Targets(frame).write(values)
-    return frame
+    return Frame({"atoms": atoms_blk}, meta=values)
 
 
 def _filter_targets(frame: Frame, kept: frozenset[str]) -> Frame:
     """Drop targets not in *kept* to shrink metadata when user wants a subset."""
-    filtered = {k: v for k, v in Targets(frame).read().items() if k in kept}
-    Targets(frame).write(filtered)
+    for key in [k for k in frame.meta if k not in kept]:
+        del frame.meta[key]
     return frame
 
 
@@ -217,8 +213,7 @@ class QM9Dataset:
 
     Each sample is a :class:`molpy.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``) and scalar quantum
-    properties stored in ``frame.meta`` (read them with
-    :class:`molhub.dataset.Targets`).
+    properties stored in ``frame.meta``.
 
     Args:
         root: Directory for the raw QM9 tarball (downloaded on first use).

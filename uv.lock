@@ -583,57 +583,50 @@ wheels = [
 ]
 
 [[package]]
-name = "molcrafts-molcfg"
-version = "1.4.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/27/26d42088d70c0da60277ad720e65c9bd5f786a75a5f670aad595ac8fa450/molcrafts_molcfg-1.4.2.tar.gz", hash = "sha256:75c351ca03c78552487d4866394d1ef63c07e2f853ba02f91ec2991e8c19e3dd", size = 39963, upload-time = "2026-07-01T08:02:14.746Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/ae/195b755fa697ee1fdb3bcdf7d525dc1e1a07f19bab9c6b02c70801d93d46/molcrafts_molcfg-1.4.2-py3-none-any.whl", hash = "sha256:30170debb26ca77afc24ca543aaf259e801be0ad729df1a44f4af53bd60c20f6", size = 21217, upload-time = "2026-07-01T08:02:13.327Z" },
-]
-
-[[package]]
-name = "molcrafts-mollog"
-version = "1.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/54/2f9345c025460c056d84c61d86f852305fd9863ed95dbcca038e1d61d4cc/molcrafts_mollog-1.2.2.tar.gz", hash = "sha256:02fa31d11c3ac560440aac68b1709bd41a88318abc712f2c3c6307e2db26880a", size = 43861, upload-time = "2026-05-11T10:13:11.251Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/92/7b39c0715515965fa0463670c647735aacdfc255cb7fb33d5a4fc15cbf57/molcrafts_mollog-1.2.2-py3-none-any.whl", hash = "sha256:1dc4cacf715aae173f022698a99db8a725ecaf4d504c19336c987ddca6cee426", size = 24849, upload-time = "2026-05-11T10:13:10.094Z" },
-]
-
-[[package]]
 name = "molcrafts-molpy"
-version = "0.12.2"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "../molpy" }
 dependencies = [
-    { name = "molcrafts-molcfg" },
-    { name = "molcrafts-mollog" },
     { name = "molcrafts-molrs" },
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/90/807d779ebc0cffed7fdfa630ac9fca0adeef736cb58f300e582d24345fd3/molcrafts_molpy-0.12.2.tar.gz", hash = "sha256:76b5fc295ae576db01d174689829c20f84f6ae3d9f82cc5f5894f707076c9c9e", size = 362019, upload-time = "2026-08-05T15:10:51.036Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/1f/393e93dac47546b3c7d4cae0f2e1233b1735bbb354179f6202d94ebdd13d/molcrafts_molpy-0.12.2-py3-none-any.whl", hash = "sha256:07ab516a400078b76dcd36228b416f64272e5e1173548065f2ede6bdb1f6f0e8", size = 434945, upload-time = "2026-08-05T15:10:49.392Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'doc'", specifier = ">=0.24.0" },
+    { name = "molcrafts-molpy", extras = ["dev", "doc"], marker = "extra == 'all'" },
+    { name = "molcrafts-molrs", directory = "../molrs/molrs-python" },
+    { name = "molcrafts-zensical-theme", marker = "extra == 'doc'", specifier = ">=0.2.9" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.0" },
+    { name = "rdkit", marker = "extra == 'rdkit'" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.1" },
+    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.23" },
+    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.65" },
+    { name = "zensical", marker = "extra == 'doc'", specifier = ">=0.0.53" },
 ]
+provides-extras = ["dev", "rdkit", "doc", "all"]
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.12.2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.16.0"
+source = { directory = "../molrs/molrs-python" }
 dependencies = [
     { name = "numpy" },
 ]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/bd/e8f61c9b214b85e02bcb77cdae0016378801b06da076412bff37b23b756d/molcrafts_molrs-0.12.2-cp312-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:96abb6e9d876f5db2c739e88f5527f5dbed4a00e91f0124181d75b6632e3bae2", size = 10128525, upload-time = "2026-08-05T14:06:02.863Z" },
-    { url = "https://files.pythonhosted.org/packages/a6/a4/68c4dc2330bd227a1f185a575a85e1a41ed76e8ad77d3cc9dd675809147f/molcrafts_molrs-0.12.2-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:377aeb014423282dade8554a1df2dca6ac66258a5c8d43e1ca074a591136bd56", size = 5729664, upload-time = "2026-08-05T14:06:04.885Z" },
-    { url = "https://files.pythonhosted.org/packages/98/23/505600020eceb33169ec87866c04b6899d80439fba3772c3c6f7dc038f62/molcrafts_molrs-0.12.2-cp312-abi3-pyemscripten_2026_0_wasm32.whl", hash = "sha256:c5be9a9b1903a05df44ebcad811862fa99a31c069cdd9ee6098c5e0d1bb48ede", size = 1865815, upload-time = "2026-08-05T14:06:07.221Z" },
-    { url = "https://files.pythonhosted.org/packages/a9/ef/cdbc45677ab7c131f780282d99660ed45296f09c49d6e09faf114bfeab39/molcrafts_molrs-0.12.2-cp312-abi3-win_amd64.whl", hash = "sha256:d0e7b9ec6d6df4c1d9297efa8f0599d2358ad83d8d8aff03775ec3cb2006367c", size = 4951806, upload-time = "2026-08-05T14:06:08.799Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "maturin", marker = "extra == 'dev'", specifier = ">=1.0,<2.0" },
+    { name = "mkdocstrings", extras = ["python"], marker = "extra == 'doc'" },
+    { name = "molcrafts-zensical-theme", marker = "extra == 'doc'", specifier = ">=0.2.3" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.23" },
+    { name = "zensical", marker = "extra == 'doc'", specifier = ">=0.0.51" },
 ]
+provides-extras = ["dev", "doc"]
 
 [[package]]
 name = "molcrafts-zensical-theme"
@@ -664,6 +657,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "jsonschema" },
+    { name = "molcrafts-molrs" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
@@ -686,7 +680,8 @@ docs = [
 requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.20" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "molcrafts-molpy", specifier = ">=0.12,<0.13" },
+    { name = "molcrafts-molpy", editable = "../molpy" },
+    { name = "molcrafts-molrs", marker = "extra == 'dev'", directory = "../molrs/molrs-python" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.15" },

@@ -13,12 +13,12 @@ stored in ``frame.meta``.  Numeric columns are auto-detected.
 
 Usage::
 
-    from molhub.dataset import CSVDataset, Targets
+    from molhub.dataset import CSVDataset
 
     ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
     print(len(ds))       # number of rows
     frame = ds[0]        # first row as a Frame
-    print(Targets(frame)["labels.Exp_Tg(K)"])   # access a column
+    print(frame.meta["labels.Exp_Tg(K)"])   # access a column
 
     # Also works with local files:
     ds = CSVDataset("/path/to/data.csv")
@@ -33,7 +33,6 @@ from typing import Any
 from molpy import Frame
 
 from molhub.dataset.cache import DownloadCache
-from molhub.dataset.meta import Targets
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -149,9 +148,7 @@ class CSVDataset:
 
     def __getitem__(self, idx: int) -> Frame:
         row = self._rows[idx]
-        frame = Frame()
-        Targets(frame).write(row)
-        return frame
+        return Frame(meta=row)
 
     # -- introspection -------------------------------------------------------
 
