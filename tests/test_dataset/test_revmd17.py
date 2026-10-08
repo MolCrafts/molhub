@@ -280,27 +280,3 @@ class TestRevMD17Manifest:
     def test_declares_the_sources_targets(self, manifest):
         assert manifest.targets.graph_level == ("energy",)
         assert manifest.targets.atom_level == ("forces",)
-
-
-@pytest.mark.network
-class TestRevMD17AgainstRealUpstream:
-    """Run with ``pytest -m network``. Resolves metadata and fetches only the
-    2 kB readme — never a 150 MB array."""
-
-    def test_upstream_still_publishes_the_manifests_digests(self):
-        from molhub.sources.drivers.figshare import FigshareSource
-
-        manifest = Manifest.from_path(_MANIFEST_PATH)
-        source = FigshareSource()
-        for molecule in _MOLECULES:
-            artifact = manifest.artifact(molecule)
-            remote = source.resolve(artifact.locators[0])[0]
-            assert remote.upstream_digest == str(artifact.digest)
-            assert remote.size == artifact.size
-
-    def test_the_readme_role_transfers_and_verifies(self, tmp_path, monkeypatch):
-        from molhub.molhub import Molhub
-
-        monkeypatch.setenv("MOLHUB_HOME", str(tmp_path))
-        paths = Molhub(_MANIFEST_PATH.parents[3]).fetch(COORDINATE, roles=["readme"])
-        assert paths["readme"].read_text(encoding="utf-8").startswith("THE REVISED MD17 dataset")

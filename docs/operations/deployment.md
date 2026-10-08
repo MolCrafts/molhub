@@ -38,7 +38,7 @@ and dispatches.
 | workflow | fast tier | full tier | upstream only |
 |---|---|---|---|
 | `lint.yml` | `lint / python` (ruff, ty), `lint / node` (audit, contract, biome, tsc) | same | — |
-| `test.yml` | `test / tier`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / browser` (Playwright Inspector), `test / package` | — |
+| `test.yml` | `test / tier`, `test / python (ubuntu-latest, 3.12)`, `test / node` (workspaces, parity, Worker dry run, Web build) | + Python 3.13/3.14, macOS, Windows, `test / package` | — |
 | `docs.yml` | `docs / build` (`npm run docs:check`) | same | master: `docs / deploy` (docs site), `docs / web` (MolHub Web; also on molhub-registry's `registry-published`) |
 | `deploy.yml` | — | — | master: `deploy / api` (D1 migrations, Worker, `/health`) |
 | `nightly.yml` | — | — | weekly: `nightly / molpy` (newest MolPy), `nightly / coverage` |

@@ -91,9 +91,9 @@ style. It applies to every file, not only "important" ones.
 that module's unit tests** under `tests/` (path mirrors the module),
 with fakes/stubs for outbound deps. The unit-test loop is
 `uv run pytest {path} -v` on the mirrored path — **not** full-suite
-and **not** cross-module regression. Full suite (`uv run pytest -v`)
-and `regressions/` are CI / public-API nets; they are **not** how you
-green a unit during design or implementation.
+and **not** cross-module regression. The full suite (`uv run pytest -v`)
+is the CI net; it is **not** how you green a unit during design or
+implementation.
 
 If a change "only works when the whole suite runs", or a unit test
 must boot sibling modules' real implementations / the full app /
@@ -131,7 +131,7 @@ Do not "fix it with more integration tests."
   than one coherent responsibility.
 - **All-in-one façade APIs.** No public `run_everything` /
   `compute_all` / `pipeline` that hides multi-step work. Composition
-  is the **caller's** job (scripts, docs examples, `regressions/`).
+  is the **caller's** job (scripts, docs examples).
   The library exposes primitives only.
 - **Coupling that forces full-graph testing.** No hidden cross-module
   state, import-time side effects, or hard-wired concrete
@@ -152,11 +152,11 @@ Do not "fix it with more integration tests."
 
 - Unit tests **only** under `tests/`, path mirrors source
   (`src/molhub/dataset/qm9.py` → `tests/test_dataset/test_qm9.py`), types mirror
-  (`FooClass` → `TestFooClass`). Single-function tests — no e2e under
-  `tests/`. **One module → its mirrored tests only**; unit green does
-  not require full suite. Public-API scenarios → `regressions/` with
-  **hard-coded** goldens (no live third-party oracles). Details:
-  `tester` agent.
+  (`FooClass` → `TestFooClass`). Single-function tests — no e2e, no
+  speed or timing asserts, no regression/golden-run tests, no real
+  network or upstream services. **One module → its mirrored tests
+  only**; unit green does not require full suite. Details: `tester`
+  agent.
 
 ## Default workflow
 

@@ -10,7 +10,7 @@ describe("submission API", () => {
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ status: "ok" });
 
-    const name = `docs-${crypto.randomUUID().slice(0, 8)}`;
+    const name = "docs-test";
     const created = await call("/v1/submissions", {
       method: "POST",
       headers: { "content-type": "application/json", "user-agent": name },
@@ -24,7 +24,7 @@ describe("submission API", () => {
   });
 
   it("creates a submission and exposes its review status without GitHub", async () => {
-    const name = `sample-${crypto.randomUUID().slice(0, 8)}`;
+    const name = "sample-test";
     const created = await call("/v1/submissions", {
       method: "POST",
       headers: { "content-type": "application/json", origin: env.WEB_ORIGIN },
@@ -55,7 +55,7 @@ describe("submission API", () => {
   });
 
   it("lets an authenticated reviewer reject with an actionable note", async () => {
-    const name = `reject-${crypto.randomUUID().slice(0, 8)}`;
+    const name = "reject-test";
     const created = await call("/v1/submissions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -78,7 +78,7 @@ describe("submission API", () => {
   });
 
   it("gives an authenticated reviewer a work queue without contributor email", async () => {
-    const name = `queue-${crypto.randomUUID().slice(0, 8)}`;
+    const name = "queue-test";
     const created = await call("/v1/submissions", {
       method: "POST",
       headers: {
@@ -102,7 +102,7 @@ describe("submission API", () => {
   });
 
   it("rate limits repeated anonymous submissions before D1 work", async () => {
-    const actor = `rate-${crypto.randomUUID()}`;
+    const actor = "rate-test";
     const statuses: number[] = [];
     for (let index = 0; index < 6; index += 1) {
       const response = await call("/v1/submissions", {

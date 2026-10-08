@@ -22,5 +22,5 @@
       "@brand/*": ["../../.github/assets/*"]
     }
   },
-  "include": ["app/src", "e2e", "scripts", "*.config.ts"]
+  "include": ["app/src", "scripts", "*.config.ts"]
 }
