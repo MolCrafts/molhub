@@ -18,18 +18,18 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Iterator, Protocol, runtime_checkable
 
-from molpy.core.frame import Frame
+from molpy.core import Frame
 
 # ---------------------------------------------------------------------------
 # Sample — a molpy Frame
 # ---------------------------------------------------------------------------
 
 Sample = Frame
-"""A single dataset sample is a :class:`molpy.core.frame.Frame`.
+"""A single dataset sample is a :class:`molpy.core.Frame`.
 
 The ``atoms`` block carries per-atom data (``element``, ``x``, ``y``, ``z``,
 ``number``, and optionally ``fx``, ``fy``, ``fz`` for forces).
-Graph-level targets (e.g. energy) live in ``frame.metadata``.
+Graph-level targets (e.g. energy) live in ``frame.meta``.
 """
 
 
@@ -42,7 +42,7 @@ Graph-level targets (e.g. energy) live in ``frame.metadata``.
 class TargetSchema:
     """Declares how targets are organised in a :data:`Sample`.
 
-    ``graph_level`` targets (e.g. energy) are stored in ``frame.metadata``.
+    ``graph_level`` targets (e.g. energy) are stored in ``frame.meta``.
     ``atom_level`` targets (e.g. forces) are stored as columns in the
     ``atoms`` block (``fx``, ``fy``, ``fz``).
 
@@ -83,7 +83,7 @@ class MapDataset(Protocol):
         """Return the sample at integer *idx*.
 
         Returns:
-            A :class:`molpy.core.frame.Frame`.
+            A :class:`molpy.core.Frame`.
 
         Raises:
             IndexError: If *idx* is out of range.
@@ -115,7 +115,7 @@ class IterableDataset(Protocol):
         """Yield samples in streaming order.
 
         Returns:
-            An iterator over :class:`molpy.core.frame.Frame` objects.
+            An iterator over :class:`molpy.core.Frame` objects.
         """
         ...
 

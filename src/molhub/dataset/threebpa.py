@@ -26,8 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from molpy.core.element import Element
-from molpy.core.frame import Block, Frame
+from molpy.core import Block, Element, Frame
 
 from molhub.dataset.protocol import TargetSchema
 
@@ -80,7 +79,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.metadata["energy"] = energy
+        frame.meta["energy"] = energy
         frames.append(frame)
 
         i += 2 + natoms
@@ -90,9 +89,9 @@ def _parse_extxyz(path: Path) -> list[Frame]:
 class ThreeBPASource:
     """Map-style dataset for one 3BPA extended-XYZ split.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.core.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.metadata``.
+    and ``energy`` in ``frame.meta``.
 
     Args:
         path: Path to the ``.xyz`` file.

@@ -10,7 +10,7 @@ Usage::
 
     source = QM9Source(data_dir)
     print(len(source))        # 130831
-    frame = source[0]         # molpy Frame with atoms block + metadata targets
+    frame = source[0]         # molpy Frame with atoms block + meta targets
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ import urllib.request
 from pathlib import Path
 
 import numpy as np
-from molpy.core.element import Element
-from molpy.core.frame import Block, Frame
+from molpy.core import Block, Element, Frame
 from tqdm import tqdm
 
 from molhub.dataset.protocol import TargetSchema
@@ -111,15 +110,15 @@ def _parse_xyz(content: str) -> Frame:
 
     frame = Frame()
     frame["atoms"] = atoms_blk
-    frame.metadata.update(targets)
+    frame.meta.update(targets)
     return frame
 
 
 def _filter_targets(frame: Frame, kept: frozenset[str]) -> Frame:
     """Drop targets not in *kept* to shrink metadata when user wants a subset."""
-    filtered = {k: v for k, v in frame.metadata.items() if k in kept}
-    frame.metadata.clear()
-    frame.metadata.update(filtered)
+    filtered = {k: v for k, v in frame.meta.items() if k in kept}
+    frame.meta.clear()
+    frame.meta.update(filtered)
     return frame
 
 
@@ -184,9 +183,9 @@ def _load_raw(root: Path, total: int | None) -> list[Frame]:
 class QM9Source:
     """Map-style dataset for QM9.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.core.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``) and scalar quantum
-    properties stored in ``frame.metadata``.
+    properties stored in ``frame.meta``.
 
     Args:
         root: Directory for the raw QM9 tarball (downloaded on first use).

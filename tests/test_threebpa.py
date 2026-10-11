@@ -58,8 +58,8 @@ class TestThreeBPASource:
     def test_natoms(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")
         # CH4 = 5 atoms
-        assert src[0]["atoms"].nrows == 5
-        assert src[1]["atoms"].nrows == 5
+        assert src[0]["atoms"].n_rows == 5
+        assert src[1]["atoms"].n_rows == 5
 
     def test_element_dtype(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")
@@ -79,8 +79,8 @@ class TestThreeBPASource:
 
     def test_energy_in_metadata(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")
-        assert src[0].metadata["energy"] == pytest.approx(-40.50)
-        assert src[1].metadata["energy"] == pytest.approx(-40.45)
+        assert src[0].meta["energy"] == pytest.approx(-40.50)
+        assert src[1].meta["energy"] == pytest.approx(-40.45)
 
     def test_forces_shape(self, sample_xyz_path):
         src = ThreeBPASource(sample_xyz_path, tag="test")
