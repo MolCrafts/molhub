@@ -3,7 +3,7 @@
 Zero extra dependencies — uses stdlib ``csv`` and ``urllib``.
 
 Each row of the CSV becomes one :class:`Frame` with all column values
-stored in ``frame.metadata``.  Numeric columns are auto-detected.
+stored in ``frame.meta``.  Numeric columns are auto-detected.
 
 Usage::
 
@@ -12,7 +12,7 @@ Usage::
     ds = CSVDataset("https://zenodo.org/records/14980914/files/LAMALAB_CURATED_Tg_structured.csv")
     print(len(ds))       # number of rows
     frame = ds[0]        # first row as a Frame
-    print(frame.metadata["labels.Exp_Tg(K)"])   # access a column
+    print(frame.meta["labels.Exp_Tg(K)"])   # access a column
 
     # Also works with local files:
     ds = CSVDataset("/path/to/data.csv")
@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from molpy.core.frame import Frame
+from molpy.core import Frame
 
 # ---------------------------------------------------------------------------
 # CSV parsing
@@ -184,7 +184,7 @@ class CSVDataset:
     def __getitem__(self, idx: int) -> Frame:
         row = self._rows[idx]
         frame = Frame()
-        frame.metadata.update(row)
+        frame.meta.update(row)
         return frame
 
     # -- introspection -------------------------------------------------------

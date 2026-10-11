@@ -10,7 +10,7 @@ Usage::
     from molhub.dataset import RevMD17Source
 
     source = RevMD17Source(data_dir, molecule="aspirin")
-    frame = source[0]   # molpy Frame with atoms block + energy in metadata
+    frame = source[0]   # molpy Frame with atoms block + energy in frame.meta
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import ssl
 from pathlib import Path
 
 import numpy as np
-from molpy.core.frame import Block, Frame
+from molpy.core import Block, Frame
 
 from molhub.dataset.protocol import TargetSchema
 
@@ -50,9 +50,9 @@ _ELEMENT_SYMBOLS: dict[int, str] = {
 class RevMD17Source:
     """Map-style dataset for the revised MD17 trajectories.
 
-    Each sample is a :class:`molpy.core.frame.Frame` with an ``atoms`` block
+    Each sample is a :class:`molpy.core.Frame` with an ``atoms`` block
     (``element``, ``x``, ``y``, ``z``, ``number``, ``fx``, ``fy``, ``fz``)
-    and ``energy`` in ``frame.metadata``.
+    and ``energy`` in ``frame.meta``.
 
     Energies are in kcal/mol and forces in kcal/(mol·Å) as distributed.
 
@@ -137,5 +137,5 @@ class RevMD17Source:
 
         frame = Frame()
         frame["atoms"] = atoms_blk
-        frame.metadata["energy"] = float(self._energies[idx])
+        frame.meta["energy"] = float(self._energies[idx])
         return frame

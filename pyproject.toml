@@ -20,7 +20,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
 ]
 dependencies = [
-  "molcrafts-molpy>=0.3.0",
+  "molcrafts-molpy>=0.17.0",
   "tqdm",
   "requests>=2.28",
 ]

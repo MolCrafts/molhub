@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from molpy.core.frame import Frame
+from molpy.core import Frame
 
 from molhub.dataset import CSVDataset, MapDataset
 
@@ -44,28 +44,28 @@ class TestCSVDataset:
     def test_metadata_contains_columns(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         frame = ds[0]
-        assert "PSMILES" in frame.metadata
-        assert "labels.Exp_Tg(K)" in frame.metadata
-        assert "meta.source" in frame.metadata
-        assert "meta.reliability" in frame.metadata
+        assert "PSMILES" in frame.meta
+        assert "labels.Exp_Tg(K)" in frame.meta
+        assert "meta.source" in frame.meta
+        assert "meta.reliability" in frame.meta
 
     def test_numeric_inference(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         frame = ds[0]
         # Tg value should be inferred as float
-        assert isinstance(frame.metadata["labels.Exp_Tg(K)"], float)
-        assert frame.metadata["labels.Exp_Tg(K)"] == pytest.approx(345.15)
+        assert isinstance(frame.meta["labels.Exp_Tg(K)"], float)
+        assert frame.meta["labels.Exp_Tg(K)"] == pytest.approx(345.15)
 
     def test_string_columns_remain_string(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
         frame = ds[0]
-        assert isinstance(frame.metadata["PSMILES"], str)
-        assert isinstance(frame.metadata["meta.reliability"], str)
-        assert frame.metadata["meta.reliability"] == "black"
+        assert isinstance(frame.meta["PSMILES"], str)
+        assert isinstance(frame.meta["meta.reliability"], str)
+        assert frame.meta["meta.reliability"] == "black"
 
     def test_all_rows_accessible(self, sample_csv_path):
         ds = CSVDataset(str(sample_csv_path))
-        tgs = [ds[i].metadata["labels.Exp_Tg(K)"] for i in range(len(ds))]
+        tgs = [ds[i].meta["labels.Exp_Tg(K)"] for i in range(len(ds))]
         assert tgs == pytest.approx([345.15, 358.15, 344.15, 473.15, 473.15])
 
     def test_headers(self, sample_csv_path):
