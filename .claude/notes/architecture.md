@@ -50,7 +50,7 @@ Semantic L3 — `src/molhub/dataset/`:
 - `qm9.py`, `revmd17.py`, `threebpa.py` — coordinate-pinned classic sets; lazy (`qm9`) vs eager parse in `__init__` (the other two).
 - `water_les.py` — `WaterLESDataset`, extxyz with lattice → `InMemoryDataset` via `.load()`.
 - `zinc_typing.py`, `phalkethoh_mm.py` — espaloma split-bearing sets; expose `molecule_ids` / `split_table`.
-- `molrec.py` — `MolRecDataset`, molpy `MolRec` → frames with force columns.
+- `molrec.py` — `MolRecDataset`, a `*.mrec` trajectory (`molpy.io.mrec`) → frames with force columns.
 - `themol.py` — `THEMolShardDataset` (lazy per-process HDF5 handle, picklable) + five decorated definition classes; `THEMOL_UNITS` is the single unit table.
 - `universal_class_i.py` — `CollectionRole` / `MultiSourceDatasetCollection` / `Class1Universal2026`, the multi-source role map.
 

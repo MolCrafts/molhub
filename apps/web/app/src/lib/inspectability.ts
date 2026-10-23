@@ -59,7 +59,13 @@ const MEDIA_TYPE_FORMATS: Readonly<Record<string, MolvisFormat>> = {
   "chemical/x-xyz": "xyz",
 };
 
-const DERIVED_FORMATS = new Set(["molrec-zarr-v3", "npz", "tar", "tar-bz2", "psmiles-csv"]);
+const DERIVED_FORMATS = new Set(["mrec", "psmiles-csv"]);
+
+const ARCHIVE_MEDIA_TYPES = new Set([
+  "application/gzip",
+  "application/x-tar",
+  "application/zip",
+]);
 
 /**
  * Decide whether an artifact can enter Inspector from declared byte semantics.
@@ -97,7 +103,15 @@ export function inspectability(artifact: RegistryArtifact): Inspectability {
   if (declaredFormat && DERIVED_FORMATS.has(declaredFormat)) {
     return {
       state: "derived",
-      reason: `${declaredFormat} requires a traceable MolRec-derived inspection record.`,
+      reason: `${declaredFormat} requires a traceable derived inspection record.`,
+    };
+  }
+
+  const mediaType = artifact.media_type?.toLowerCase() ?? null;
+  if (mediaType && ARCHIVE_MEDIA_TYPES.has(mediaType)) {
+    return {
+      state: "derived",
+      reason: `Packaged ${mediaType} bytes need a derived record before Inspector can open them.`,
     };
   }
 

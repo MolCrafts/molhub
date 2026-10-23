@@ -38,6 +38,8 @@ Thumbs.db
 
 # Data (local downloads)
 data/
+# The shipped GAFF2 Lennard-Jones table is a package asset, not scratch data.
+!src/molhub/data/
 
 # Web app build inputs and outputs
 node_modules/

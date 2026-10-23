@@ -10,7 +10,6 @@ the frame.
 
 The literals below are hard-coded, not recomputed: they are the same baselines,
 residuals, conversion factor and constant label that
-``regressions/molix-data-dissolution-05-molhub-reception.py`` and
 ``tests/test_dataset/test_transforms.py`` assert. No network, no third-party
 runtime, no live oracle.
 
@@ -59,7 +58,7 @@ def _sample(numbers: list[int], targets: dict[str, float]) -> Frame:
     block = Block()
     block["number"] = np.array(numbers, dtype=np.int64)
     frame["atoms"] = block
-    frame.meta.update(targets)
+    frame.meta = dict(targets)
     return frame
 
 
@@ -68,33 +67,38 @@ def _sample(numbers: list[int], targets: dict[str, float]) -> Frame:
 # ---------------------------------------------------------------------------
 
 
-def check_frame_meta_is_the_whole_surface() -> None:
-    """Merge, whole replacement, plain-scalar reads, and the platform's refusal."""
-    frame = _sample([1, 1, 8], {"U0": -9.0})
-    assert float(frame.meta["U0"]) == -9.0
-    assert isinstance(frame.meta["U0"], float), "molpy hands back a plain Python float"
+def _plain(value: object) -> object:
+    """Python scalar from a molpy 0.14 ``MetaValue``."""
+    return getattr(value, "value", value)
 
-    frame.meta.update({"gap": 0.25})
-    assert set(frame.meta) == {"U0", "gap"}, "update() merges"
-    assert float(frame.meta["U0"]) == -9.0
+
+def check_frame_meta_is_the_whole_surface() -> None:
+    """Wholesale assignment, MetaValue reads, and a detached dict copy."""
+    frame = _sample([1, 1, 8], {"U0": -9.0})
+    assert float(_plain(frame.meta["U0"])) == -9.0
+    assert isinstance(_plain(frame.meta["U0"]), float)
+
+    # molpy 0.14: ``frame.meta`` returns a copy of MetaValue wrappers. Item
+    # writes and ``update()`` do not persist; replace the mapping wholesale.
+    current = {key: _plain(value) for key, value in frame.meta.items()}
+    current["gap"] = 0.25
+    frame.meta = current
+    assert set(frame.meta) == {"U0", "gap"}, "assignment merges by replacement"
+    assert float(_plain(frame.meta["U0"])) == -9.0
 
     frame.meta = {"U0": -9.0}
     assert set(frame.meta) == {"U0"}, "assignment replaces wholesale"
 
     detached = dict(frame.meta)
     detached["U0"] = 0.0
-    assert float(frame.meta["U0"]) == -9.0, "dict(frame.meta) is a detached copy"
+    assert float(_plain(frame.meta["U0"])) == -9.0, "dict(frame.meta) is a detached copy"
 
-    try:
-        frame.meta.update({"bad": None})
-    except TypeError:
-        pass
-    else:  # pragma: no cover - molpy owns this refusal now
-        raise AssertionError("a non-scalar meta value must be refused by molpy")
+    frame.meta = {"bad": None}
+    assert _plain(frame.meta["bad"]) is None, "None round-trips as JSON null"
 
     print(
-        "  Frame.meta: update() merges, assignment replaces, dict() detaches, "
-        "non-scalar refused by molpy"
+        "  Frame.meta: assignment replaces, dict() detaches, "
+        "reads unwrap MetaValue, None stores as JSON null"
     )
 
 
@@ -115,9 +119,9 @@ def check_transform_chain() -> None:
     ]
     converted = [convert.execute(sample) for sample in raw]
     for sample, want in zip(converted, _SAMPLE_ENERGIES_EV):
-        assert abs(float(sample.meta["U0"]) - want) <= _ENERGY_EXACT_ATOL
+        assert abs(float(_plain(sample.meta["U0"])) - want) <= _ENERGY_EXACT_ATOL
     for sample, want in zip(raw, _SAMPLE_ENERGIES_EV):
-        got = float(sample.meta["U0"]) * _HARTREE_TO_EV
+        got = float(_plain(sample.meta["U0"])) * _HARTREE_TO_EV
         assert abs(got - want) <= _ENERGY_EXACT_ATOL, "UnitConvert.execute mutated its input"
 
     dress = AtomicDress(elements=(1, 6, 8), target_key="U0", output_key="U0_dressed")
@@ -126,7 +130,7 @@ def check_transform_chain() -> None:
         assert abs(dress.atomic_energies[element] - want) <= _ENERGY_EXACT_ATOL
 
     dressed = [dress.execute(sample) for sample in converted]
-    residuals = [float(sample.meta["U0_dressed"]) for sample in dressed]
+    residuals = [float(_plain(sample.meta["U0_dressed"])) for sample in dressed]
     for got, want in zip(residuals, _RESIDUALS):
         assert abs(got - want) <= _ENERGY_EXACT_ATOL
     assert abs(sum(r * r for r in residuals) - _RESIDUAL_SS) <= _ENERGY_EXACT_ATOL
@@ -134,9 +138,9 @@ def check_transform_chain() -> None:
 
     labelled = [ConstantLabel(key="total_charge", value=_TOTAL_CHARGE).execute(s) for s in dressed]
     for sample, want in zip(labelled, _RESIDUALS):
-        assert isinstance(sample.meta["total_charge"], float)
-        assert abs(float(sample.meta["total_charge"]) - _TOTAL_CHARGE) <= _ENERGY_EXACT_ATOL
-        assert abs(float(sample.meta["U0_dressed"]) - want) <= _ENERGY_EXACT_ATOL
+        assert isinstance(_plain(sample.meta["total_charge"]), float)
+        assert abs(float(_plain(sample.meta["total_charge"])) - _TOTAL_CHARGE) <= _ENERGY_EXACT_ATOL
+        assert abs(float(_plain(sample.meta["U0_dressed"])) - want) <= _ENERGY_EXACT_ATOL
     assert "total_charge" not in dressed[0].meta, "ConstantLabel.execute mutated its input"
 
     print(

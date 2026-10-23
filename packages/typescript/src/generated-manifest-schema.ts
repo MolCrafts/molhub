@@ -116,7 +116,7 @@ export const MANIFEST_SCHEMA = {
           "minLength": 1
         },
         "format": {
-          "description": "Stable, machine-readable identifier for the bytes in this artifact. Consumers must use this field instead of guessing from the filename. Examples include extxyz, npz, csv, and molrec-zarr-v3.",
+          "description": "Stable, machine-readable identifier for the bytes in this artifact. Consumers must use this field instead of guessing from the filename. Examples include extxyz, csv, mrec, and ase-row. The name is the record format, not the storage engine and not the packaging.",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._+-]*$"
         },

@@ -64,13 +64,10 @@ returning the evidence a ``READY`` record needs::
     ).run()
     prepared.blocks[0].block_digest   # what the READY record quotes
 
-``writer_factory`` has **no default**. It used to be an adapter onto molnex's
-``molix.block/1`` writer; that format was deleted on 2026-09-17 (molnex spec
-``data-layer-01-consolidation``) as having no producer, no consumer and no
-instance on disk. The writer-shaped seam — :class:`~molhub.conveyor.prepare.BlockWriterLike`
-/ :class:`~molhub.conveyor.prepare.BlockWriterFactory` — stays, so a caller can
-bring their own; molhub imports no molnex writer, and the base install stays
-torch-free because there is nothing to import.
+``writer_factory`` has **no default**. The caller brings a writer.
+:class:`~molhub.conveyor.prepare.BlockWriterLike` /
+:class:`~molhub.conveyor.prepare.BlockWriterFactory` are that seam. This
+package does not import a block writer, and a base install stays torch-free.
 
 The residency half decides what stays on local disk and what the run can prove
 it saw. :class:`~molhub.conveyor.tier.TierStore` bounds one subdirectory in

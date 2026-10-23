@@ -115,7 +115,7 @@ Keep `molhub-registry` checked out beside this repository, or set
 | Transport | `BlobStore` | On-disk cache keyed by coordinate and role under `$MOLHUB_HOME`, reserved as a cross-SDK contract so one machine downloads once |
 | Transport | `Source` drivers | `https`, `zenodo`, `figshare`, `hf`, `molhub` out of the box. A third party adds a scheme by publishing a driver to the `molhub.sources` entry point — no molhub source change. `PublishingSource` adds upload to the same driver |
 | CLI | `molhub` | `search`, `info` (`--files`, `--home`), `fetch --into`, `cache verify`, `cache status`, `cache coverage` — the same verbs as the Python API |
-| Loading | `molhub.load` | One function. Opens the whole artifact, map-style or (`streaming=True`) as a walk. Split with `SubsetDataset` + `assignment`. `prepare(name, output_dir=...)` writes sealed molnex blocks |
+| Loading | `molhub.load` | One function. Opens the whole artifact, map-style or (`streaming=True`) as a walk. Split with `SubsetDataset` + `assignment`. `prepare(name, output_dir=..., writer_factory=...)` writes sealed blocks |
 | Loading | refusals | `SplitTableUnavailable` and `UnknownSplit` are the two refusals a script catches by name |
 | Datasets | `molhub.dataset` (protocols) | `Dataset` (`__len__` / `__getitem__`) and `IterableDataset` (`__iter__`). A sample is a `molpy.Frame` (one geometry) or a `molpy.Trajectory` (one inseparable multi-frame sampling unit, e.g. a torsion scan); scalars live in each frame's `frame.meta` |
 | Datasets | `molhub.dataset` (helpers) | `InMemoryDataset` wraps a list of frames; `SubsetDataset` slices any map-style dataset by index |
@@ -134,13 +134,13 @@ Each sample is a [molpy](https://github.com/MolCrafts/molpy) `Frame` — one geo
 ```bash
 pip install molhub                 # core: source, registry, CLI, dataset sources, Figshare publishing
 pip install molhub[huggingface]    # + HuggingFace Hub upload support
-pip install molhub[prepare]        # + torch, for writing molnex molix.block/1 blocks with `prepare`
+pip install molhub[prepare]        # + torch, for a caller-supplied block writer used by `prepare`
 pip install molhub[dev]            # + dev tooling (pytest, pytest-cov, pytest-mock, ruff, ty, jsonschema, tox)
 ```
 
 Requires Python >= 3.12. Core dependencies: `molcrafts-molpy >= 0.13` (upper bound deliberately open, so the next molpy minor surfaces here instead of being resolved away), `numpy >= 1.26`, `tqdm`, `requests >= 2.28`, `h5py >= 3.11`, `pyyaml >= 6.0`, `typer >= 0.12`. Installing the package also puts a `molhub` command on your `PATH`.
 
-The `prepare` extra names only torch, because that is the publishable half: molnex itself is not on PyPI. Install it from a source checkout, or point `MOLNEX_SRC` at that checkout's `src/` directory — `prepare` puts it on `sys.path` before it probes for the writer, and refuses with a message naming both routes when neither works. Everything except the block writer runs without either.
+The `prepare` extra names torch. `prepare` has no default writer: pass `writer_factory=` a writer of your own. molhub does not import a block writer, and it does not interpret the format string that writer records. It checks that each sealed manifest is sealed, names the split, agrees on the unit count, and carries a block digest.
 
 ## Quick start
 

@@ -3,9 +3,10 @@
 Mirrors ``src/molhub/conveyor/prepare.py``. Nothing here imports torch, molix or
 molnex: the writer is the injected fake below, which is the whole point of the
 ``BlockWriterLike`` / ``BlockWriterFactory`` seam. The fake is honest about the
-one thing molhub reads back — on ``seal()`` it writes the five manifest fields
-(``format``, ``split``, ``units``, ``sealed``, ``block_digest``) that the job
-verifies before it reports a block as READY evidence — so a test can make a
+one thing molhub reads back — on ``seal()`` it writes the manifest fields
+(``split``, ``units``, ``sealed``, ``block_digest``) that the job verifies
+before it reports a block as READY evidence. The writer's ``format`` string
+is left as recorded — so a test can make a
 manifest *wrong* instead of stubbing the check away.
 
 Fixtures are hand-built :class:`molpy.Frame` records of three species, so five
@@ -489,8 +490,17 @@ class TestPrepareJob:
         with pytest.raises(BlockFormatError):
             _job(_shard(), root=tmp_path, factory=factory).run()
 
-    def test_a_foreign_block_format_is_rejected(self, tmp_path: Path) -> None:
+    def test_the_writers_format_string_is_left_as_recorded(self, tmp_path: Path) -> None:
+        """molhub does not interpret the format string the writer records."""
         factory = RecordingWriterFactory(manifest_patch={"format": "molix.block/2"})
+        prepared = _job(_shard(), root=tmp_path, factory=factory).run()
+        document = json.loads(
+            (prepared.blocks[0].root / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert document["format"] == "molix.block/2"
+
+    def test_a_manifest_without_a_block_digest_is_rejected(self, tmp_path: Path) -> None:
+        factory = RecordingWriterFactory(manifest_patch={"block_digest": ""})
         with pytest.raises(BlockFormatError):
             _job(_shard(), root=tmp_path, factory=factory).run()
 

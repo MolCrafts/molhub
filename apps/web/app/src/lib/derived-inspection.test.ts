@@ -10,7 +10,7 @@ function descriptor(
   overrides: Partial<DerivedInspectionDescriptor> = {},
 ): DerivedInspectionDescriptor {
   return {
-    schema_version: 1,
+    schema_version: 2,
     source: {
       coordinate: "dataset:molcrafts/revmd17@v4",
       role: "aspirin",
@@ -25,7 +25,8 @@ function descriptor(
     molrec_schema_version: "3",
     generated_at: "2026-08-09T12:00:00Z",
     record: {
-      format: "molrec-zarr-v3",
+      format: "mrec",
+      store: "zarr",
       url: "https://data.molhub.dev/derived/abc/",
       frames: 100_000,
     },
@@ -52,7 +53,8 @@ describe("derived inspection descriptors", () => {
     const regenerated = descriptor({
       generated_at: "2026-08-10T12:00:00Z",
       record: {
-        format: "molrec-zarr-v3",
+        format: "mrec",
+        store: "zarr",
         url: "https://data.molhub.dev/derived/rebuilt/",
         frames: 100_000,
       },

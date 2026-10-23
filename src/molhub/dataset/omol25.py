@@ -5,7 +5,7 @@ The published splits are public ``*.aselmdb`` tarballs on Meta's CDN
 gated card and checkpoints — login/agree there if you need the card;
 :class:`~molhub.Molhub.fetch` pulls the tarball over plain HTTPS.
 
-:class:`OMol25Lmdb` reads those files with :class:`~molhub.io.lmdb.Lmdb`
+:class:`OMol25Lmdb` reads those files with :class:`~molhub.io.ase.AseRows`
 and yields molpy frames; :meth:`OMol25Lmdb.record` and
 :meth:`OMol25Lmdb.cache` are the raw-row surface for callers that
 index or subsample without building frames.
@@ -47,7 +47,7 @@ from molhub.dataset.definition import dataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import Dataset, TargetSchema
 from molhub.dataset.statistic import StatisticMixin, frame_field
-from molhub.io.lmdb import Lmdb
+from molhub.io.ase import AseRows
 from molhub.manifest import Artifact, Manifest, TargetDeclaration
 from molhub.molhub import Molhub
 from molhub.sources import Locator
@@ -85,7 +85,8 @@ MANIFEST = Manifest(
         "val-neutral": Artifact(
             role="val-neutral",
             filename="val_neutral.tar.gz",
-            format="aselmdb-tar",
+            format="ase-row",
+            media_type="application/gzip",
             locators=(
                 Locator.parse(
                     "https://dl.fbaipublicfiles.com/opencatalystproject/data/omol/250514/neutral_val.tar.gz"
@@ -96,7 +97,8 @@ MANIFEST = Manifest(
         "4m": Artifact(
             role="4m",
             filename="train_4M.tar.gz",
-            format="aselmdb-tar",
+            format="ase-row",
+            media_type="application/gzip",
             locators=(
                 Locator.parse(
                     "https://dl.fbaipublicfiles.com/opencatalystproject/data/omol/250514/train_4M.tar.gz"
@@ -107,7 +109,8 @@ MANIFEST = Manifest(
         "val": Artifact(
             role="val",
             filename="val.tar.gz",
-            format="aselmdb-tar",
+            format="ase-row",
+            media_type="application/gzip",
             locators=(
                 Locator.parse(
                     "https://dl.fbaipublicfiles.com/opencatalystproject/data/omol/250514/val.tar.gz"
@@ -232,7 +235,7 @@ def _count_table_atoms(path: str) -> dict[int, int]:
     Module-level so :meth:`OMol25Lmdb.cache` can fan it out over a
     process pool; each worker opens its own read-only environment.
     """
-    table = Lmdb(path)
+    table = AseRows.open(path)
     try:
         return {
             int(row): int(np.asarray(table.get(row)["numbers"]).reshape(-1).shape[0])
@@ -440,11 +443,11 @@ class OMol25Lmdb(Dataset, StatisticMixin):
         self._parent_role: str | None = None
         self._parent_size: int | None = None
         paths: list[Path] = []
-        tables: list[Lmdb | None] = []
+        tables: list[AseRows | None] = []
         parts: list[np.ndarray] = []
         total = 0
         for path in sorted(self.root.glob("*.aselmdb")):
-            table = Lmdb(path)
+            table = AseRows.open(path)
             table_idx = len(paths)
             paths.append(path)
             tables.append(table)
@@ -490,10 +493,10 @@ class OMol25Lmdb(Dataset, StatisticMixin):
         state["_tables"] = [None] * len(self._paths)
         return state
 
-    def _table(self, table_idx: int) -> Lmdb:
+    def _table(self, table_idx: int) -> AseRows:
         table = self._tables[table_idx]
         if table is None:
-            table = self._tables[table_idx] = Lmdb(self._paths[table_idx])
+            table = self._tables[table_idx] = AseRows.open(self._paths[table_idx])
         return table
 
     def record(self, idx: int) -> dict[str, Any]:

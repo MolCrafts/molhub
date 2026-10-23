@@ -43,10 +43,9 @@ class UnsupportedRecordError(PrepareError):
     """A record this encoder has no columns for.
 
     Raised at *construction* for ``THEMolUnitEncoder(task="mbis")`` — whose
-    atom-level electrostatics targets need column routes ``molix.block/1`` does
-    not define — and at ``encode`` for anything that is not a
-    ``Sequence[Frame]``. Encoding either "as far as it goes" would
-    produce a unit that silently lost its targets.
+    atom-level electrostatics targets have no column on ``RawUnit`` — and at
+    ``encode`` for anything that is not a ``Sequence[Frame]``. Encoding either
+    "as far as it goes" would produce a unit that silently lost its targets.
 
     The MBIS refusal is keyed on the task rather than on the record because a
     record is a molpy object: after ``hf-facade-02-frame-records`` an MBIS frame
@@ -77,23 +76,21 @@ class UnroutableUnitError(PrepareError):
 
 
 class IncompleteProvenanceError(PrepareError):
-    """Provenance is missing a key molnex's block format requires.
+    """Provenance is missing one of the four keys a block records.
 
-    ``molix.block/1`` validates the presence of ``source`` / ``generator`` /
-    ``created_at`` / ``units`` and nothing about their contents. molhub checks
-    the same four keys **before** opening a writer, so the defect surfaces even
-    in an environment where molnex is not importable, and never halfway through
-    a shard.
+    molhub checks that ``source`` / ``generator`` / ``created_at`` / ``units``
+    are present, and nothing about their contents, **before** opening a writer.
+    The defect therefore surfaces even when no block writer is installed, and
+    never halfway through a shard.
     """
 
 
 class BlockFormatError(PrepareError):
     """A sealed block does not witness the READY record molhub would write.
 
-    Raised when ``manifest.json`` is unreadable, declares a format other than
-    ``molix.block/1``, is not ``sealed``, names a split other than the one the
-    writer was constructed with, reports a unit count the writer disagrees with,
-    or carries no ``block_digest``. molhub does not recompute the digest —
-    recomputation is ``BlockReader.verify()``'s job in molnex — so these five
-    fields are the whole of the cross-repo format coupling.
+    Raised when ``manifest.json`` is unreadable, is not ``sealed``, names a
+    split other than the one the writer was constructed with, reports a unit
+    count the writer disagrees with, or carries no ``block_digest``. The
+    writer's ``format`` string is left as recorded. molhub does not recompute
+    the digest.
     """

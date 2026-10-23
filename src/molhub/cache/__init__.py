@@ -1,13 +1,21 @@
-"""Cached per-row count vectors.
+"""Cached bytes.
 
-A packing budget needs one integer per row. Containers that already hold that
-number answer from it; containers that would have to decode every record cache
-the vector instead, keyed by a fingerprint of the files it was measured from.
-
-See :class:`~molhub.cache.counts.CountSidecar` for why the key is a
-fingerprint rather than a description of the dataset.
+:class:`~molhub.cache.counts.CountSidecar` stores one count vector beside the
+files it measured. :class:`~molhub.cache.lmdb.LmdbCache` stores opaque values
+in one LMDB. That LMDB is a mutable runtime cache and lives on node-local
+disk (:func:`molhub.cache.local.runtime_cache_root`). Neither cache is a
+dataset.
 """
 
 from molhub.cache.counts import CountSidecar
+from molhub.cache.lmdb import LmdbCache
+from molhub.cache.local import require_node_local, runtime_cache_root
+from molhub.cache.protocol import Cache
 
-__all__ = ["CountSidecar"]
+__all__ = [
+    "Cache",
+    "CountSidecar",
+    "LmdbCache",
+    "require_node_local",
+    "runtime_cache_root",
+]

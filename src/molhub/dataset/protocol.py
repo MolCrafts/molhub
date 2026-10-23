@@ -278,6 +278,20 @@ class SubsetDataset(IdentifiedDataset, StatisticMixin):
         """The parent's collection at this view's *idx*."""
         return self._source[self._indices[idx]]
 
+    def __getitems__(self, indices: Sequence[int]) -> list[Sequence[Frame]]:
+        """The parent's batch fetch, on this view's indices.
+
+        Torch calls this once per batch. Forwarding the parent indices keeps
+        a parent's ``__getitems__`` — its staging pool and its row cache — on
+        the path the loader actually reads. A parent without one is read a
+        row at a time.
+        """
+        parent = [self._indices[int(index)] for index in indices]
+        fetch = getattr(self._source, "__getitems__", None)
+        if callable(fetch):
+            return list(fetch(parent))
+        return [self._source[index] for index in parent]
+
 
 def assignment(dataset: object) -> dict[str, list[int]]:
     """Published name → indices into *dataset*.

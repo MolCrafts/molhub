@@ -283,4 +283,3 @@ class TestCacheLayering:
         assert "MOLHUB_REGISTRY" in blob
         assert "FIGSHARE_TOKEN" in blob
         assert "MOLHUB_SOURCE_BASE" in blob
-        assert "MOLNEX_SRC" in blob

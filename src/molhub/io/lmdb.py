@@ -1,83 +1,178 @@
-"""Read-only single-file LMDB table.
+"""LMDB environment: keys and values, nothing about what the bytes mean.
 
-On disk: one file (``subdir=False``). Keys are ASCII. Reserved keys are
-``nextid``, ``deleted_ids``, ``metadata``. Every other key is an integer
-row id. Values are zlib-compressed JSON. NumPy arrays are stored as
-``{"__ndarray__": [shape, dtype, flat_data]}``.
-
-This is the layout FairChem ships as ``*.aselmdb``. The reader does not
-import ASE and does not reconstruct Atoms.
+A collection, an ASE row file, and a row cache all open one of these and
+decide their own keys. This module does not import a format.
 """
 
 from __future__ import annotations
 
-import json
-import zlib
-from collections.abc import Iterator, Mapping
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+__all__ = ["Lmdb"]
 
-__all__ = ["Lmdb", "RESERVED_KEYS"]
+_MAP_SIZE = 1 << 40
+_SHARED: dict[str, tuple[Any, int]] = {}
+_SHARED_LOCK = threading.Lock()
 
-RESERVED_KEYS = frozenset({"nextid", "deleted_ids", "metadata"})
 
-
-def _require_lmdb():
+def _backend():
     try:
-        import lmdb as _lmdb
+        import lmdb
     except ImportError as error:
         raise ImportError(
-            "Reading this table needs the lmdb package. Install with `pip install lmdb`."
+            "This store needs the lmdb package. Install with `pip install lmdb`."
         ) from error
-    return _lmdb
-
-
-def _json_object(dct: dict[str, Any]) -> Any:
-    """Restore arrays. Ignore foreign type tags; leave the rest as a dict."""
-    packed = dct.get("__ndarray__")
-    if packed is not None:
-        shape, dtype, data = packed
-        return np.asarray(data, dtype=dtype).reshape(shape)
-    if "__complex__" in dct:
-        real, imag = dct["__complex__"]
-        return complex(real, imag)
-    dct.pop("__ase_objtype__", None)
-    dct.pop("__datetime__", None)
-    return dct
-
-
-def decode_value(raw: bytes) -> Any:
-    """zlib + UTF-8 JSON, with the published ndarray hook."""
-    return json.loads(zlib.decompress(raw).decode("utf-8"), object_hook=_json_object)
+    return lmdb
 
 
 class Lmdb:
-    """One LMDB file as ``row_id → dict``.
+    """One single-file LMDB environment.
 
     Args:
-        path: Single-file LMDB (not a directory).
+        path: The file. A directory environment is not this class.
+        readonly: Open without a writer lock when True.
+        create: Create the file and its parent. Refuses to imply creation
+            from a missing file on a read.
+        share: Reuse the environment this process already opened at *path*.
+            LMDB refuses a second ``open`` of a file the process holds, which
+            is what a cache meets when a dataset is unpickled beside the one
+            that filled it. Workers are new processes and open their own.
+        map_size: Address-space reservation, not an allocation.
+        lock: Process lock. Defaults to True for a writer and False for a
+            readonly open.
+        max_readers: Reader slots. A worker pool stages several reads at once.
     """
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = Path(path).expanduser().resolve()
-        if not self.path.is_file():
-            raise FileNotFoundError(self.path)
-        backend = _require_lmdb()
-        self._env = backend.open(
-            str(self.path),
-            subdir=False,
-            meminit=False,
-            readonly=True,
-            lock=False,
-            readahead=True,
-        )
-        self.ids = tuple(self._load_ids())
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        readonly: bool = True,
+        create: bool = False,
+        share: bool = False,
+        map_size: int = _MAP_SIZE,
+        lock: bool | None = None,
+        max_readers: int = 126,
+    ) -> None:
+        self.path = Path(path).expanduser()
+        if not readonly:
+            self.path = self.path.resolve()
+        else:
+            self.path = self.path.resolve()
+            if not self.path.is_file() and not create:
+                raise FileNotFoundError(self.path)
+        self.readonly = bool(readonly)
+        self.create = bool(create)
+        self.share = bool(share)
+        self.map_size = int(map_size)
+        self.lock = (not self.readonly) if lock is None else bool(lock)
+        self.max_readers = int(max_readers)
+        self._env: Any = None
+        self._opened: str | None = None
+        if create:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _open(self) -> Any:
+        env = self._env
+        if env is not None:
+            return env
+        path = str(self.path)
+        if not self.share:
+            self._env = _backend().open(
+                path,
+                subdir=False,
+                readonly=self.readonly,
+                lock=self.lock,
+                map_size=self.map_size,
+                create=self.create,
+                max_readers=self.max_readers,
+                readahead=self.readonly,
+                meminit=False,
+            )
+            self._opened = path
+            return self._env
+        with _SHARED_LOCK:
+            if self._env is not None:
+                return self._env
+            found = _SHARED.get(path)
+            if found is None:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                env = _backend().open(
+                    path,
+                    subdir=False,
+                    readonly=self.readonly,
+                    lock=self.lock,
+                    map_size=self.map_size,
+                    create=True,
+                    max_readers=self.max_readers,
+                    sync=False,
+                    metasync=False,
+                    readahead=False,
+                    meminit=False,
+                )
+                _SHARED[path] = (env, 1)
+            else:
+                env, count = found
+                _SHARED[path] = (env, count + 1)
+            self._env = env
+            self._opened = path
+            return env
+
+    def begin(self, *, write: bool = False, buffers: bool = False) -> Any:
+        """A transaction. The caller closes it."""
+        return self._open().begin(write=write, buffers=buffers)
+
+    def get(self, key: bytes) -> bytes | None:
+        """Copy the value out of a read transaction, or None when *key* is absent."""
+        with self.begin() as txn:
+            raw = txn.get(key)
+        return None if raw is None else bytes(raw)
+
+    def put(self, key: bytes, value: bytes) -> None:
+        """Store *value* at *key*. A second put replaces it."""
+        with self.begin(write=True) as txn:
+            txn.put(key, value)
+
+    def delete(self, key: bytes) -> None:
+        """Remove *key* when it is present."""
+        with self.begin(write=True) as txn:
+            txn.delete(key)
+
+    def sync(self) -> None:
+        """Flush the environment."""
+        self._open().sync(True)
+
+    def keys(self) -> Iterator[bytes]:
+        """Every key, copied out of one read transaction."""
+        with self.begin() as txn:
+            cursor = txn.cursor()
+            found = [bytes(key) for key, _ in cursor]
+        return iter(found)
 
     def close(self) -> None:
-        """Close the environment."""
-        self._env.close()
+        """Drop this handle. A shared environment closes with its last handle."""
+        env = self._env
+        path = self._opened
+        self._env = None
+        self._opened = None
+        if env is None:
+            return
+        if not self.share or path is None:
+            env.close()
+            return
+        with _SHARED_LOCK:
+            found = _SHARED.get(path)
+            if found is None or found[0] is not env:
+                return
+            count = found[1] - 1
+            if count <= 0:
+                _SHARED.pop(path, None)
+                env.close()
+            else:
+                _SHARED[path] = (env, count)
 
     def __enter__(self) -> Lmdb:
         return self
@@ -85,45 +180,14 @@ class Lmdb:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def __len__(self) -> int:
-        return len(self.ids)
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["_env"] = None
+        state["_opened"] = None
+        return state
 
-    def __iter__(self) -> Iterator[int]:
-        return iter(self.ids)
-
-    def get(self, row_id: int) -> dict[str, Any]:
-        """Return the decoded record for *row_id*."""
-        with self._env.begin(write=False) as txn:
-            raw = txn.get(str(int(row_id)).encode("ascii"))
-        if raw is None:
-            raise KeyError(row_id)
-        record = decode_value(raw)
-        if not isinstance(record, Mapping):
-            raise TypeError(f"lmdb row {row_id} is {type(record).__name__}, not a dict")
-        out = dict(record)
-        out["id"] = int(row_id)
-        return out
-
-    def _get_reserved(self, name: str) -> Any | None:
-        with self._env.begin(write=False) as txn:
-            raw = txn.get(name.encode("ascii"))
-        if raw is None:
-            return None
-        return decode_value(raw)
-
-    def _load_ids(self) -> list[int]:
-        nextid = self._get_reserved("nextid")
-        deleted = self._get_reserved("deleted_ids")
-        gone = {int(i) for i in (deleted or ())}
-        if nextid is None:
-            ids: list[int] = []
-            with self._env.begin(write=False) as txn:
-                cursor = txn.cursor()
-                for key, _ in cursor:
-                    name = key.decode("ascii")
-                    if name in RESERVED_KEYS:
-                        continue
-                    ids.append(int(name))
-            ids.sort()
-            return ids
-        return [i for i in range(1, int(nextid)) if i not in gone]
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

@@ -209,7 +209,7 @@ class DerivedLayout:
 
     ``metadata.json`` sits at the *artifact* level and describes the derivation
     (inputs, outputs, seed, generator). ``manifest.json`` sits *inside* a block
-    directory and is molnex's ``molix.block/1`` contract. They never merge and
+    directory and records the sealed block (split, rows, digests, sealed). They never merge and
     never nest: a block directory that grew a ``metadata.json`` would be a schema
     collision waiting to be mis-parsed by one of the two repos.
 

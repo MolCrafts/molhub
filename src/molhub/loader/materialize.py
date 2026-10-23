@@ -1,4 +1,4 @@
-"""One split of one dataset, materialized as sealed molnex blocks.
+"""One split of one dataset, materialized as sealed blocks.
 
 :func:`prepare` is the doorway and :class:`BlockExport` is the work — the entry
 sits beside the type it delegates to, and ``molhub/__init__`` re-exports it, so
@@ -31,24 +31,9 @@ implementation of that rule — as the record passes on its way to the encoder. 
 identity the table does not assign is simply absent from the mapping, which is
 exactly what the refusal above reads.
 
-**Fail closed without molnex** (ac-005). Blocks are molnex's format, and this
-distribution can neither import nor install it by itself. So the default writer
-is resolved — by really importing what it needs — **before anything is created**,
-and a missing half is re-raised as an :class:`ImportError` naming the ``prepare``
-extra and the ``MOLNEX_SRC`` escape hatch. A bare ``No module named 'torch'`` is
-not an answer to "why did my export not run", and a half-written block directory
-is not a smaller failure than none.
-
-**``MOLNEX_SRC`` is honoured, because the refusal names it.** molnex is not on
-PyPI, so the ``prepare`` extra can only install torch and the documented way to
-supply the other half is a source checkout. Nothing on this path used to read
-that variable — ``import_module`` looks down :data:`sys.path` — so a reader who
-followed the instruction got the same refusal a second time and no way to tell
-why. :meth:`BlockExport.resolve_writer` now puts ``$MOLNEX_SRC`` at the front of
-:data:`sys.path` before probing, and **leaves it there**: the writer imports
-molnex again when it opens its first block, so a path restored on the way out
-would resolve the probe and break the write. A checkout that is present but
-broken then fails in its own voice instead of as "no module named molix".
+**Fail closed with no writer** (ac-005). ``writer_factory`` has no default.
+Omitting it raises :class:`ValueError` **before anything is created**. A
+half-written block directory is not a smaller failure than none.
 
 **Two of the preconditions are public** (reachability wave, ruling 6).
 :meth:`BlockExport.refuse_unroutable` and :meth:`BlockExport.resolve_writer` are
@@ -59,19 +44,19 @@ that cannot be exported at all never provokes "the split table is not here".
 They are the same two checks the constructor makes, so asking early costs an
 already-resolved answer rather than a second implementation.
 
-**A dataset ``molix.block/1`` has no routes for is refused, not exported.**
+**A dataset whose targets have no :class:`~molhub.conveyor.encoder.RawUnit`
+column is refused, not exported.**
 :class:`~molhub.conveyor.encoder.THEMolUnitEncoder` refuses the subset label
-``"mbis"`` because the block format defines no columns for its atom-level
+``"mbis"`` because ``RawUnit`` defines no columns for its atom-level
 electrostatics targets, and labelling those units with the *collection role*
 they are published under (``electrostatic``) is a second name for the same
 records rather than a second answer: an export that succeeded on them would
 write the geometry and topology and **drop** the per-atom charges, volumes,
 dipoles, quadrupoles and Slater parameters the dataset exists for. So
 :class:`BlockExport` puts the question to the encoder's own constructor — the
-one place that route table is stated — with the subset label its coordinate
+one place those columns are stated — with the subset label its coordinate
 names, and re-raises the refusal in this layer's vocabulary before anything is
-fetched or created. The named future route is a molnex spec adding a routable
-atom-level column space to ``molix.block/1``; until it lands, the targets are
+fetched or created. Until ``RawUnit`` grows columns for those targets, they are
 read with ``load_dataset(name)`` and this refusal stands.
 
 Reference:
@@ -100,13 +85,6 @@ from molhub.registry import Registry
 
 __all__ = ["SplitRouting", "BlockExport", "prepare"]
 
-
-# The block format this layer writes, named in the refusal above so a reader
-# knows where the missing column routes have to be added. Mirrored from
-# ``molhub.conveyor.prepare`` rather than imported, as
-# ``molhub.conveyor.coverage`` mirrors it: it is molnex's public identifier, and
-# a private constant is not a cross-module surface.
-_BLOCK_FORMAT = "molix.block/1"
 
 # Who a block says wrote it, when the caller states no provenance of its own.
 _GENERATOR = "molhub.loader.materialize.BlockExport"
@@ -204,10 +182,10 @@ class BlockExport:
             writer, and says so with an actionable :class:`ImportError` when
             molnex is not importable.
         provenance: Opaque provenance for every block. ``None`` states this
-            layer's own, which carries the four keys ``molix.block/1`` requires.
+            layer's own, which carries the four provenance keys a block records.
 
     Raises:
-        UnsupportedRecordError: If ``molix.block/1`` routes none of this
+        UnsupportedRecordError: If ``RawUnit`` has no column for this
             dataset's targets, so exporting it could only drop them. Raised at
             construction, before any directory exists and before a byte is read.
         ImportError: If *writer_factory* is ``None`` and molnex or torch cannot
@@ -252,7 +230,7 @@ class BlockExport:
             UnroutableUnitError: If a record's molecule has no split in the
                 derivation.
             IncompleteProvenanceError: If the stated provenance is missing a key
-                ``molix.block/1`` requires; raised before a writer is opened.
+                a block records; raised before a writer is opened.
             BlockFormatError: If a sealed block does not witness what molhub
                 would report about it.
         """
@@ -306,19 +284,18 @@ class BlockExport:
             THEMolUnitEncoder(task=coordinate.name)
         except UnsupportedRecordError:
             raise UnsupportedRecordError(
-                f"{coordinate.canonical} cannot be materialized as {_BLOCK_FORMAT} "
-                "blocks: its atom-level electrostatics targets (atomic_charge, "
-                "atomic_volume, the dipole and quadrupole components and the per-atom "
-                f"Slater parameters) have no column route in {_BLOCK_FORMAT}. Exporting it "
-                "anyway would write the geometry and topology and silently drop every "
-                "target the dataset exists for, so nothing was written and nothing was "
-                f"created. The fix is a routable atom-level column space in {_BLOCK_FORMAT}, "
+                f"{coordinate.canonical} cannot be materialized: its atom-level "
+                "electrostatics targets (atomic_charge, atomic_volume, the dipole and "
+                "quadrupole components and the per-atom Slater parameters) have no column "
+                "on RawUnit. Exporting it anyway would write the geometry and topology and "
+                "silently drop every target the dataset exists for, so nothing was written "
+                "and nothing was created. The fix is a RawUnit column for those targets, "
                 "not a flag here; until it exists, read the targets with "
                 "load_dataset(name)."
             ) from None
 
     def _own_provenance(self) -> dict[str, object]:
-        """The four keys ``molix.block/1`` requires, stated by this layer.
+        """The four provenance keys a block records, stated by this layer.
 
         The units are the dataset's own declaration rather than a restatement:
         a second spelling of "kcal/mol" is a second thing to be wrong.
@@ -334,12 +311,9 @@ class BlockExport:
     def resolve_writer(factory: BlockWriterFactory | None) -> BlockWriterFactory:
         """The writer to open blocks with, or a refusal a reader can act on.
 
-        The default is probed by importing what it will import anyway, here,
-        where nothing has been created yet — so an install without molnex fails
-        with an answer instead of with a bare missing-module error halfway
-        through a directory tree. A caller holding nothing but the argument can
-        ask before it builds anything; a caller that already has a writer gets it
-        back untouched, so asking twice costs one dictionary lookup.
+        There is no default. A caller holding nothing but the argument can ask
+        before it builds anything; a caller that already has a writer gets it
+        back untouched.
 
         Args:
             factory: The caller's writer. There is no default.
@@ -348,21 +322,13 @@ class BlockExport:
             The factory blocks will be opened with.
 
         Raises:
-            ValueError: *factory* is ``None``. ``prepare`` used to default to
-                molnex's ``molix.block/1`` writer; that format was deleted on
-                2026-09-17 (molnex spec ``data-layer-01-consolidation``) as
-                having no producer, no consumer and no instance on disk — no
-                block was ever written, here or there. Rather than default to a
-                target that cannot exist, this refuses and names the one thing
-                the caller can do.
+            ValueError: *factory* is ``None``. The message names ``writer_factory``.
         """
         if factory is not None:
             return factory
         raise ValueError(
-            "prepare has no default writer. It used to open molnex's "
-            "'molix.block/1' blocks, and that format was deleted (molnex spec "
-            "data-layer-01-consolidation) because nothing produced or read one. "
-            "Pass writer_factory= a writer of your own; nothing was written."
+            "prepare has no default writer. Pass writer_factory= a writer of "
+            "your own; nothing was written."
         )
 
 
@@ -391,7 +357,7 @@ def prepare(
 
     Raises:
         ValueError: If the dataset is published as whole files.
-        UnsupportedRecordError: If ``molix.block/1`` routes none of the targets.
+        UnsupportedRecordError: If ``RawUnit`` has no column for the targets.
         ImportError: If molnex is not importable and no writer was injected.
     """
     from molhub.loader.builder import DatasetBuilder

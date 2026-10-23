@@ -340,7 +340,7 @@ def cache_status(
     that reported it with exit 0 would be one nothing could gate on.
     """
     # Imported here, not at module scope: `molhub search` should not pay for the
-    # conveyor's numpy import, and `molhub.dataset.neighbor` set this precedent.
+    # conveyor's numpy import.
     from molhub.conveyor import Ledger, TierStore
 
     home = _apply_home(home)

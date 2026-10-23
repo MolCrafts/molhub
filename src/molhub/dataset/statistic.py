@@ -27,9 +27,9 @@ __all__ = [
 class Field:
     """One Frame location, named the way the Frame is named.
 
-    * ``graph.natoms`` is ``frame["atoms"].nrows``.
+    * ``graph.natoms`` is ``frame["atoms"].n_rows``.
     * ``graph.<name>`` is the unwrapped ``frame.meta[name]`` scalar.
-    * a bare block name (``bonds``, ``angles``, …) is that block's ``nrows``.
+    * a bare block name (``bonds``, ``angles``, …) is that block's ``n_rows``.
 
     A new quantity is a new Frame column or meta key. This type does not
     grow a parallel vocabulary (LMDB records, aliases, caches).
@@ -41,7 +41,7 @@ class Field:
         """Return this field's per-sample value from *frame*."""
         key = self.key
         if key == "graph.natoms":
-            return int(frame["atoms"].nrows)
+            return int(frame["atoms"].n_rows)
         if key.startswith("graph."):
             name = key.removeprefix("graph.")
             meta = getattr(frame, "meta", None) or {}
@@ -50,7 +50,7 @@ class Field:
             value = meta[name]
             return getattr(value, "value", value)
         try:
-            return int(frame[key].nrows)
+            return int(frame[key].n_rows)
         except (KeyError, TypeError, AttributeError):
             pass
         meta = getattr(frame, "meta", None) or {}

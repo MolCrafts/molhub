@@ -110,10 +110,10 @@ cache `molhub fetch` fills. A completed walk therefore leaves nothing to re-read
 a walk interrupted by an exception keeps the verified file it was inside. See
 [the Python reference](../reference/python.md) for the whole rule.
 
-The third spelling is `prepare`, which materializes one split as sealed molnex
+The third spelling is `prepare`, which materializes one split as sealed
 blocks through that same bounded walk:
 
-<!-- test: skip writes molnex molix.block/1 blocks, which needs molnex importable -->
+<!-- test: skip prepare has no default writer; pass writer_factory= -->
 
 ```python
 from molhub import prepare
@@ -121,9 +121,10 @@ from molhub import prepare
 prepare("themol/torsion-scan", output_dir="blocks/")
 ```
 
-`prepare` needs molnex importable and refuses, before writing anything, when it
-is not — naming the `prepare` extra (`pip install 'molhub[prepare]'`, which
-brings torch) and `MOLNEX_SRC`, which it puts on `sys.path` for you when it is
-set. It also refuses a dataset whose targets `molix.block/1` has no column routes
-for — `themol/mbis`, whose atom-level electrostatics an export could only drop —
-so those are read with `load` rather than materialized.
+`prepare` has no default writer. Pass `writer_factory=` a writer of your own;
+omitting it raises `ValueError` before anything is written. It also refuses a
+dataset whose targets have no column on `RawUnit` — `themol/mbis`, whose
+atom-level electrostatics an export could only drop — so those are read with
+`load` rather than materialized. The writer's format string is left as
+recorded: molhub checks that the sealed manifest names the split, the unit
+count and a block digest.

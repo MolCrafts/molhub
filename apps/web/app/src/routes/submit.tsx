@@ -271,7 +271,7 @@ function SubmitPage() {
                     <Field
                       label="Format"
                       htmlFor={`${artifact.id}-format`}
-                      hint="extxyz, npz, csv…"
+                      hint="extxyz, csv, mrec, ase-row…"
                     >
                       <Input
                         id={`${artifact.id}-format`}

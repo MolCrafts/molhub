@@ -32,8 +32,7 @@ Provenance of the goldens (hard-coded literals; nothing is recomputed here):
 * Molecular identities (blake2b-128 hex of the mapped isomeric SMILES) and
   ``molecule_id`` values (``uuid5(UUID(int=0), smiles).hex``) were computed once
   offline with the stdlib and pinned. The water identity is the same literal
-  ``tests/test_conveyor/test_encoder.py`` and
-  ``regressions/streaming-data-tiers-03-conveyor-03-prepare.py`` pin.
+  ``tests/test_conveyor/test_encoder.py`` pins.
   command: ``python -c "import hashlib, uuid; s='[O:2]([H:1])[H:3]';
   print(hashlib.blake2b(s.encode(), digest_size=16).hexdigest(),
   uuid.uuid5(uuid.UUID(int=0), s).hex)"``; CPython 3.12, stdlib only; 2026-08-15.
@@ -88,7 +87,7 @@ assert "molix" not in sys.modules, "importing molhub.dataset pulled molix into s
 
 import h5py  # noqa: E402
 import numpy as np  # noqa: E402
-from molpy import Block, Frame, Trajectory  # noqa: E402
+from molpy import Block, Frame  # noqa: E402
 
 from molhub.conveyor.encoder import RawUnit, THEMolUnitEncoder  # noqa: E402
 from molhub.conveyor.errors import UnsupportedRecordError  # noqa: E402
@@ -286,7 +285,7 @@ def _butane_coords(angle_shift: float) -> np.ndarray:
     return coords
 
 
-def _hessian_dataset(root: Path) -> THEMolShardDataset[Frame]:
+def _hessian_dataset(root: Path) -> THEMolShardDataset:
     """A two-record hessian shard: bonded water, then a bondless neon atom."""
     root.mkdir(parents=True, exist_ok=True)
     with h5py.File(root / "shard-000.h5", "w") as handle:
@@ -303,7 +302,7 @@ def _hessian_dataset(root: Path) -> THEMolShardDataset[Frame]:
     return THEMolHessian(root).load()
 
 
-def _torsion_dataset(root: Path) -> THEMolShardDataset[Trajectory]:
+def _torsion_dataset(root: Path) -> THEMolShardDataset:
     """A one-record torsion-scan shard: one whole two-constraint butane profile."""
     root.mkdir(parents=True, exist_ok=True)
     with h5py.File(root / "shard-000.h5", "w") as handle:
@@ -321,7 +320,7 @@ def _torsion_dataset(root: Path) -> THEMolShardDataset[Trajectory]:
     return THEMolTorsionScan(root).load()
 
 
-def _mbis_dataset(root: Path) -> THEMolShardDataset[Frame]:
+def _mbis_dataset(root: Path) -> THEMolShardDataset:
     """A one-record MBIS shard: water, with per-atom electrostatics supervision."""
     root.mkdir(parents=True, exist_ok=True)
     quadrupole = (
@@ -347,17 +346,22 @@ def _column(block: Block, name: str) -> np.ndarray:
     return np.asarray(block[name])
 
 
+def _plain(value: object) -> object:
+    """Python scalar from a molpy 0.14 ``MetaValue``."""
+    return getattr(value, "value", value)
+
+
 # ---------------------------------------------------------------------------
 # Leg 1 — one geometry is a `molpy.Frame` carrying a COO `hessian` block
 # ---------------------------------------------------------------------------
 
 
-def check_hessian_records(dataset: THEMolShardDataset[Frame]) -> None:
+def check_hessian_records(dataset: THEMolShardDataset) -> None:
     """A hessian record IS a Frame; its Hessian is all ``(3N)**2`` entries, row-major."""
     assert isinstance(dataset, THEMolShardDataset)
     assert len(dataset) == 2, f"expected two records in the shard, got {len(dataset)}"
 
-    water, neon = dataset[0], dataset[1]
+    water, neon = dataset[0][0], dataset[1][0]
     assert isinstance(water, Frame), f"a hessian record is a molpy Frame, got {type(water)}"
     assert isinstance(neon, Frame)
 
@@ -366,11 +370,11 @@ def check_hessian_records(dataset: THEMolShardDataset[Frame]) -> None:
     assert _column(water["atoms"], "atom_map").tolist() == [1, 2, 3]
     assert _column(water["bonds"], "atomi").tolist() == list(WATER_BOND_ATOMI)
     assert _column(water["bonds"], "atomj").tolist() == list(WATER_BOND_ATOMJ)
-    assert water.meta["molecule_id"] == WATER_MOLECULE_ID
-    assert water.meta["source_record_id"] == HESSIAN_RECORD_KEYS[0]
-    assert water.meta["mapped_isomeric_smiles"] == WATER_SMILES
-    assert water.meta["total_charge"] == 0
-    assert neon.meta["molecule_id"] == NEON_MOLECULE_ID
+    assert _plain(water.meta["molecule_id"]) == WATER_MOLECULE_ID
+    assert _plain(water.meta["source_record_id"]) == HESSIAN_RECORD_KEYS[0]
+    assert _plain(water.meta["mapped_isomeric_smiles"]) == WATER_SMILES
+    assert _plain(water.meta["total_charge"]) == 0
+    assert _plain(neon.meta["molecule_id"]) == NEON_MOLECULE_ID
     assert "bonds" not in neon, "a bare noble-gas atom has zero bonds, and no bond block"
 
     # -- the Hessian is a block, not a meta scalar ---------------------------
@@ -403,26 +407,26 @@ def check_hessian_records(dataset: THEMolShardDataset[Frame]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def check_torsion_records(dataset: THEMolShardDataset[Trajectory]) -> None:
-    """A torsion profile IS a Trajectory; its dihedral is the 1-row ``scan`` block."""
+def check_torsion_records(dataset: THEMolShardDataset) -> None:
+    """A torsion profile is a FrameCollection; its dihedral is the 1-row ``scan`` block."""
     assert len(dataset) == 1
     record = dataset[0]
-    assert isinstance(record, Trajectory), (
-        f"a torsion scan is a molpy Trajectory, got {type(record)}"
-    )
     assert len(record) == SCAN_N_FRAMES
+    assert all(isinstance(frame, Frame) for frame in record)
 
     frames = [record[index] for index in range(SCAN_N_FRAMES)]
-    assert [frame.meta["scan_id"] for frame in frames] == [SCAN_RECORD_KEY] * SCAN_N_FRAMES
-    assert [frame.meta["constraint_index"] for frame in frames] == list(SCAN_CONSTRAINT_INDICES)
-    assert [frame.meta["energy"] for frame in frames] == list(SCAN_ENERGIES)
-    assert frames[0].meta["molecule_id"] != frames[0].meta["scan_id"], (
+    assert [_plain(frame.meta["scan_id"]) for frame in frames] == [SCAN_RECORD_KEY] * SCAN_N_FRAMES
+    assert [_plain(frame.meta["constraint_index"]) for frame in frames] == list(
+        SCAN_CONSTRAINT_INDICES
+    )
+    assert [_plain(frame.meta["energy"]) for frame in frames] == list(SCAN_ENERGIES)
+    assert _plain(frames[0].meta["molecule_id"]) != _plain(frames[0].meta["scan_id"]), (
         "a scan id is not a molecular identity"
     )
 
     angles: list[float] = []
     for frame in frames:
-        angle = frame.meta["torsion_angle"]
+        angle = getattr(frame.meta["torsion_angle"], "value", frame.meta["torsion_angle"])
         assert isinstance(angle, float), f"molpy hands back a plain float, got {type(angle)}"
         angles.append(angle)
     assert [abs(got - want) <= 1e-9 for got, want in zip(angles, BUTANE_SCAN_ANGLES)] == [
@@ -443,7 +447,7 @@ def check_torsion_records(dataset: THEMolShardDataset[Trajectory]) -> None:
         assert head.tolist() == [list(row) for row in BUTANE_HEAD_POS[shift]]
 
     print(
-        f"  Records/torsion-scan: one molpy Trajectory of {len(record)} frames, angles "
+        f"  Records/torsion-scan: one FrameCollection of {len(record)} frames, angles "
         f"{angles} deg (atol 1e-9), energies {list(SCAN_ENERGIES)}, scan block "
         f"{SCAN_BLOCK_COLUMNS} = {[list(row) for row in SCAN_BLOCK_ROWS]}"
     )
@@ -454,10 +458,10 @@ def check_torsion_records(dataset: THEMolShardDataset[Trajectory]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def check_mbis_records(dataset: THEMolShardDataset[Frame]) -> None:
+def check_mbis_records(dataset: THEMolShardDataset) -> None:
     """An MBIS record IS a Frame: per-atom targets in ``atoms``, shells in a block."""
     assert len(dataset) == 1
-    record = dataset[0]
+    record = dataset[0][0]
     assert isinstance(record, Frame), f"an MBIS record is a molpy Frame, got {type(record)}"
 
     atoms = record["atoms"]
@@ -536,7 +540,7 @@ def check_mbis_records(dataset: THEMolShardDataset[Frame]) -> None:
 
 
 def check_encoded_columns(
-    hessian: THEMolShardDataset[Frame], torsion: THEMolShardDataset[Trajectory]
+    hessian: THEMolShardDataset, torsion: THEMolShardDataset
 ) -> None:
     """The pre-dissolution ``RawUnit`` goldens, over records that are now molpy objects."""
     water = THEMolUnitEncoder(task="hessian").encode(hessian[0])
@@ -628,7 +632,8 @@ def check_mbis_encoding_is_refused_at_construction() -> None:
         THEMolUnitEncoder(task="mbis")
     except UnsupportedRecordError as error:
         message = str(error)
-        assert "molix.block/1" in message, "the refusal must name the missing column routes"
+        assert "RawUnit" in message, "the refusal must name the type that has no column"
+        assert "atomic_charge" in message, "the refusal must name the missing targets"
     else:  # pragma: no cover - the refusal is the point of this leg
         raise AssertionError("THEMolUnitEncoder(task='mbis') was constructed; it must be refused")
 
@@ -639,7 +644,7 @@ def check_mbis_encoding_is_refused_at_construction() -> None:
 
     print(
         "  Encoder/mbis: THEMolUnitEncoder(task='mbis') raises UnsupportedRecordError at "
-        "construction, naming molix.block/1; the four routable tasks still construct"
+        "construction, naming RawUnit; the four routable tasks still construct"
     )
 
 

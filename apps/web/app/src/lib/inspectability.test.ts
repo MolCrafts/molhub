@@ -33,9 +33,18 @@ describe("inspectability", () => {
     });
   });
 
-  it("routes large and archive records to the derived path", () => {
+  it("routes large files and packaged bytes to the derived path", () => {
     expect(inspectability(artifact({ size: DIRECT_INSPECTION_LIMIT + 1 })).state).toBe("derived");
-    expect(inspectability(artifact({ format: "npz", media_type: null })).state).toBe("derived");
+    expect(
+      inspectability(artifact({ format: "ase-row", media_type: "application/gzip" })).state,
+    ).toBe("derived");
+    expect(inspectability(artifact({ format: "mrec", media_type: null })).state).toBe("derived");
+  });
+
+  it("does not treat a bare npz format name as a derived record", () => {
+    expect(inspectability(artifact({ format: "npz", media_type: null })).state).toBe(
+      "unsupported",
+    );
   });
 
   it("requires an HTTP source for browser inspection", () => {

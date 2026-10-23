@@ -326,15 +326,23 @@ class TestReadyBlocks:
         with pytest.raises(BlockNotSealed):
             ready.metadata()
 
-    def test_an_unsupported_schema_version_is_refused(self, tmp_path):
-        ready = _ready(tmp_path, {TRAIN: _document(schema_version=2)})
+    def test_a_manifest_missing_split_is_refused(self, tmp_path):
+        document = {key: value for key, value in MANIFEST_DOCUMENT.items() if key != "split"}
+        ready = _ready(tmp_path, {TRAIN: document})
         with pytest.raises(UnsupportedBlockFormat):
             ready.metadata()
 
-    def test_an_unsupported_format_is_refused(self, tmp_path):
-        ready = _ready(tmp_path, {TRAIN: _document(format="molix.block/2")})
+    def test_a_manifest_missing_rows_is_refused(self, tmp_path):
+        document = {key: value for key, value in MANIFEST_DOCUMENT.items() if key != "rows"}
+        ready = _ready(tmp_path, {TRAIN: document})
         with pytest.raises(UnsupportedBlockFormat):
             ready.metadata()
+
+    def test_the_recorded_format_string_is_not_interpreted(self, tmp_path):
+        ready = _ready(tmp_path, {TRAIN: _document(format="molix.block/2", schema_version=9)})
+        (metadata,) = ready.metadata()
+        assert metadata.split == "train"
+        assert metadata.units == 2
 
     def test_the_metadata_is_frozen(self, tmp_path):
         (metadata,) = _ready(tmp_path, {TRAIN: MANIFEST_DOCUMENT}).metadata()

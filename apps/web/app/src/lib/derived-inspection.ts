@@ -6,7 +6,7 @@ const exactVersion = z
   .refine((value) => value.toLowerCase() !== "latest", "Versions must be immutable");
 
 export const derivedInspectionDescriptorSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   source: z.object({
     coordinate: z.string().regex(/^(dataset|model|plugin):[^/]+\/[^@]+@[^@]+$/),
     role: z.string().min(1),
@@ -21,7 +21,8 @@ export const derivedInspectionDescriptorSchema = z.object({
   molrec_schema_version: exactVersion,
   generated_at: z.iso.datetime(),
   record: z.object({
-    format: z.literal("molrec-zarr-v3"),
+    format: z.literal("mrec"),
+    store: z.literal("zarr"),
     url: z.url().refine((value) => value.startsWith("https://"), "Record URL must use HTTPS"),
     frames: z.number().int().positive(),
   }),
@@ -47,6 +48,7 @@ export async function derivedInspectionKey(
     converter: valid.converter,
     molrec_schema_version: valid.molrec_schema_version,
     record_format: valid.record.format,
+    record_store: valid.record.store,
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");

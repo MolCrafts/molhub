@@ -91,6 +91,10 @@ from molhub.conveyor.encoder import RawUnit  # noqa: E402
 from molhub.conveyor.errors import UnsupportedRecordError  # noqa: E402
 from molhub.conveyor.prepare import PreparedBlocks  # noqa: E402
 from molhub.coordinate import Coordinate  # noqa: E402
+from collections.abc import Sequence  # noqa: E402
+
+from molpy import Frame  # noqa: E402
+
 from molhub.dataset.protocol import IterableDataset  # noqa: E402
 from molhub.registry import Registry  # noqa: E402
 from molhub.sources.blobs import BlobStore  # noqa: E402
@@ -675,9 +679,9 @@ class RecordingWriterFactory:
 # ---------------------------------------------------------------------------
 
 
-def _ids(records: Iterable[Frame]) -> tuple[str, ...]:
+def _ids(records: Iterable[Sequence[Frame]]) -> tuple[str, ...]:
     """The ``source_record_id`` of every record of an iterable, in walk order."""
-    return tuple(str(record.meta["source_record_id"]) for record in records)
+    return tuple(str(record[0].meta["source_record_id"]) for record in records)
 
 
 def _ledger_text(path: Path) -> str:
@@ -731,14 +735,14 @@ def check_streaming_walk(registry: Registry, hub: LandingHub, ledger: Path, budg
     assert isinstance(stream, IterableDataset), type(stream)
 
     records = list(stream)
-    assert all(isinstance(record, Frame) for record in records), [type(r) for r in records]
+    assert all(isinstance(record[0], Frame) for record in records), [type(r) for r in records]
 
     walked = _ids(records)
     assert walked == STREAMED_IDS, walked
     assert set(walked).isdisjoint(OTHER_SPLIT_IDS), walked
 
     # One meta literal: a record still names the published file it came from.
-    assert records[0].meta["source_id"] == FIRST_SOURCE_ID, records[0].meta["source_id"]
+    assert records[0][0].meta["source_id"] == FIRST_SOURCE_ID, records[0][0].meta["source_id"]
 
     recorded = _lifecycle(_ledger_text(ledger)[len(before) :])
     assert recorded == {"shard-000": LIFECYCLE, "shard-001": LIFECYCLE}, recorded
@@ -874,7 +878,7 @@ def check_prepare_refuses_unroutable_targets(
         )
     except UnsupportedRecordError as error:
         message = str(error)
-        assert BLOCK_FORMAT in message, message
+        assert "RawUnit" in message, message
         assert COORDINATE in message, message
         assert "drop" in message.lower(), message
     else:  # pragma: no cover - the refusal is the point of this leg
@@ -887,7 +891,7 @@ def check_prepare_refuses_unroutable_targets(
     assert hub.roles_fetched == [], hub.roles_fetched
 
     print(
-        f"  prepare/refusal: themol/mbis raises UnsupportedRecordError naming {BLOCK_FORMAT}, "
+        "  prepare/refusal: themol/mbis raises UnsupportedRecordError naming RawUnit, "
         f"with no writer opened, nothing fetched and {output_dir.name}/ never created"
     )
 

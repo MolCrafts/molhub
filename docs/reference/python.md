@@ -77,9 +77,12 @@ Where a value sits on a record follows one rule:
   (`row`/`col`/`value`), `frame["scan"]` (the four scanned atom indices).
 
 `type(record)` prints `molrs.frame.Frame`, not `molpy.Frame`. That is the same
-class: molpy re-exports its `Frame` and `Block` from molrs, the Rust core it is
-built on (`from molrs.frame import Block, Frame` in molpy's own `__init__`). The
-API to program against is molpy's, and molhub imports it as `molpy.Frame`.
+class: molpy re-exports its `Frame` and `Block` from molrs (`from molrs.frame
+import Block, Frame` in molpy's own `__init__`). The API to program against is
+molpy's, and molhub imports it as `molpy.Frame`. Graph-level scalars live in
+`frame.meta`; molpy 0.14 hands each entry back as a `MetaValue` whose `.value`
+is the Python scalar, and writes persist only by wholesale assignment
+(`frame.meta = {...}`).
 
 Which names a record carries is on the `Frame` itself. `molhub info` prints
 the declared names, where each sits (`atom` column / `meta` / named block),
@@ -162,29 +165,22 @@ says so; read it with `load_dataset(name)`.
 
 ### Materializing as blocks
 
-`prepare` writes the dataset into a molnex block directory, reading it through
-the same bounded walk.
+`prepare` writes the dataset into sealed block directories, reading it through
+the same bounded walk. The caller supplies `writer_factory=`.
 
-<!-- test: skip writes molnex molix.block/1 blocks, which needs molnex importable -->
+<!-- test: skip prepare has no default writer; pass writer_factory= -->
 
 ```python
 from molhub import prepare
 
-prepare("themol/torsion-scan", output_dir="blocks/")
-# molnex: BlockDataset.load_from_disk("blocks/")
+prepare("themol/torsion-scan", output_dir="blocks/", writer_factory=writer)
 ```
 
-molnex reads the directory back with `BlockDataset.load_from_disk("blocks/")`.
-
-Blocks are molnex's format and molnex is not on PyPI, so `prepare` resolves its
-writer — by really importing `molix.store.block` and `torch` — **before** it
-creates anything, and refuses with an `ImportError` naming both ways out:
-`pip install 'molhub[prepare]'` for the publishable half (torch), and a molnex
-source checkout for the other. `MOLNEX_SRC` is that escape hatch and is honoured
-here: its value is put at the front of `sys.path` before the probe and left
-there, because the writer imports molnex again when it opens its first block.
-Point it at the checkout's `src/` directory. Injecting `writer_factory=` a
-writer of your own bypasses the whole question.
+`prepare` has no default writer. Omitting `writer_factory=` raises `ValueError`
+before any directory exists. The writer's format string is left as recorded.
+molhub checks that each sealed manifest is `sealed`, names the split the writer
+was opened for, reports the same unit count the writer committed, and carries a
+`block_digest`.
 
 ### When a split cannot be opened
 
@@ -227,12 +223,12 @@ refuse by naming `THEMolHessianRelax(hub=hub).load(role="shard-000")` /
 molhub ships no reader for, the refusal says so and points at
 `molhub fetch <coordinate>`.
 
-**`UnsupportedRecordError` — the block format has no columns for this dataset.**
-`prepare("themol/mbis", ...)` raises it, and creates nothing: `molix.block/1`
-routes none of MBIS's atom-level electrostatics targets, so an export would
-write the geometry and topology and silently drop every target the dataset
-exists for. Read them with `load_dataset("themol/mbis", split=...)` until the
-format routes them.
+**`UnsupportedRecordError` — `RawUnit` has no column for this dataset.**
+`prepare("themol/mbis", ...)` raises it, and creates nothing: MBIS's atom-level
+electrostatics targets have no column on `RawUnit`, so an export would write
+the geometry and topology and silently drop every target the dataset exists
+for. Read them with `load_dataset("themol/mbis", split=...)` until `RawUnit`
+grows those columns.
 
 **`ValueError` — the payload needs a conversion this machine has not run.** Both
 espaloma datasets publish bytes their own reader cannot open, and the refusal

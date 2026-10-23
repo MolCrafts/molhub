@@ -103,12 +103,16 @@ digest 强校验由 `HttpsSource` + `Fetcher` 实现，回归测试锁定 202、
 molpy 是 pre-1.0，且在小版本间移动公开 API。0.3 → 0.9 把 `Frame`/`Block`/
 `Element` 从 `molpy.core.*` 搬到顶层，并把 `Frame.metadata` 改名 `Frame.meta`。
 原先 `molcrafts-molpy>=0.3.0` 的开放下界让这次破坏性升级悄悄进了 lock，
-origin/master 一度不可导入且 CI 未覆盖。依赖已收紧为 `>=0.12,<0.13`。
+origin/master 一度不可导入且 CI 未覆盖。依赖现钉在 `>=0.14,<0.15`。
 
-**Frame.meta 契约：** `frame.meta` 是写穿 mapping。读 `frame.meta[key]` 得到
-Python 标量；写 `frame.meta[key] = v` 或 `frame.meta.update(...)` 会落盘。
-Rust 侧仍是闭集 `MetaValue`；精确 dtype 才显式构造 `MetaValue`。没有
-`Targets` / `read_meta` 包装层。loader 仍可用内部 `write_meta` 整表替换。
+**Frame.meta 契约（molpy 0.14）：** `frame.meta` 返回一份 `dict[str, MetaValue]`
+拷贝。读 `frame.meta[key]` 得到 `MetaValue`，Python 标量在 `.value`。写必须整表
+替换：`frame.meta = {"U0": -9.0}`。条目赋值和 `update()` 改的是拷贝，不会落盘。
+没有 `Targets` / `read_meta` 包装层。
+
+**labelled-config record：** 没有 `molpy.Record` / `MolRec`。轨迹走
+`molpy.io.mrec`；教师标签写在帧上（标量 `frame.meta["<teacher>.<name>"]`，力
+`atoms["<teacher>.fx"]` 等）。
 
 另注：`len(Block)` 是**列数**，行数是 `Block.nrows`；`len(Frame)` 是 block 个数。
 

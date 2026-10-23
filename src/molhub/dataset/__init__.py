@@ -1,5 +1,6 @@
 """Dataset module — protocols and built-in dataset sources."""
 
+from molhub.dataset.ase import AseDataset
 from molhub.dataset.bonds import BondMargins, infer_bonds
 from molhub.dataset.csv_dataset import CSVDataset
 from molhub.dataset.definition import (
@@ -8,8 +9,9 @@ from molhub.dataset.definition import (
     UnknownDataset,
     dataset,
 )
+from molhub.dataset.hdf5 import Hdf5Dataset
 from molhub.dataset.hub import ArtifactHub
-from molhub.dataset.neighbor import NeighborDelegate
+from molhub.dataset.lmdb import LmdbDataset
 from molhub.dataset.omol25 import (
     OMol25,
     OMol25Dataset,
@@ -65,6 +67,9 @@ Hessian = THEMolHessian
 TorsionScan = THEMolTorsionScan
 
 __all__ = [
+    "AseDataset",
+    "Hdf5Dataset",
+    "LmdbDataset",
     "dataset",
     "DatasetManifest",
     "Datasets",
@@ -91,7 +96,6 @@ __all__ = [
     "AtomicDress",
     "UnitConvert",
     "ConstantLabel",
-    "NeighborDelegate",
     "OMol25",
     "OMol25Dataset",
     "OMol25Lmdb",

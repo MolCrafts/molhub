@@ -8,7 +8,7 @@ import pytest
 
 
 def pytest_configure() -> None:
-    """Let tests compare molpy 0.14 ``MetaValue`` wrappers to Python scalars.
+    """Let tests compare molpy ``MetaValue`` wrappers to Python scalars.
 
     ``frame.meta[key]`` is a ``MetaValue``; the documented numbers live on
     ``.value``. Production code unwraps at the few sites that need a scalar.
@@ -25,13 +25,13 @@ def pytest_configure() -> None:
     def _lt(self, other):  # noqa: ANN001
         return _unwrap(self) < _unwrap(other)
 
-    molrs.MetaValue.__eq__ = _eq  # type: ignore[method-assign]
-    molrs.MetaValue.__lt__ = _lt  # type: ignore[method-assign]
-    molrs.MetaValue.__float__ = lambda self: float(self.value)  # type: ignore[method-assign]
-    molrs.MetaValue.__int__ = lambda self: int(self.value)  # type: ignore[method-assign]
-    molrs.MetaValue.__index__ = lambda self: int(self.value)  # type: ignore[method-assign]
-    molrs.MetaValue.__str__ = lambda self: str(self.value)  # type: ignore[method-assign]
-    molrs.MetaValue.__hash__ = lambda self: hash(self.value)  # type: ignore[method-assign]
+    molrs.core.MetaValue.__eq__ = _eq  # type: ignore[method-assign]
+    molrs.core.MetaValue.__lt__ = _lt  # type: ignore[method-assign]
+    molrs.core.MetaValue.__float__ = lambda self: float(self.value)  # type: ignore[method-assign]
+    molrs.core.MetaValue.__int__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    molrs.core.MetaValue.__index__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    molrs.core.MetaValue.__str__ = lambda self: str(self.value)  # type: ignore[method-assign]
+    molrs.core.MetaValue.__hash__ = lambda self: hash(self.value)  # type: ignore[method-assign]
 
 
 MAIN_BODY = b"main artifact bytes"

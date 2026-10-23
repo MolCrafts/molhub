@@ -26,7 +26,6 @@ from molhub.dataset.definition import UnknownDataset
 from molhub.dataset.hub import ArtifactHub
 from molhub.dataset.protocol import Dataset, SubsetDataset, assignment
 from molhub.loader.builder import DatasetBuilder
-from molhub.loader.datamodule import DataModule
 from molhub.loader.errors import SplitTableUnavailable, UnknownSplit
 from molhub.loader.mapstyle import UnknownRecordKey
 from molhub.loader.materialize import prepare
@@ -39,7 +38,6 @@ __all__ = [
     "load",
     "assignment",
     "prepare",
-    "DataModule",
     "SubsetDataset",
     "UnknownDataset",
     "AmbiguousRevision",

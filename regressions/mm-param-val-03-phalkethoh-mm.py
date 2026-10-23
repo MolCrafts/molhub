@@ -56,9 +56,13 @@ def main() -> None:
         train = PhalkethohMMDataset(root, download=False, split="train")
         assert len(train) == 2
         assert train.source_id == f"{COORDINATE}#split=train"
-        assert train[0].meta["molecule_id"] == "molA"
-        assert train[0].meta["mm_energy"] == -1.0
-        assert train[1].meta["mm_energy"] == -1.5
+
+        def _plain(value: object) -> object:
+            return getattr(value, "value", value)
+
+        assert _plain(train[0][0].meta["molecule_id"]) == "molA"
+        assert _plain(train[0][0].meta["mm_energy"]) == -1.0
+        assert _plain(train[1][0].meta["mm_energy"]) == -1.5
     print("mm-param-val-03-phalkethoh-mm: OK")
 
 

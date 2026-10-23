@@ -18,12 +18,22 @@ from molhub.dataset import (
     THEMolTorsionRelax,
     THEMolTorsionScan,
 )
-from molhub.dataset.themol import THEMOL_UNITS
+from molhub.dataset.gaff2 import Gaff2LennardJones
+from molhub.dataset.themol import GAFF2_UNITS, THEMOL_UNITS
+from molhub.dataset.themol_format import _mapped_topology_frame
 from molhub.loader.info import Feature
 
 WATER = "[O:2]([H:1])[H:3]"
 BUTANE = "[H:1][C:2]([H:5])([H:6])[C:3]([H:7])([H:8])[C:4]([H:9])([H:10])[H:11]"
 NEON = "[Ne:1]"
+#: Methyl carbon 1, ring carbons 2-7, methyl hydrogens 8-10, ring hydrogens 11-15.
+TOLUENE = (
+    "[C:1]([H:8])([H:9])([H:10])[c:2]1[c:3]([H:11])[c:4]([H:12])[c:5]([H:13])"
+    "[c:6]([H:14])[c:7]1[H:15]"
+)
+TOLUENE_NUMBERS = (6,) * 7 + (1,) * 8
+AMMONIUM = "[N+:1]([H:2])([H:3])([H:4])[H:5]"
+SILANE = "[Si:1]([H:2])([H:3])([H:4])[H:5]"
 
 
 def _identity(group: h5py.Group, smiles: str, numbers: list[int]) -> None:
@@ -370,10 +380,27 @@ class TestGroupedTasks:
 # moves onto blocks / atom columns / per-frame `meta`.
 # ---------------------------------------------------------------------------
 
-# The atom columns `_mapped_topology_frame` already writes for every task. The
-# MBIS supervision columns are pinned below as the exact difference from this
-# set, so a stray extra column is a failure rather than a silent addition.
-GEOMETRY_ATOM_COLUMNS = frozenset({"element", "number", "atom_map", "formal_charge", "x", "y", "z"})
+# The atom columns `_mapped_topology_frame` already writes for every task:
+# identity, geometry, and the per-atom topology facts a Class-I parameter head
+# conditions on (`formal_charge`, the two ring columns and the GAFF2
+# Lennard-Jones prior). The MBIS supervision columns are pinned below as the
+# exact difference from this set, so a stray extra column is a failure rather
+# than a silent addition.
+GEOMETRY_ATOM_COLUMNS = frozenset(
+    {
+        "element",
+        "number",
+        "atom_map",
+        "formal_charge",
+        "ring_connectivity",
+        "min_ring_size",
+        "gaff2_sigma",
+        "gaff2_epsilon",
+        "x",
+        "y",
+        "z",
+    }
+)
 
 # The Cartesian Hessian as a COO block: *all* (3N)**2 entries, row-major, no
 # triangle folding and no sparsity assumption (D1).
@@ -623,6 +650,62 @@ class TestTHEMolShardDataset:
         monkeypatch.setattr("molhub.dataset.themol._open_h5", _refuse)
         assert THEMolHessian(shard).load().keys() == self.KEYS
 
+    def test_getitems_matches_indexing(self, tmp_path: Path) -> None:
+        """A batched fetch reads the same records indexing does, in the order asked."""
+        shard = THEMolHessian(self._shard(tmp_path)).load()
+        order = [1, 0]
+        batched = shard.__getitems__(order)
+        serial = [shard[i] for i in order]
+        assert [item[0].meta["source_record_id"] for item in batched] == [
+            item[0].meta["source_record_id"] for item in serial
+        ]
+        for got, expected in zip(batched, serial, strict=True):
+            assert np.array_equal(got[0]["atoms"]["x"], expected[0]["atoms"]["x"])
+            assert np.array_equal(got[0]["hessian"]["value"], expected[0]["hessian"]["value"])
+            assert (
+                got[0].meta["mapped_isomeric_smiles"] == expected[0].meta["mapped_isomeric_smiles"]
+            )
+
+    def test_a_second_read_rebuilds_frames_without_opening_the_shard(self, tmp_path: Path) -> None:
+        """A cache hit does not open the shard. The miss still does."""
+        shard = THEMolHessian(self._shard(tmp_path)).load()
+        first = shard[0][0]
+        opened: list[int] = []
+        snap = shard._h5().snapshot
+
+        def _count(name: str):
+            opened.append(1)
+            return snap(name)
+
+        shard._h5().snapshot = _count  # type: ignore[method-assign]
+        second = shard[0][0]
+        assert opened == []
+        assert second["hessian"]["row"].dtype == np.dtype(np.int32)
+        assert second["hessian"]["col"].dtype == np.dtype(np.int32)
+        assert second["hessian"]["value"].dtype == np.dtype(np.float64)
+        assert np.array_equal(second["hessian"]["value"], first["hessian"]["value"])
+        assert list(second["atoms"]["element"]) == list(first["atoms"]["element"])
+        assert second.meta["mapped_isomeric_smiles"] == first.meta["mapped_isomeric_smiles"]
+        batched = shard.__getitems__([0, 1])
+        assert opened == [1]
+        assert batched[0][0].meta["source_record_id"] == first.meta["source_record_id"]
+        assert batched[1][0].meta["source_record_id"] == "eq-record-1"
+
+    def test_without_a_cache_every_read_stages(self, tmp_path: Path) -> None:
+        shard = THEMolHessian(self._shard(tmp_path)).load()
+        shard.cache = None
+        staged: list[int] = []
+        stage = shard.stage
+
+        def _count(index: int):
+            staged.append(int(index))
+            return stage(index)
+
+        shard.stage = _count  # type: ignore[method-assign]
+        shard[0]
+        shard[0]
+        assert staged == [0, 0]
+
     def test_element_mask_sets_one_bit_per_element_the_row_carries(self, tmp_path: Path) -> None:
         """A row's elements, as a bitmask — the cheap input to a coverage check.
 
@@ -765,6 +848,128 @@ class TestTHEMolHessian:
         assert isinstance(record[0], Frame)
         assert "bonds" not in record[0]
         assert np.asarray(record[0]["hessian"]["value"]).shape == (9,)
+
+
+def _topology_group(smiles: str, numbers: Sequence[int]) -> dict[str, object]:
+    """A record's identity arrays, as `_mapped_topology_frame` reads them off a shard."""
+    return {
+        "mapped_isomeric_smiles": smiles,
+        "mapped_nonisomeric_smiles": smiles,
+        "atomic_numbers": np.asarray(numbers, dtype=np.int32)[:, None],
+        "coords": np.zeros((len(numbers), 3), dtype=np.float64),
+    }
+
+
+class TestMappedTopologyFrame:
+    """The topology facts every THEMol frame carries, computed once per record.
+
+    All of them are read off the mapped SMILES, so a plain dict stands in for
+    the HDF5 group: the shard-level readers are pinned by the classes above
+    and below, and what is pinned here is the chemistry of each column.
+    """
+
+    @staticmethod
+    def _toluene() -> Frame:
+        return _mapped_topology_frame(_topology_group(TOLUENE, TOLUENE_NUMBERS), "tol", "src")
+
+    def test_ring_connectivity_counts_ring_bonds_at_the_atom(self) -> None:
+        """Six ring carbons carry two ring bonds each; the methyl carbon and every H none."""
+        column = np.asarray(self._toluene()["atoms"]["ring_connectivity"])
+        assert column.dtype == np.int64
+        assert column.tolist() == [0, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    def test_min_ring_size_is_the_smallest_ring_through_the_atom_or_zero(self) -> None:
+        column = np.asarray(self._toluene()["atoms"]["min_ring_size"])
+        assert column.dtype == np.int64
+        assert column.tolist() == [0, 6, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    def test_min_ring_size_picks_the_smaller_of_two_rings(self) -> None:
+        """Cyclopropylbenzene: 3 on the cyclopropyl carbons, 6 on the phenyl ones."""
+        smiles = (
+            "[C:1]1([H:10])([H:11])[C:2]([H:12])([H:13])[C:3]1([H:14])"
+            "[c:4]1[c:5]([H:15])[c:6]([H:16])[c:7]([H:17])[c:8]([H:18])[c:9]1[H:19]"
+        )
+        group = _topology_group(smiles, (6,) * 9 + (1,) * 10)
+        frame = _mapped_topology_frame(group, "cpb", "src")
+        carbons = np.asarray(frame["atoms"]["min_ring_size"]).tolist()[:9]
+        assert carbons == [3, 3, 3, 6, 6, 6, 6, 6, 6]
+
+    def test_in_ring_marks_exactly_the_bonds_between_ring_neighbours(self) -> None:
+        """A bond is a ring bond iff its two atoms are adjacent in some SSSR ring."""
+        bonds = self._toluene()["bonds"]
+        in_ring = np.asarray(bonds["in_ring"])
+        assert in_ring.dtype == np.int64
+        ring_atoms = set(range(1, 7))
+        expected = [
+            int(i in ring_atoms and j in ring_atoms)
+            for i, j in zip(np.asarray(bonds["atomi"]), np.asarray(bonds["atomj"]), strict=True)
+        ]
+        assert in_ring.tolist() == expected
+        assert int(in_ring.sum()) == 6
+
+    def test_the_gaff2_prior_is_the_tables_well_for_the_antechamber_type(self) -> None:
+        """c3 on the methyl carbon, ca on the ring, hc on methyl H, ha on ring H."""
+        table = Gaff2LennardJones()
+        atoms = self._toluene()["atoms"]
+        sigma = np.asarray(atoms["gaff2_sigma"])
+        epsilon = np.asarray(atoms["gaff2_epsilon"])
+        assert sigma.dtype == np.float64 and epsilon.dtype == np.float64
+        expected_types = ["c3"] + ["ca"] * 6 + ["hc"] * 3 + ["ha"] * 5
+        assert sigma.tolist() == pytest.approx([table.sigma(t) for t in expected_types], rel=1e-12)
+        assert epsilon.tolist() == pytest.approx(
+            [table.epsilon(t) for t in expected_types], rel=1e-12
+        )
+
+    def test_a_charged_species_keeps_its_formal_charge_and_types_as_such(self) -> None:
+        frame = _mapped_topology_frame(_topology_group(AMMONIUM, (7, 1, 1, 1, 1)), "amm", "src")
+        assert np.asarray(frame["atoms"]["formal_charge"]).tolist() == [1, 0, 0, 0, 0]
+        assert frame.meta["total_charge"] == 1
+        nitrogen_epsilon = float(np.asarray(frame["atoms"]["gaff2_epsilon"])[0])
+        assert nitrogen_epsilon == Gaff2LennardJones().epsilon("n+")
+
+    def test_an_element_gaff2_cannot_type_gets_nan_not_zero(self) -> None:
+        """Silicon has no GAFF2 row: the prior is absent, and absent is NaN."""
+        frame = _mapped_topology_frame(_topology_group(SILANE, (14, 1, 1, 1, 1)), "sil", "src")
+        sigma = np.asarray(frame["atoms"]["gaff2_sigma"])
+        epsilon = np.asarray(frame["atoms"]["gaff2_epsilon"])
+        assert np.isnan(sigma[0]) and np.isnan(epsilon[0])
+        assert np.isfinite(sigma[1:]).all() and np.isfinite(epsilon[1:]).all()
+
+    def test_a_bondless_atom_has_zero_ring_columns_and_no_bond_block(self) -> None:
+        frame = _mapped_topology_frame(_topology_group(NEON, (10,)), "ne", "src")
+        assert "bonds" not in frame
+        assert np.asarray(frame["atoms"]["ring_connectivity"]).tolist() == [0]
+        assert np.asarray(frame["atoms"]["min_ring_size"]).tolist() == [0]
+
+    def test_the_columns_follow_atom_map_order_not_parse_order(self) -> None:
+        """Water is parsed O first and mapped H:1 O:2 H:3; the ring columns ride along."""
+        smiles = (
+            "[c:3]1([H:1])[c:2]([H:4])[c:5]([H:6])[c:7]([H:8])[c:9]([H:10])[c:11]1"
+            "[C:12]([H:13])([H:14])[H:15]"
+        )
+        numbers = [1, 6, 6, 1, 6, 1, 6, 1, 6, 1, 6, 6, 1, 1, 1]
+        frame = _mapped_topology_frame(_topology_group(smiles, numbers), "tol2", "src")
+        atoms = frame["atoms"]
+        is_ring_carbon = [n == 6 and k != 11 for k, n in enumerate(numbers)]
+        assert np.asarray(atoms["ring_connectivity"]).tolist() == [
+            2 if ring else 0 for ring in is_ring_carbon
+        ]
+        assert np.asarray(atoms["min_ring_size"]).tolist() == [
+            6 if ring else 0 for ring in is_ring_carbon
+        ]
+        methyl_epsilon = float(np.asarray(atoms["gaff2_epsilon"])[11])
+        assert methyl_epsilon == Gaff2LennardJones().epsilon("c3")
+
+    def test_nan_priors_survive_the_record_cache(self, tmp_path: Path) -> None:
+        """The second read comes from the LMDB cache; a NaN must not become a number."""
+        path = tmp_path / "shard-000.h5"
+        _write_hessian(path, smiles=SILANE, numbers=(14, 1, 1, 1, 1), coords=np.zeros((5, 3)))
+        shard = THEMolHessian(path).load()
+        first = np.asarray(shard[0][0]["atoms"]["gaff2_sigma"])
+        second = np.asarray(shard[0][0]["atoms"]["gaff2_sigma"])
+        assert np.isnan(first[0]) and np.isnan(second[0])
+        assert second.dtype == np.float64
+        assert np.asarray(shard[0][0]["atoms"]["min_ring_size"]).dtype == np.int64
 
 
 class TestTHEMolMBIS:
@@ -1046,6 +1251,30 @@ class TestTHEMolTorsionScan:
         assert all(isinstance(frame, Frame) for frame in record)
         assert len(record) == 2
 
+    def test_a_second_read_of_a_scan_matches_the_first(self, tmp_path: Path) -> None:
+        path = tmp_path / "shard-000.h5"
+        _write_torsion(path, relax=False)
+        dataset = THEMolTorsionScan(path).load()
+        first = dataset[0]
+        opened: list[int] = []
+        snap = dataset._h5().snapshot
+
+        def _count(name: str):
+            opened.append(1)
+            return snap(name)
+
+        dataset._h5().snapshot = _count  # type: ignore[method-assign]
+        second = dataset[0]
+        assert opened == []
+        assert [frame.meta["energy"] for frame in second] == [0.0, -1.0]
+        assert [frame.meta["constraint_index"] for frame in second] == [0, 1]
+        assert [frame.meta["torsion_angle"] for frame in second] == pytest.approx(
+            [frame.meta["torsion_angle"] for frame in first]
+        )
+        assert [np.asarray(frame["atoms"]["x"]).tolist() for frame in second] == [
+            np.asarray(frame["atoms"]["x"]).tolist() for frame in first
+        ]
+
     def test_each_frame_carries_its_scan_scalars(self, tmp_path: Path) -> None:
         record = self._record(tmp_path)
         assert [record[index].meta["scan_id"] for index in range(2)] == [
@@ -1124,6 +1353,41 @@ class TestTHEMolHessianRelax:
             THEMolHessianRelax(path).load()[0]
 
 
+class TestTHEMolShardDatasetSplit:
+    """``split`` is the record as a molrec system plus per-frame state."""
+
+    def test_a_relaxation_splits_into_identity_and_state(self, tmp_path: Path) -> None:
+        path = tmp_path / "shard-000.h5"
+        _write_hessian_relax(path)
+        system, frames, steps = THEMolHessianRelax(path).load().split(0)
+        assert sorted(system["atoms"].keys()) == [
+            "atom_map",
+            "atomic_number",
+            "element",
+            "formal_charge",
+            "gaff2_epsilon",
+            "gaff2_sigma",
+            "min_ring_size",
+            "ring_connectivity",
+        ]
+        assert np.asarray(system["atoms"]["atomic_number"]).dtype == np.uint64
+        assert "bonds" in system.keys()
+        assert {"molecule_id", "mapped_smiles", "total_charge"} <= set(system.meta)
+        assert sorted(frames[1]["atoms"].keys()) == ["fx", "fy", "fz", "x", "y", "z"]
+        assert [frame.meta["pe"] for frame in frames] == [-10.0, -10.5]
+        assert steps == [0, 1]
+
+    def test_a_torsion_scan_steps_by_constraint_and_keeps_its_scan_block(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "shard-000.h5"
+        _write_torsion(path, relax=False)
+        system, frames, steps = THEMolTorsionScan(path).load().split(0)
+        assert "scan" in system.keys() and all("scan" not in f.keys() for f in frames)
+        assert steps == [0, 1]
+        assert set(frames[0].meta) == {"pe", "constraint_index", "torsion_angle"}
+
+
 def test_definition_construction_is_io_free(tmp_path: Path) -> None:
     definition = THEMolHessian(tmp_path)
     assert definition.root == tmp_path.resolve()
@@ -1167,3 +1431,15 @@ def test_themol_units_declares_exactly_these_quantities() -> None:
         "inverse_sigma",
         "torsion_angle",
     }
+
+
+def test_the_gaff2_prior_declares_its_two_units() -> None:
+    """Literals, like `torsion_angle` above: a unit is a claim, not a lookup."""
+    assert GAFF2_UNITS == {"gaff2_sigma": "angstrom", "gaff2_epsilon": "kcal/mol"}
+
+
+def test_the_gaff2_units_are_the_shipped_tables() -> None:
+    """The declaration and the asset it describes cannot drift apart."""
+    units = Gaff2LennardJones().units
+    assert GAFF2_UNITS["gaff2_sigma"] == units["sigma"]
+    assert GAFF2_UNITS["gaff2_epsilon"] == units["epsilon"]

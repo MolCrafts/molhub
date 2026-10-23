@@ -2,11 +2,10 @@
 
 This is the semantic half of the prepare stage: it maps the records
 :mod:`molhub.dataset.themol` already parses out of HDF5 — a
-``Sequence[Frame]`` (``Sequence[Frame]``) — onto the column names
-``molix.block/1`` routes, and does nothing else. It opens no file, holds no
-writer, decides no split, and imports neither torch nor molix — so a shard
-can be encoded, inspected and unit-tested in an environment where molnex is
-not installed at all.
+``Sequence[Frame]`` — onto :class:`RawUnit`'s own columns, and does nothing
+else. It opens no file, holds no writer, decides no split, and imports
+neither torch nor molix — so a shard can be encoded, inspected and
+unit-tested in an environment where no block writer is installed.
 
 **A record is recognised by shape, not by name.**
 ``tests/test_conveyor/test_layering.py`` allows this module stdlib, ``molhub``
@@ -15,17 +14,14 @@ depth — so :meth:`THEMolUnitEncoder.encode` cannot name ``Frame`` or
 ``FrameCollection`` in an ``isinstance`` check. It requires a sequence whose
 first item has ``meta``. A bare frame is not a collection.
 
-**Column names are molnex's route names, not molhub's.** They are rows of the
-closed ``_COLUMN_ROUTES`` registry molnex used to carry, which
-resolves a column to a row space and a payload route by *name* — an
-unregistered column is a ``ValueError``, not a new prefix — so the encoder emits
-exactly: ``Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` /
-``torsion_atoms`` in molecule space, and ``pos`` / ``forces`` / ``energy`` /
-``torsion_angle`` in frame space.
+**Column names are :class:`RawUnit`'s own.** The encoder emits exactly
+``Z`` / ``bond_atomi`` / ``bond_atomj`` / ``bond_type`` / ``torsion_atoms``
+in molecule space, and ``pos`` / ``forces`` / ``energy`` / ``torsion_angle``
+in frame space.
 
 **No unit conversion happens here, by construction.**
 :data:`~molhub.dataset.themol.THEMOL_UNITS` declares Å / kcal mol⁻¹ /
-kcal mol⁻¹ Å⁻¹, which is already the block format's convention. The only numeric
+kcal mol⁻¹ Å⁻¹, which the caller copies into ``provenance["units"]``. The only numeric
 transformation is the dtype narrowing the store refuses to do silently
 (float64 → ``<f4``, molpy's uint64 valence columns → ``<i4``, atomic numbers →
 ``<i2``); no conversion factor appears anywhere in this module, and the caller
@@ -33,17 +29,11 @@ puts ``THEMOL_UNITS`` itself into ``provenance["units"]``.
 
 **Named gap — the Cartesian Hessian is not encoded.** A hessian record yields a
 one-frame equilibrium-geometry unit, and the ``hessian`` block its frame carries
-— all ``(3N)**2`` COO entries — is deliberately dropped, for two independent
-reasons:
-
-1. ``molix.block/1`` has no routable column space for a per-molecule ragged 2-D
-   payload. Its only Hessian column is ``hessian_diag``, a *projected internal*
-   target, and the projection needs a B-matrix that is equally unroutable — so
-   storing the Cartesian block would mean forking the block format, which is the
-   one thing this boundary exists to prevent.
-2. The streaming strategy classifies the Hessian core as **hot tier**
-   (``.claude/specs/streaming-data-tiers-01-strategy.md`` § 6), permanently
-   resident at ≈ 5.8 GB. It does not belong in a rolling block at all.
+— all ``(3N)**2`` COO entries — is deliberately dropped because
+:class:`RawUnit` has no column for it. The streaming strategy also classifies
+the Hessian core as **hot tier**
+(``.claude/specs/streaming-data-tiers-01-strategy.md`` § 6), permanently
+resident at ≈ 5.8 GB, so it does not belong in a rolling block.
 
 The successor owns the projected-target column: the chain's ``-04`` sub-spec, or
 a dedicated Hessian-target spec if the projection lands first. Until then
@@ -53,7 +43,7 @@ cannot decay from a decision into an accident.
 Also not encoded: a frame's ``meta["step_index"]``. It labels which optimizer
 iteration a torsion-relax or relaxation frame came from, which is provenance
 about the *generation* of a frame rather than a supervision target, and
-``molix.block/1`` has no frame-space route for it.
+:class:`RawUnit` has no column for it.
 
 Reference:
     ``.claude/specs/streaming-data-tiers-03-conveyor-03-prepare.md`` § 3
@@ -177,8 +167,7 @@ class THEMolUnitEncoder:
         ValueError: *task* is empty; molnex stores it as a dictionary code and
             refuses an empty label.
         UnsupportedRecordError: *task* is ``"mbis"``, whose atom-level
-            electrostatics targets need column routes ``molix.block/1`` does not
-            define.
+            electrostatics targets have no column on :class:`RawUnit`.
     """
 
     def __init__(self, *, task: str) -> None:
@@ -191,8 +180,8 @@ class THEMolUnitEncoder:
             raise UnsupportedRecordError(
                 "THEMol 'mbis' has no encoder: its atom-level electrostatics targets "
                 "(atomic_charge, atomic_volume, the dipole and quadrupole components and "
-                "the per-atom Slater parameters) need column routes molix.block/1 does not "
-                "define. Encoding the geometry alone would produce a unit that silently lost "
+                "the per-atom Slater parameters) have no column on RawUnit. Encoding the "
+                "geometry alone would produce a unit that silently lost "
                 "every target it exists for. The refusal is here, at construction, because an "
                 "MBIS frame and a hessian frame are the same type: one shard is one task, and "
                 "the task is named here."
@@ -236,7 +225,7 @@ class THEMolUnitEncoder:
 
         Returns:
             The unit, with molecule-space and frame-space columns named as
-            ``molix.block/1`` routes them.
+            :class:`RawUnit` declares them.
 
         Raises:
             UnsupportedRecordError: *record* is not a sequence of frames.

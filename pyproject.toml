@@ -56,16 +56,13 @@ dev = [
   # diagnostics can move between releases.
   "ty>=0.0.69",
   "tox>=4.23",
+  # The arbiter of the LMDB collection layout: tests/test_io/test_lmdb.py reads
+  # what molhub writes through molrec's official codec.
+  "molrec[lmdb]",
 ]
 huggingface = ["huggingface_hub>=0.20"]
 omol = ["lmdb>=1.4"]
-# The conveyor's prepare stage writes molnex `molix.block/1` blocks through
-# `molhub.conveyor.prepare.MolnexBlockWriter`. molnex is **not published on
-# PyPI**, so this extra can only name the publishable half — torch. For the
-# other half, install molnex from a source checkout, or point `MOLNEX_SRC` at
-# its `src/` directory (the escape hatch `tests/test_dataset/test_neighbor.py`
-# already uses). Everything except `MolnexBlockWriter` works without either:
-# the `molix` import is lazy, inside that class.
+# torch for a caller-supplied block writer. molhub does not import one.
 prepare = ["torch>=2.10"]
 
 [dependency-groups]
@@ -90,7 +87,7 @@ Repository = "https://github.com/MolCrafts/molhub"
 where = ["src"]
 
 [tool.setuptools.package-data]
-molhub = ["schema/*.yaml"]
+molhub = ["schema/*.yaml", "data/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -131,31 +128,8 @@ include = ["src/molhub/sources/drivers/huggingface.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
-# Same treatment for `molix` (molnex): only the neighbour delegate wants it, it
-# is imported inside the method that needs it, and it is not on PyPI, so no
-# extra can pull it and the lint environment never resolves it.
-[[tool.ty.overrides]]
-include = ["src/molhub/dataset/neighbor.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# And for the loader's molix delegate: `DataModule.__init__` imports
-# `molix.data` and, on the packing path, `torch` inside the method that needs
-# them. Neither is on PyPI so no extra can pull molnex, and the lint environment
-# installs neither — the same situation as the three sites above, and the reason
-# this file reported the last two `unresolved-import` diagnostics once the real
-# type errors were fixed.
-[[tool.ty.overrides]]
-include = ["src/molhub/loader/datamodule.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-# And once more for the conveyor's single lazy import site: `MolnexBlockWriter`
-# imports `torch` and `molix.store.block` inside its constructor (the Option-A
-# ruling), the `prepare` extra cannot pull molnex because it is unpublished, and
-# the lint environment installs neither.
+# prepare.py does not import a block writer. This override ignores an
+# unresolved import in that file.
 [[tool.ty.overrides]]
 include = ["src/molhub/conveyor/prepare.py"]
 
@@ -188,6 +162,7 @@ unresolved-import = "ignore"
 [tool.uv.sources]
 molcrafts-molpy = { path = "../molpy", editable = true }
 molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
+molrec = { path = "../molrec", editable = true }
 
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py
 [tool.tox]

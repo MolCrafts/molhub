@@ -144,6 +144,34 @@ class TestSubsetDataset:
         with pytest.raises(IndexError):
             sub[1]
 
+    def test_getitems_reads_the_parent_a_row_at_a_time(self):
+        base = InMemoryDataset(
+            [_make_frame([1]), _make_frame([6]), _make_frame([8])],
+            name="base",
+        )
+        sub = SubsetDataset(base, [2, 0])
+        got = sub.__getitems__([1, 0])
+        assert [int(item[0]["atoms"]["number"][0]) for item in got] == [1, 8]
+
+    def test_getitems_forwards_a_parent_batch(self):
+        class _Batched(InMemoryDataset):
+            def __init__(self) -> None:
+                super().__init__(
+                    [_make_frame([1]), _make_frame([6]), _make_frame([8])],
+                    name="base",
+                )
+                self.asked: list[list[int]] = []
+
+            def __getitems__(self, indices):
+                self.asked.append([int(index) for index in indices])
+                return [self[index] for index in indices]
+
+        base = _Batched()
+        sub = SubsetDataset(base, [2, 0])
+        got = sub.__getitems__([1, 0])
+        assert base.asked == [[0, 2]]
+        assert [int(item[0]["atoms"]["number"][0]) for item in got] == [1, 8]
+
     def test_manifest_reads_through_to_the_parent(self):
         """A subset publishes the parent's data, so it declares the parent's units.
 

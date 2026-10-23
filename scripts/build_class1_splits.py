@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deprecated location — the generator ships inside the wheel now.
 
-``$MOLHUB_HOME/derived/molcrafts/class1-universal-splits/1/`` is the split
+``<home>/derived/molcrafts/class1-universal-splits/1/`` is the split
 assignment every THEMol split view and every prepared block is routed by, and
 nobody publishes it: it is derived, on the machine that wants it. A generator
 that lived only here would mean a pip-installed molhub could not open a single

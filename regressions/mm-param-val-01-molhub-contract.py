@@ -28,7 +28,7 @@ def _frame(molecule_id: str, conformer_id: str) -> Frame:
     atoms["number"] = np.array([6, 1], dtype=np.int64)
     frame = Frame()
     frame["atoms"] = atoms
-    frame.meta.update({"molecule_id": molecule_id, "conformer_id": conformer_id})
+    frame.meta = {"molecule_id": molecule_id, "conformer_id": conformer_id}
     return frame
 
 
@@ -43,10 +43,14 @@ def main() -> None:
     source = InMemoryDataset(frames, name="regression-mc")
     assert isinstance(source, Dataset)
     assert len(source) == 20
-    assert source[0].meta["molecule_id"] == "m00"
-    assert source[0].meta["conformer_id"] == "c0"
-    assert source[1].meta["molecule_id"] == "m00"
-    assert source[1].meta["conformer_id"] == "c1"
+
+    def _plain(value: object) -> object:
+        return getattr(value, "value", value)
+
+    assert _plain(source[0][0].meta["molecule_id"]) == "m00"
+    assert _plain(source[0][0].meta["conformer_id"]) == "c0"
+    assert _plain(source[1][0].meta["molecule_id"]) == "m00"
+    assert _plain(source[1][0].meta["conformer_id"]) == "c1"
 
     print("mm-param-val-01-molhub-contract: OK")
 

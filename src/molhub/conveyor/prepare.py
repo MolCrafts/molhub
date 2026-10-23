@@ -9,24 +9,15 @@ returns, :class:`PreparedBlocks`, is the seam: one entry per sealed root, which
 the conveyor driver (the single ledger-transition writer) turns into one READY
 record each.
 
-Option A — an optional extra plus a lazy import (binding)
----------------------------------------------------------
+The writer is injected
+---------------------
 
-molnex's writer is **not** imported here any more: ``molix.block/1`` was deleted
-on 2026-09-17 (molnex spec ``data-layer-01-consolidation``) as having no producer,
-no consumer and no instance on disk. This stage keeps the writer-shaped seam —
-:class:`BlockWriterLike` / :class:`BlockWriterFactory` — so a caller can bring a
-writer of their own, and defaults to none. Nothing
-in this package imports torch or molix at module scope — not even under
-``if TYPE_CHECKING`` — so ``import molhub.conveyor.prepare`` succeeds in a base
-install with neither installed, and :class:`PrepareJob` is unit-tested against an
-injected fake writer instead of a sibling repo's real implementation. The seam is
-typed by the two Protocols below rather than by molnex's own names, which is what
-makes that possible; ``tests/test_conveyor/test_layering.py`` enforces it against
-the source text, and the ``prepare`` extra plus the ``MOLNEX_SRC`` escape hatch
-(``pyproject.toml``) are how the real thing gets installed. This extends the
-ruling ``molix-data-dissolution-05-molhub-reception`` (ac-006) already made for
-:mod:`molhub.dataset.neighbor` from one delegate method to a whole package.
+``writer_factory`` has no default. This module imports no block writer, so
+``import molhub.conveyor.prepare`` succeeds in a base install, and
+:class:`PrepareJob` is unit-tested against an injected fake.
+:class:`BlockWriterLike` / :class:`BlockWriterFactory` are the seam;
+``tests/test_conveyor/test_layering.py`` enforces the import rule against the
+source text.
 
 The identity drop is deliberate. :attr:`RawUnit.identity`'s one job — choosing
 which writer a unit goes to — is finished by the time the writer's
@@ -75,15 +66,10 @@ __all__ = [
     "PrepareJob",
 ]
 
-# The format molhub is willing to report as READY evidence, and the manifest
-# that witnesses it. Kept as a string, not an import: the writer that produced
-# this format lived in molnex and was deleted 2026-09-17, and a ledger written
-# before then still names it.
-_BLOCK_FORMAT = "molix.block/1"
 _MANIFEST_NAME = "manifest.json"
 
-# molnex validates the presence of these four provenance keys and nothing about
-# their contents; molhub checks the same four, earlier.
+# A sealed block records these four provenance keys. molhub checks that they
+# are present and nothing about their contents, before a writer is opened.
 _PROVENANCE_KEYS = ("source", "generator", "created_at", "units")
 
 # The strategy's worked example. Production blocks are 1-5 GB; a test uses a
@@ -253,9 +239,9 @@ class PrepareJob:
         missing = [key for key in _PROVENANCE_KEYS if key not in provenance]
         if missing:
             raise IncompleteProvenanceError(
-                f"provenance for shard {name!r} is missing {missing}; {_BLOCK_FORMAT} requires "
-                f"{list(_PROVENANCE_KEYS)} to exist (their contents are the producer's "
-                "business). Checked here so the defect surfaces before a writer is opened, "
+                f"provenance for shard {name!r} is missing {missing}; a block records "
+                f"{list(_PROVENANCE_KEYS)} (their contents are the producer's business). "
+                "Checked here so the defect surfaces before a writer is opened, "
                 "not halfway through a shard."
             )
         self._records = records
@@ -350,13 +336,6 @@ class PrepareJob:
         document = self._manifest(block.root)
         unit_count = block.writer.unit_count
 
-        declared = document.get("format")
-        if declared != _BLOCK_FORMAT:
-            raise BlockFormatError(
-                f"{block.root} declares format {declared!r}; molhub reports READY evidence "
-                f"for {_BLOCK_FORMAT} only. A block format molhub cannot read is one it "
-                "cannot vouch for either."
-            )
         if document.get("sealed") is not True:
             raise BlockFormatError(
                 f"{block.root} reports sealed={document.get('sealed')!r} after seal() "
@@ -396,10 +375,8 @@ class PrepareJob:
     def _manifest(root: Path) -> Mapping[str, Any]:
         """The sealed manifest of *root*, as a JSON object.
 
-        Exactly five of its fields are ever read (``format``, ``split``,
-        ``units``, ``sealed``, ``block_digest``). That narrow read is the entire
-        cross-repo format coupling, and it is deliberately the smallest thing
-        that makes READY machine-checkable.
+        Four fields are read (``split``, ``units``, ``sealed``, ``block_digest``).
+        The writer's ``format`` string is left as recorded.
         """
         path = root / _MANIFEST_NAME
         try:

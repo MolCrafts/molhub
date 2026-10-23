@@ -34,7 +34,8 @@ import math
 from collections.abc import Iterable, Mapping
 
 import numpy as np
-from molpy import Frame, UnitSystem
+from molpy import Frame
+from molpy.core import UnitRegistry
 
 __all__ = ["AtomicDress", "UnitConvert", "ConstantLabel"]
 
@@ -220,14 +221,14 @@ class UnitConvert:
     Raises:
         ValueError: *conversions* is empty, a value is not a 2-tuple, or a
             resolved factor is not finite.
-        molpy.UnitsError: A unit is unknown, or the pair is dimensionally
+        molpy.core.UnitsError: A unit is unknown, or the pair is dimensionally
             incompatible.
     """
 
     def __init__(self, conversions: Mapping[str, tuple[str, str]]) -> None:
         if not conversions:
             raise ValueError("UnitConvert needs at least one field to convert.")
-        registry = UnitSystem()
+        registry = UnitRegistry()
         factors: dict[str, float] = {}
         for key, pair in conversions.items():
             if not isinstance(pair, tuple) or len(pair) != 2:
@@ -236,7 +237,7 @@ class UnitConvert:
                     f"(source_unit, target_unit), got {pair!r}."
                 )
             source, target = pair
-            factor = float((1.0 * registry.Unit(source)).to(registry.Unit(target)).magnitude)
+            factor = float(registry.factor(source, target))
             if not math.isfinite(factor):
                 raise ValueError(
                     f"UnitConvert: non-finite factor for {key!r} ({source} -> {target})."

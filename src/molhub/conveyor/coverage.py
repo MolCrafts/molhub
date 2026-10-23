@@ -21,11 +21,12 @@ by agreeing, right up until the day it did not.
 **``metadata.json`` versus ``manifest.json``.** ``metadata.json`` sits at the
 *artifact* level and describes a derivation run (inputs, outputs, seed,
 generator); it is :class:`~molhub.conveyor.tier.DerivedLayout`'s file.
-``manifest.json`` sits *inside* one block directory and is molnex's
-``molix.block/1`` contract — columns, split, task_names, units, rows, digests,
-sealed. This module reads only the second. They never merge and never nest: a
+``manifest.json`` sits *inside* one block directory. This module reads the
+structural fields a sampler needs — ``split``, ``units``, ``rows``,
+``task_names``, ``digests``, ``block_digest``, ``sealed`` — and leaves the
+writer's ``format`` string unread. They never merge and never nest: a
 block directory that grew a ``metadata.json`` would be a schema collision
-waiting to be mis-parsed by one of the two repos.
+waiting to be mis-parsed.
 
 The handoff is torch-free on purpose. Everything the molnex-side sampler needs
 to plan a batch — split, units, frames, task names, provenance pin — is in that
@@ -59,10 +60,8 @@ __all__ = [
     "UnsupportedBlockFormat",
 ]
 
-# The block contract as molnex's deleted writer wrote it. Two
-# fields are validated and eight are read; the rest ride along untouched.
-_BLOCK_FORMAT = "molix.block/1"
-_SCHEMA_VERSION = 1
+# Structural fields this reader needs. The writer's format string and
+# schema_version ride along unread.
 _MANIFEST_NAME = "manifest.json"
 
 # The row space the sampler plans in. A block counts units; a batch counts
@@ -81,11 +80,10 @@ class BlockNotSealed(ConveyorError):
 
 
 class UnsupportedBlockFormat(ConveyorError):
-    """A manifest declares a block format or schema version molhub cannot read.
+    """A manifest is unreadable or omits a field this reader needs.
 
-    Refused rather than parsed hopefully: the fields this module reads are
-    ``molix.block/1``'s, and reading a future layout through them would produce
-    a coverage number and a sampler plan that are quietly wrong.
+    Refused rather than filled in: a coverage number or a sampler plan built
+    from a missing ``rows`` or ``split`` would be quietly wrong.
     """
 
 
@@ -291,9 +289,8 @@ class ReadyBlocks:
         Raises:
             BlockNotSealed: If a manifest is present but does not claim
                 ``sealed``.
-            UnsupportedBlockFormat: If a manifest declares another format or
-                schema version, is unreadable, or omits a field the format it
-                declares promises.
+            UnsupportedBlockFormat: If a manifest is unreadable or omits a
+                structural field this reader needs.
         """
         found: list[BlockMetadata] = []
         for block in sorted(self._tier.entries(), key=lambda entry: entry.key()):
@@ -316,21 +313,13 @@ class ReadyBlocks:
         if not isinstance(document, Mapping):
             raise UnsupportedBlockFormat(
                 f"{path} holds a JSON {type(document).__name__}, not an object; a block "
-                f"manifest is one {_BLOCK_FORMAT} object."
+                "manifest is one JSON object."
             )
         return document
 
     @classmethod
     def _read(cls, block: BlockId, root: Path, document: Mapping[str, Any]) -> BlockMetadata:
         """Project one validated manifest onto the fields the sampler needs."""
-        declared = document.get("format")
-        version = document.get("schema_version")
-        if declared != _BLOCK_FORMAT or version != _SCHEMA_VERSION:
-            raise UnsupportedBlockFormat(
-                f"{root} declares format {declared!r} schema_version {version!r}; molhub "
-                f"reads {_BLOCK_FORMAT} version {_SCHEMA_VERSION}. A future layout read "
-                "through today's field names is a wrong answer, not a partial one."
-            )
         if document.get("sealed") is not True:
             raise BlockNotSealed(
                 f"{root} reports sealed={document.get('sealed')!r}. READY is conjunctive, "
@@ -339,8 +328,8 @@ class ReadyBlocks:
         rows = document.get("rows")
         if not isinstance(rows, Mapping):
             raise UnsupportedBlockFormat(
-                f"{root} carries rows={rows!r}; {_BLOCK_FORMAT} counts its rows per space, "
-                "and a block that does not is not the format it declares."
+                f"{root} carries rows={rows!r}; a block counts its rows per space, "
+                "and a manifest without that mapping cannot be planned."
             )
         return BlockMetadata(
             block_id=block,
@@ -360,7 +349,7 @@ class ReadyBlocks:
         """Read one field the declared format promises, refusing its absence."""
         if name not in document:
             raise UnsupportedBlockFormat(
-                f"{root} declares {_BLOCK_FORMAT} but its manifest carries no {name!r}. "
-                "molhub reads eight fields and invents none of them."
+                f"{root} manifest carries no {name!r}. "
+                "molhub reads the structural fields and invents none of them."
             )
         return document[name]

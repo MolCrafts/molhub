@@ -57,8 +57,8 @@ def main() -> None:
         assert len(val) == 1
         assert len(test) == 1
         assert train.source_id == f"{COORDINATE}#split=train"
-        frame = train[0]
-        assert frame.meta["molecule_id"] == "m00"
+        frame = train[0][0]
+        assert getattr(frame.meta["molecule_id"], "value", frame.meta["molecule_id"]) == "m00"
         assert list(frame["atoms"]["atom_type"]) == ["c3", "hc"]
         assert list(frame["bonds"]["atomi"]) == [0]
         assert list(frame["bonds"]["atomj"]) == [1]

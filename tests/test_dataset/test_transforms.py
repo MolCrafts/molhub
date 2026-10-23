@@ -40,7 +40,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from molpy import Block, Frame, UnitsError
+from molpy import Block, Frame
+from molpy.core import UnitsError
 
 from molhub.dataset import transforms
 from molhub.dataset.transforms import (

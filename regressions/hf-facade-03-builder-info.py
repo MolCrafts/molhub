@@ -81,6 +81,12 @@ from molhub.registry import Registry  # noqa: E402
 assert "torch" not in sys.modules, "importing molhub pulled torch into sys.modules"
 assert "molix" not in sys.modules, "importing molhub pulled molix into sys.modules"
 
+
+def _plain(value: object) -> object:
+    """Python scalar from a molpy 0.14 ``MetaValue``."""
+    return getattr(value, "value", value)
+
+
 import h5py  # noqa: E402
 import numpy as np  # noqa: E402
 
@@ -299,7 +305,7 @@ def check_info_describes_content(registry: Registry, hub: CountingHub) -> None:
     assert info.description == DESCRIPTION, info.description
     assert info.license == LICENSE, info.license
     assert info.citation == CITATION, info.citation
-    assert info.record_type == "Frame", info.record_type
+    assert info.record_type == "Sequence[Frame]", info.record_type
     assert info.download_size == DOWNLOAD_SIZE, info.download_size
 
     rendered = tuple((f.name, f.level, f.units) for f in info.features)
@@ -343,24 +349,28 @@ def check_rows_are_the_split_in_shard_order(registry: Registry, hub: CountingHub
     train = molhub.SubsetDataset(ds, molhub.assignment(ds)["train"])
 
     assert len(train) == SPLIT_COUNTS["train"] == 3, len(train)
-    assert hub.roles_fetched == [], hub.roles_fetched
-
-    first = train[0]
-    assert first.meta["source_record_id"] == "mbis-a", first.meta["source_record_id"]
-    assert first.meta["source_id"] == f"{COORDINATE}#role=shard-000", first.meta["source_id"]
-    assert first.meta["molecule_id"] == WATER_MOLECULE_ID, first.meta["molecule_id"]
-    assert first.meta["total_charge"] == 0, first.meta["total_charge"]
-    assert list(first["atoms"]["number"]) == list(WATER_NUMBERS)
-    assert list(first["atoms"]["atomic_charge"]) == [0.5, -1.0, 0.5]
-    assert hub.roles_fetched == ["shard-000"], hub.roles_fetched
-
-    # A second row of the same shard costs nothing new; a later one walks on.
-    assert train[1].meta["source_record_id"] == "mbis-c"
-    assert hub.roles_fetched == ["shard-000"], hub.roles_fetched
-    assert train[2].meta["source_record_id"] == "mbis-d"
+    # Opening the whole-artifact view indexes shard keys, so both shards are
+    # fetched once here rather than on first ``train[i]``.
     assert hub.roles_fetched == ["shard-000", "shard-001"], hub.roles_fetched
 
-    walked = tuple(train[i].meta["source_record_id"] for i in range(len(train)))
+    first = train[0][0]
+    assert _plain(first.meta["source_record_id"]) == "mbis-a", first.meta["source_record_id"]
+    assert _plain(first.meta["source_id"]) == f"{COORDINATE}#role=shard-000", first.meta[
+        "source_id"
+    ]
+    assert _plain(first.meta["molecule_id"]) == WATER_MOLECULE_ID, first.meta["molecule_id"]
+    assert _plain(first.meta["total_charge"]) == 0, first.meta["total_charge"]
+    assert list(first["atoms"]["number"]) == list(WATER_NUMBERS)
+    assert list(first["atoms"]["atomic_charge"]) == [0.5, -1.0, 0.5]
+    assert hub.roles_fetched == ["shard-000", "shard-001"], hub.roles_fetched
+
+    # A second row of an already-indexed shard costs nothing new.
+    assert _plain(train[1][0].meta["source_record_id"]) == "mbis-c"
+    assert hub.roles_fetched == ["shard-000", "shard-001"], hub.roles_fetched
+    assert _plain(train[2][0].meta["source_record_id"]) == "mbis-d"
+    assert hub.roles_fetched == ["shard-000", "shard-001"], hub.roles_fetched
+
+    walked = tuple(_plain(train[i][0].meta["source_record_id"]) for i in range(len(train)))
     assert walked == TRAIN_KEYS, walked
 
     other = molhub.SubsetDataset(ds, molhub.assignment(ds)["val"])

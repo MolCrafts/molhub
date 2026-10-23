@@ -505,10 +505,10 @@ class TestBlockExport:
 
 
 class TestPrepareRefusesUnroutableTargets:
-    """A dataset ``molix.block/1`` has no routes for is refused, not exported.
+    """A dataset whose targets have no RawUnit column is refused, not exported.
 
     The encoder refuses ``task="mbis"`` because none of its atom-level
-    electrostatics targets has a column route. Labelling the units with the
+    electrostatics targets has a column. Labelling the units with the
     collection role the dataset is *published* under is a different string for
     the same shard, and an export that succeeded on it would write geometry and
     topology and silently drop every target the dataset exists for — the exact
@@ -589,18 +589,18 @@ class TestPrepareRefusesUnroutableTargets:
         message = str(self._refusal(verified_registry, landing_hub, factory, output_dir))
         assert COORDINATE in message
 
-    def test_the_refusal_names_the_format_whose_routes_are_missing(
+    def test_the_refusal_names_the_columns_that_are_missing(
         self,
         verified_registry,
         landing_hub: LandingHub,
         factory: RecordingWriterFactory,
         output_dir: Path,
     ) -> None:
-        """Naming the format is what makes this actionable: the fix is a column
-        space in ``molix.block/1``, not a flag here."""
+        """Naming RawUnit is what makes this actionable: the fix is a column
+        on that type, not a flag here."""
         message = str(self._refusal(verified_registry, landing_hub, factory, output_dir))
-        assert BLOCK_FORMAT in message
-        assert "route" in message.lower()
+        assert "RawUnit" in message
+        assert "column" in message.lower()
 
     def test_the_refusal_says_what_exporting_anyway_would_cost(
         self,
