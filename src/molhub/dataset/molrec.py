@@ -98,7 +98,7 @@ class MolRecDataset:
 
     Args:
         record_path: Path to the ``*.mrec`` store written by
-            :func:`molpy.io.mrec.write_trajectory`.
+            :class:`molpy.io.mrec.MrecWriter`.
         teacher_id: Which teacher's labels to expose. Selects the
             ``"<teacher_id>."``-prefixed meta keys and atom columns; the
             prefix is stripped from the target names.
@@ -125,7 +125,7 @@ class MolRecDataset:
         if not self.record_path.exists():
             raise FileNotFoundError(f"MolRec record not found: {self.record_path}")
 
-        self._trajectory = _mrec.read_trajectory(str(self.record_path))
+        self._trajectory = _mrec.MrecReader(self.record_path)
         if len(self._trajectory) == 0:
             raise ValueError(
                 f"Record {self.record_path} carries labels but no trajectory, so there "
@@ -226,7 +226,7 @@ class MolRecDataset:
         for axis in ("x", "y", "z"):
             atoms[axis] = np.asarray(source_atoms[axis], dtype=np.float64)
         atoms["number"] = np.asarray(
-            [Element.get_atomic_number(symbol) for symbol in symbols], dtype=np.int64
+            [Element.by_symbol(symbol).z for symbol in symbols], dtype=np.int64
         )
         for name, columns in self._vectors.items():
             for dest, column in zip(_teacher_columns(name), columns, strict=True):

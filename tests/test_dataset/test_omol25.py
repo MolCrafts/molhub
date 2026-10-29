@@ -651,7 +651,7 @@ class TestNrows:
         # allowed to drift: that is the whole reason a budget may trust it.
         counts = rows_of(counted, "atoms")
         for index in range(len(counted)):
-            assert int(counted[index][0]["atoms"].nrows) == int(counts[index])
+            assert int(counted[index][0]["atoms"].n_rows) == int(counts[index])
 
     def test_is_integral(self, counted):
         assert rows_of(counted, "atoms").dtype == np.dtype(np.int64)

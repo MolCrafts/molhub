@@ -42,9 +42,7 @@ describe("inspectability", () => {
   });
 
   it("does not treat a bare npz format name as a derived record", () => {
-    expect(inspectability(artifact({ format: "npz", media_type: null })).state).toBe(
-      "unsupported",
-    );
+    expect(inspectability(artifact({ format: "npz", media_type: null })).state).toBe("unsupported");
   });
 
   it("requires an HTTP source for browser inspection", () => {

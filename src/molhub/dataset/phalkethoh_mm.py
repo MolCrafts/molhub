@@ -99,7 +99,7 @@ def _symbol_for(z: int) -> str:
     if z_int in _ELEMENT_SYMBOLS:
         return _ELEMENT_SYMBOLS[z_int]
     try:
-        return str(Element(z_int).symbol)
+        return str(Element.by_number(z_int).symbol)
     except Exception:
         return "?"
 

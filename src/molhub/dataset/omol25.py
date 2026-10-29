@@ -26,6 +26,7 @@ consumers convert (e.g. :class:`~molhub.dataset.transforms.UnitConvert`).
 
 from __future__ import annotations
 
+import multiprocessing
 from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -549,7 +550,10 @@ class OMol25Lmdb(Dataset, StatisticMixin):
 
         counts = np.empty(len(self), dtype=np.int64)
         if workers and int(workers) > 1:
-            with ProcessPoolExecutor(max_workers=int(workers)) as pool:
+            # Spawned, not forked: a forked worker inherits the parent's open LMDB
+            # environments, and LMDB refuses a second open of one in a process.
+            context = multiprocessing.get_context("spawn")
+            with ProcessPoolExecutor(max_workers=int(workers), mp_context=context) as pool:
                 per_table = list(pool.map(_count_table_atoms, (str(p) for p in self._paths)))
             for i in range(len(self)):
                 table_idx, row_id = (int(v) for v in self._index[i])

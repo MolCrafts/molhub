@@ -61,11 +61,7 @@ const MEDIA_TYPE_FORMATS: Readonly<Record<string, MolvisFormat>> = {
 
 const DERIVED_FORMATS = new Set(["mrec", "psmiles-csv"]);
 
-const ARCHIVE_MEDIA_TYPES = new Set([
-  "application/gzip",
-  "application/x-tar",
-  "application/zip",
-]);
+const ARCHIVE_MEDIA_TYPES = new Set(["application/gzip", "application/x-tar", "application/zip"]);
 
 /**
  * Decide whether an artifact can enter Inspector from declared byte semantics.

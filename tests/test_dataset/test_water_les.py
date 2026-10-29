@@ -137,7 +137,7 @@ class TestWaterLESParse:
 
     def test_atom_count(self, water_les_root):
         """2 H2O = 6 atoms in the fixture-scaled configuration."""
-        assert WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"].nrows == 6
+        assert WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"].n_rows == 6
 
     def test_atomic_numbers(self, water_les_root):
         atoms = WaterLESDataset(water_les_root, split="test").load()[0][0]["atoms"]
@@ -273,7 +273,7 @@ class TestWaterLESUnits:
         frames = WaterLESDataset(water_les_root, split="test").load()
         for i in range(len(frames)):
             frame = frames[i][0]
-            per_atom = float(frame.meta["energy"]) / frame["atoms"].nrows
+            per_atom = float(frame.meta["energy"]) / frame["atoms"].n_rows
             assert -20.0 < per_atom < -5.0
 
     def test_energy_passes_through_unscaled(self, water_les_root):

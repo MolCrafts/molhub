@@ -7,12 +7,14 @@ published THEMol layout.
 Every frame's ``atoms`` block also carries what a Class-I parameter head
 conditions on, computed once per record from the mapped SMILES and reordered
 by atom-map id like ``formal_charge``: ``ring_connectivity`` (ring bonds at
-the atom), ``min_ring_size`` (the smallest SSSR ring through the atom, ``0``
+the atom), ``min_ring_size`` (the smallest ring through the atom, ``0``
 outside any ring) and the GAFF2 Lennard-Jones prior ``gaff2_sigma`` /
 ``gaff2_epsilon`` of the atom's antechamber type (:data:`GAFF2_UNITS`;
 ``NaN`` where GAFF2 has no row for the type, never ``0``). The ``bonds``
-block carries ``in_ring``. Ring perception and atom typing are molpy's
-(:func:`molpy.perceive.perceive_rings`,
+block carries ``in_ring``. A ring here is any simple cycle of at most
+:data:`SMALL_RING_MAX_ATOMS` atoms, ByteFF's featurization, so a macrocycle bond
+on no small ring is not a ring bond. Ring perception and atom typing are molpy's
+(:func:`molpy.perceive.assign_small_rings`,
 :class:`molpy.ff.typifier.AtdTypifier`); the table is
 :class:`~molhub.dataset.gaff2.Gaff2LennardJones`.
 """
@@ -27,6 +29,7 @@ from typing import Any
 
 import numpy as np
 from molpy import Block, Element, Frame
+from molpy.core import Atomistic
 
 from molhub.dataset.gaff2 import Gaff2LennardJones
 
@@ -83,14 +86,22 @@ GAFF2_UNITS: dict[str, str] = {
 }
 #: The ``atoms`` columns :func:`_mapped_topology_frame` derives from the SMILES
 #: topology beyond identity and geometry, and the ``bonds`` column.
+#: The largest ring the ring columns count, ByteFF's ``MAX_RING_SIZE``. A bond
+#: whose smallest ring is larger (a macrocycle) is not a ring bond.
+SMALL_RING_MAX_ATOMS = 8
+
 TOPOLOGY_ATOM_COLUMNS: tuple[str, ...] = (
     "formal_charge",
     "ring_connectivity",
     "min_ring_size",
+    "equi_index",
     "gaff2_sigma",
     "gaff2_epsilon",
 )
 TOPOLOGY_BOND_COLUMNS: tuple[str, ...] = ("in_ring",)
+#: The ``propers`` columns: the four atoms (atom-map order, 0-based) and whether
+#: the torsion turns about a linear centre (``molpy.perceive.perceive_linear_dihedrals``).
+TOPOLOGY_PROPER_COLUMNS: tuple[str, ...] = ("atomi", "atomj", "atomk", "atoml", "linear")
 
 _THREAD_LOCAL = threading.local()
 
@@ -164,13 +175,18 @@ def _mapped_topology_frame(
 
     mapped_isomeric = _read_string(group["mapped_isomeric_smiles"])
     mapped_nonisomeric = _read_string(group["mapped_nonisomeric_smiles"])
-    molecule = mp.io.read_smiles_str(mapped_isomeric)
+    # The graph is read off the stereo-free string: no topology column reads a
+    # geometry, and RDKit's isomeric output can mark one single bond for two
+    # conjugated double bonds inconsistently (1 of 430 906 mbis@1 records),
+    # which molpy refuses as a contradiction. Same atoms, maps and bonds.
+    molecule = mp.io.smiles.read_smiles(mapped_nonisomeric).to_atomistic()
+    mp.perceive.assign_small_rings(molecule, SMALL_RING_MAX_ATOMS)
     topology = molecule.to_frame()
     topology_atoms = topology["atoms"]
-    if "atom_class" not in topology_atoms:
+    if "atom_map" not in topology_atoms:
         raise ValueError(f"THEMol mapped SMILES has no atom-map ids: {record_id}")
 
-    atom_map = np.asarray(topology_atoms["atom_class"], dtype=np.int64)
+    atom_map = np.asarray(topology_atoms["atom_map"], dtype=np.int64)
     order = np.argsort(atom_map, kind="stable")
     expected_map = np.arange(1, len(atom_map) + 1, dtype=np.int64)
     if not np.array_equal(atom_map[order], expected_map):
@@ -178,15 +194,15 @@ def _mapped_topology_frame(
             f"THEMol atom-map ids for {record_id} are not exactly 1..N: {atom_map.tolist()}"
         )
     n_atoms = len(atom_map)
+    # Parse row -> atom-map row (0-based).
+    new_row = atom_map - 1
 
-    elements = np.asarray(topology_atoms["element"], dtype=str)[order]
+    parsed_numbers = np.asarray(topology_atoms["atomic_number"], dtype=np.int64)[order]
+    elements = np.asarray([Element.by_number(int(z)).symbol for z in parsed_numbers], dtype=str)
     formal_charge = (
         np.asarray(topology_atoms["formal_charge"], dtype=np.int64)[order]
         if "formal_charge" in topology_atoms
         else np.zeros(n_atoms, dtype=np.int64)
-    )
-    parsed_numbers = np.asarray(
-        [Element.get_atomic_number(symbol) for symbol in elements], dtype=np.int64
     )
     stored_numbers = np.asarray(group["atomic_numbers"], dtype=np.int64).reshape(-1)
     if not np.array_equal(parsed_numbers, stored_numbers):
@@ -206,8 +222,8 @@ def _mapped_topology_frame(
         )
 
     # Bonds in parse order, endpoints as parse rows; remapped to atom-map
-    # order below. The row order of ``to_frame`` is the handle order of
-    # ``entities``, which is how a ring's atom handles become rows.
+    # order below. The row order of ``to_frame`` is the order of
+    # ``molecule.atoms``, which is how a ring's atom views become rows.
     if "bonds" in topology:
         bonds = topology["bonds"]
         parsed_i = np.asarray(bonds["atomi"], dtype=np.int64)
@@ -215,32 +231,25 @@ def _mapped_topology_frame(
     else:
         bonds = None
         parsed_i = parsed_j = np.zeros(0, dtype=np.int64)
-    handles = molecule.entities()
-    row_of = {handle: row for row, handle in enumerate(handles)}
+    atoms = list(molecule.atoms)
+    row_of = {atom: row for row, atom in enumerate(atoms)}
 
-    rings = mp.perceive.perceive_rings(molecule)
-    ring_bonds: set[tuple[int, int]] = set()
-    for ring in rings.rings():
-        rows = [row_of[handle] for handle in ring]
-        for a, b in zip(rows, rows[1:] + rows[:1], strict=True):
-            ring_bonds.add((min(a, b), max(a, b)))
-    in_ring = np.fromiter(
-        ((min(i, j), max(i, j)) in ring_bonds for i, j in zip(parsed_i, parsed_j, strict=True)),
-        dtype=np.int64,
-        count=len(parsed_i),
+    in_ring = (
+        (np.asarray(bonds["small_ring_size"], dtype=np.int64) > 0).astype(np.int64)
+        if bonds is not None
+        else np.zeros(0, dtype=np.int64)
     )
     ring_ends = np.concatenate([parsed_i[in_ring == 1], parsed_j[in_ring == 1]])
     ring_connectivity = np.bincount(ring_ends, minlength=n_atoms).astype(np.int64)
-    min_ring_size = np.asarray(
-        [rings.smallest_ring_containing_atom(handle) or 0 for handle in handles],
-        dtype=np.int64,
-    )
+    min_ring_size = np.asarray(topology_atoms["small_ring_size"], dtype=np.int64)
+    equi_index = _equivalence_index(molecule, atoms, order)
+    propers = _propers(molecule, row_of, new_row)
 
     # GAFF2 types: antechamber's answer for the SMILES graph, every hydrogen
     # drawn. An atom the table cannot type (a silicon, a noble gas) keeps its
     # element as a label GAFF2 has no row for, so its prior is NaN.
     typed = _gaff2_typifier().typify(molecule)
-    gaff2_types = [typed.get(handle, "type") for handle in handles]
+    gaff2_types = [atom["type"] for atom in typed.atoms]
     gaff2_sigma, gaff2_epsilon = _gaff2_table().sigma_epsilon(gaff2_types)
 
     frame = Frame()
@@ -252,6 +261,7 @@ def _mapped_topology_frame(
             "formal_charge": formal_charge,
             "ring_connectivity": ring_connectivity[order],
             "min_ring_size": min_ring_size[order],
+            "equi_index": equi_index,
             "gaff2_sigma": gaff2_sigma[order],
             "gaff2_epsilon": gaff2_epsilon[order],
             "x": coords[:, 0],
@@ -270,6 +280,11 @@ def _mapped_topology_frame(
                 bond_columns[key] = np.asarray(bonds[key])
         bond_columns["in_ring"] = in_ring
         frame["bonds"] = Block(bond_columns)
+    # Always written, empty when the molecule has no torsion: every frame of a
+    # source carries the same blocks and columns, so a batch is never mixed in
+    # schema (a frame without ``propers`` got an empty one without ``linear``
+    # downstream, and a batch holding both was refused).
+    frame["propers"] = Block(propers)
 
     molecule_id = uuid.uuid5(uuid.UUID(int=0), mapped_isomeric).hex
     frame.meta = {
@@ -691,3 +706,58 @@ read_hessian_relax = _read_hessian_relax
 read_mbis = _read_mbis
 read_torsion = _read_torsion
 read_torsion_relax = _read_torsion_relax
+
+
+def _equivalence_index(molecule: Atomistic, atoms: list[Any], order: np.ndarray) -> np.ndarray:
+    """Each atom's topological class, as the atom-map row of the class's first member.
+
+    ``molpy.perceive.assign_symmetry_classes`` names a class by a parse row; the
+    frame is in atom-map order, so the class is renamed by its first member in
+    that order.
+    """
+    import molpy as mp
+
+    mp.perceive.assign_symmetry_classes(molecule)
+    parsed = np.asarray([atom["symmetry_class"] for atom in atoms], dtype=np.int64)[order]
+    first: dict[int, int] = {}
+    return np.asarray([first.setdefault(int(c), k) for k, c in enumerate(parsed)], dtype=np.int64)
+
+
+def _propers(
+    molecule: Atomistic, row_of: dict[Any, int], new_row: np.ndarray
+) -> dict[str, np.ndarray]:
+    """The proper torsions of the bond graph, atom-map order, and which are linear.
+
+    The rows are molpy's ``generate_topology`` dihedrals, oriented so the second
+    atom precedes the third; ``linear`` marks a torsion whose second or third
+    atom is a linear centre (``molpy.perceive.perceive_linear_dihedrals``).
+    """
+    import copy
+
+    import molpy as mp
+
+    linear = {
+        tuple(row_of[atom] for atom in quad)
+        for quad in mp.perceive.perceive_linear_dihedrals(molecule)
+    }
+    linear |= {quad[::-1] for quad in linear}
+    graph = copy.copy(molecule)
+    graph.generate_topology(gen_angle=False, gen_dihedral=True, gen_improper=False)
+    dihedrals = graph.to_frame()
+    columns = ("atomi", "atomj", "atomk", "atoml")
+    rows = (
+        np.stack([np.asarray(dihedrals["dihedrals"][c], dtype=np.int64) for c in columns], axis=1)
+        if "dihedrals" in dihedrals
+        else np.zeros((0, 4), dtype=np.int64)
+    )
+    is_linear = np.asarray([tuple(int(a) for a in row) in linear for row in rows], dtype=bool)
+    mapped = new_row[rows] if len(rows) else rows
+    flip = mapped[:, 1] > mapped[:, 2]
+    mapped[flip] = mapped[flip][:, ::-1]
+    return {
+        "atomi": mapped[:, 0],
+        "atomj": mapped[:, 1],
+        "atomk": mapped[:, 2],
+        "atoml": mapped[:, 3],
+        "linear": is_linear,
+    }

@@ -160,7 +160,7 @@ def _parse_water_extxyz(path: Path) -> list[Frame]:
         atoms["y"] = positions[:, 1]
         atoms["z"] = positions[:, 2]
         atoms["number"] = np.asarray(
-            [Element.get_atomic_number(symbol) for symbol in symbols], dtype=np.int64
+            [Element.by_symbol(symbol).z for symbol in symbols], dtype=np.int64
         )
         atoms["fx"] = forces[:, 0]
         atoms["fy"] = forces[:, 1]

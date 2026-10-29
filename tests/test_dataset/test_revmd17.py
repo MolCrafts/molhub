@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from molpy import UnitSystem
+from molpy.core import UnitRegistry
 
 from molhub.coordinate import Coordinate
 from molhub.dataset import ArtifactHub, Dataset, RevMD17Dataset
@@ -251,9 +251,9 @@ class TestRevMD17Units:
         }
 
     def test_every_unit_parses_through_the_molpy_registry(self):
-        registry = UnitSystem()
+        registry = UnitRegistry()
         for unit in RevMD17Dataset.manifest.units.values():
-            registry.Unit(unit)
+            registry.parse(unit)
 
 
 class TestRevMD17Manifest:

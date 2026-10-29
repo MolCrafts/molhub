@@ -81,7 +81,7 @@ class TestMrecWriter:
         system, frames = _water_record(3)
         with MrecWriter(path, backend=Lmdb, units={"length": "angstrom"}) as out:
             out.write_record(frames, system=system)
-        collection = molrec_lmdb.LmdbCollectionCodec().read(molrec_lmdb.LmdbCollectionStore(path))
+        collection = molrec_lmdb.LmdbCollectionCodec().read(molrec_lmdb.LmdbCollectionStorage(path))
         trajectory = collection.records[0].trajectory
         assert collection.meta.units == {"length": "angstrom"}
         assert trajectory.step == [0, 1, 2]

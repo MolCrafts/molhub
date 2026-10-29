@@ -63,8 +63,8 @@ class TestThreeBPADataset:
 
     def test_natoms(self, sample_xyz_path):
         src = ThreeBPADataset(sample_xyz_path, tag="train_300K")
-        assert src[0][0]["atoms"].nrows == 5
-        assert src[1][0]["atoms"].nrows == 5
+        assert src[0][0]["atoms"].n_rows == 5
+        assert src[1][0]["atoms"].n_rows == 5
 
     def test_element_dtype(self, sample_xyz_path):
         elem = ThreeBPADataset(sample_xyz_path, tag="train_300K")[0][0]["atoms"]["element"]

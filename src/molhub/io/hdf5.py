@@ -199,7 +199,9 @@ class Hdf5:
             self._write = None
             return
         local = getattr(self, "_local", None)
-        handle = getattr(local, "handle", None) if local is not None else None
+        if local is None:
+            return
+        handle = getattr(local, "handle", None)
         if handle is not None:
             handle.close()
             local.handle = None

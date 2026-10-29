@@ -14,7 +14,7 @@ def pytest_configure() -> None:
     ``.value``. Production code unwraps at the few sites that need a scalar.
     Tests keep asserting the numbers they already pin.
     """
-    import molrs
+    from molpy import core
 
     def _unwrap(value):  # noqa: ANN001
         return getattr(value, "value", value)
@@ -25,13 +25,13 @@ def pytest_configure() -> None:
     def _lt(self, other):  # noqa: ANN001
         return _unwrap(self) < _unwrap(other)
 
-    molrs.core.MetaValue.__eq__ = _eq  # type: ignore[method-assign]
-    molrs.core.MetaValue.__lt__ = _lt  # type: ignore[method-assign]
-    molrs.core.MetaValue.__float__ = lambda self: float(self.value)  # type: ignore[method-assign]
-    molrs.core.MetaValue.__int__ = lambda self: int(self.value)  # type: ignore[method-assign]
-    molrs.core.MetaValue.__index__ = lambda self: int(self.value)  # type: ignore[method-assign]
-    molrs.core.MetaValue.__str__ = lambda self: str(self.value)  # type: ignore[method-assign]
-    molrs.core.MetaValue.__hash__ = lambda self: hash(self.value)  # type: ignore[method-assign]
+    core.MetaValue.__eq__ = _eq  # type: ignore[method-assign]
+    core.MetaValue.__lt__ = _lt  # type: ignore[method-assign]
+    core.MetaValue.__float__ = lambda self: float(self.value)  # type: ignore[method-assign]
+    core.MetaValue.__int__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    core.MetaValue.__index__ = lambda self: int(self.value)  # type: ignore[method-assign]
+    core.MetaValue.__str__ = lambda self: str(self.value)  # type: ignore[method-assign]
+    core.MetaValue.__hash__ = lambda self: hash(self.value)  # type: ignore[method-assign]
 
 
 MAIN_BODY = b"main artifact bytes"

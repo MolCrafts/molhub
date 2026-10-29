@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from molpy import Block, Box, Frame, Trajectory
+from molpy import Block, Box, Frame
 from molpy.io import mrec
 
 from molhub.dataset import Dataset
@@ -127,7 +127,10 @@ def _frame(
 
 
 def _write(path: Path, frames: list[Frame]) -> None:
-    mrec.write_trajectory(str(path), Trajectory(frames))
+    schema = mrec.SequenceSchema.from_frames(frames)
+    with mrec.MrecWriter(path, schema) as writer:
+        for frame in frames:
+            writer.append(frame)
 
 
 @pytest.fixture
@@ -211,7 +214,7 @@ class TestMolRecRecordToSample:
 
     def test_heterogeneous_atom_counts_are_preserved(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
-        assert [frames[i][0]["atoms"].nrows for i in range(len(frames))] == [5, 3, 4]
+        assert [frames[i][0]["atoms"].n_rows for i in range(len(frames))] == [5, 3, 4]
 
     def test_atomic_numbers_are_mapped_from_symbols(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA").load()
@@ -376,7 +379,7 @@ class TestMolRecSubset:
 
     def test_total_keeps_the_leading_frames(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA", total=2).load()
-        assert [frames[i][0]["atoms"].nrows for i in range(len(frames))] == [5, 3]
+        assert [frames[i][0]["atoms"].n_rows for i in range(len(frames))] == [5, 3]
 
     def test_total_larger_than_the_record_is_a_no_op(self, conformer_record):
         frames = MolRecDataset(conformer_record.path, teacher_id="teacherA", total=99).load()

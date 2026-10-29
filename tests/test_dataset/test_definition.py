@@ -243,11 +243,11 @@ class TestUniformDatasetShape:
         assert not missing, f"{cls.__name__} declares no unit for {sorted(missing)}"
 
     def test_declared_units_parse_through_the_molpy_registry(self, cls):
-        from molpy import UnitSystem
+        from molpy.core import UnitRegistry
 
-        registry = UnitSystem()
+        registry = UnitRegistry()
         for unit in cls.manifest.units.values():
-            registry.Unit(unit)
+            registry.parse(unit)
 
     def test_coordinate_class_attribute_matches_the_manifest(self, cls):
         assert cls.COORDINATE == cls.manifest.coordinate.canonical

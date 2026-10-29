@@ -200,7 +200,7 @@ class RevMD17Dataset(Dataset, StatisticMixin):
         self._energies = data["energies"].reshape(-1)  # (n_frames,)
         self._forces = data["forces"]  # (n_frames, n_atoms, 3)
         self._symbols = np.array(
-            [Element(int(z)).symbol for z in self._charges],
+            [Element.by_number(int(z)).symbol for z in self._charges],
             dtype="U3",
         )
         self._coords = data["coords"]  # (n_frames, n_atoms, 3)
@@ -258,6 +258,7 @@ class RevMD17Dataset(Dataset, StatisticMixin):
         self._require_loaded()
         assert self._coords is not None
         assert self._forces is not None and self._energies is not None
+        assert self._symbols is not None and self._charges is not None
         coord = self._coords[idx]  # (natoms, 3)
         forces = self._forces[idx]  # (natoms, 3)
 

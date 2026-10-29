@@ -100,7 +100,7 @@ class THEMolShardDataset(Prefetch, Dataset, StatisticMixin):
         self._reader = reader
         self._keys = self._index_keys()
         name = getattr(reader, "__name__", "reader")
-        self.cache = LmdbCache([self.path], f"themol.rows.v1.{name}") if cache else None
+        self.cache = LmdbCache([self.path], f"themol.rows.v4.{name}") if cache else None
 
     def __len__(self) -> int:
         return len(self._keys)
@@ -314,7 +314,7 @@ class THEMolShardDataset(Prefetch, Dataset, StatisticMixin):
     #: identity columns and the topology blocks. Everything else a frame
     #: carries is state and is written per frame.
     SYSTEM_ATOMS: tuple[str, ...] = ("element", "number", "atom_map", *TOPOLOGY_ATOM_COLUMNS)
-    SYSTEM_BLOCKS: tuple[str, ...] = ("bonds", "scan")
+    SYSTEM_BLOCKS: tuple[str, ...] = ("bonds", "propers", "scan")
     #: Per-frame scalars; every other meta key is the record's.
     STEP_META: tuple[str, ...] = ("energy", "step_index", "constraint_index", "torsion_angle")
     #: This reader's names -> molrec's (``docs/spec/conventions.md``).
@@ -385,10 +385,10 @@ class THEMolShardDataset(Prefetch, Dataset, StatisticMixin):
             states.append(state)
         steps = list(range(len(frames)))
         for key in ("step_index", "constraint_index"):
-            values = [getattr(f.meta.get(key), "value", f.meta.get(key)) for f in frames]
-            present = all(v is not None for v in values)
-            if present and all(b > a for a, b in zip(values, values[1:])):
-                steps = [int(v) for v in values]
+            values = [f.meta.get(key) for f in frames]
+            counted = [int(v) for v in values if isinstance(v, (int, float))]
+            if len(counted) == len(values) and all(b > a for a, b in zip(counted, counted[1:])):
+                steps = counted
                 break
         return system, tuple(states), steps
 

@@ -394,6 +394,7 @@ GEOMETRY_ATOM_COLUMNS = frozenset(
         "formal_charge",
         "ring_connectivity",
         "min_ring_size",
+        "equi_index",
         "gaff2_sigma",
         "gaff2_epsilon",
         "x",
@@ -894,6 +895,52 @@ class TestMappedTopologyFrame:
         carbons = np.asarray(frame["atoms"]["min_ring_size"]).tolist()[:9]
         assert carbons == [3, 3, 3, 6, 6, 6, 6, 6, 6]
 
+    def test_equi_index_names_the_first_atom_of_each_topological_class(self) -> None:
+        """Toluene: the two ortho and the two meta positions pair up, H with their carbons."""
+        column = np.asarray(self._toluene()["atoms"]["equi_index"])
+        assert column.dtype == np.int64
+        assert column.tolist() == [0, 1, 2, 3, 4, 3, 2, 7, 7, 7, 10, 11, 12, 11, 10]
+
+    def test_a_carboxylates_oxygens_share_a_class_whatever_the_bond_orders(self) -> None:
+        smiles = "[C:1]([H:5])([H:6])([H:7])[C:2](=[O:3])[O-:4]"
+        frame = _mapped_topology_frame(_topology_group(smiles, (6, 6, 8, 8, 1, 1, 1)), "ace", "src")
+        assert np.asarray(frame["atoms"]["equi_index"]).tolist() == [0, 1, 2, 2, 4, 4, 4]
+
+    def test_every_torsion_of_propyne_turns_about_a_linear_centre(self) -> None:
+        smiles = "[C:1]([H:4])([H:5])([H:6])[C:2]#[C:3][H:7]"
+        frame = _mapped_topology_frame(_topology_group(smiles, (6, 6, 6, 1, 1, 1, 1)), "pyn", "src")
+        propers = frame["propers"]
+        assert len(np.asarray(propers["atomi"])) == 4
+        assert np.asarray(propers["linear"]).all()
+
+    def test_a_molecule_without_torsions_still_carries_an_empty_propers_block(self) -> None:
+        frame = _mapped_topology_frame(_topology_group(WATER, (1, 8, 1)), "water", "src")
+        propers = frame["propers"]
+        assert sorted(propers.keys()) == ["atomi", "atomj", "atomk", "atoml", "linear"]
+        assert len(np.asarray(propers["atomi"])) == 0
+
+    def test_no_torsion_of_toluene_is_linear(self) -> None:
+        propers = self._toluene()["propers"]
+        rows = np.stack([np.asarray(propers[c]) for c in ("atomi", "atomj", "atomk", "atoml")], 1)
+        assert len(rows) > 0 and not np.asarray(propers["linear"]).any()
+        assert (rows[:, 1] < rows[:, 2]).all()
+
+    def test_the_graph_is_read_off_the_stereo_free_string(self) -> None:
+        """A contradictory isomeric string (two marks on one side of C1=C2) still builds."""
+        group = _topology_group("[C:1]([F:3])([Cl:4])=[C:2]([F:5])[H:6]", (6, 6, 9, 17, 9, 1))
+        group["mapped_isomeric_smiles"] = "[C:1](/[F:3])(/[Cl:4])=[C:2](/[F:5])[H:6]"
+        frame = _mapped_topology_frame(group, "conflict", "src")
+        assert np.asarray(frame["atoms"]["number"]).tolist() == [6, 6, 9, 17, 9, 1]
+        assert len(np.asarray(frame["bonds"]["atomi"])) == 5
+
+    def test_a_ring_larger_than_eight_atoms_is_no_ring(self) -> None:
+        """Cyclononane: ByteFF counts rings of at most eight atoms, so none here."""
+        smiles = "".join(f"[C:{k}]" + ("1" if k in (1, 9) else "") for k in range(1, 10))
+        frame = _mapped_topology_frame(_topology_group(smiles, (6,) * 9), "c9", "src")
+        assert not np.asarray(frame["bonds"]["in_ring"]).any()
+        assert not np.asarray(frame["atoms"]["ring_connectivity"]).any()
+        assert not np.asarray(frame["atoms"]["min_ring_size"]).any()
+
     def test_in_ring_marks_exactly_the_bonds_between_ring_neighbours(self) -> None:
         """A bond is a ring bond iff its two atoms are adjacent in some SSSR ring."""
         bonds = self._toluene()["bonds"]
@@ -1364,6 +1411,7 @@ class TestTHEMolShardDatasetSplit:
             "atom_map",
             "atomic_number",
             "element",
+            "equi_index",
             "formal_charge",
             "gaff2_epsilon",
             "gaff2_sigma",

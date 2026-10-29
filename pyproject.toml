@@ -23,8 +23,10 @@ dependencies = [
   # molpy is pre-1.0 and moves public API between minors. 0.14 dropped
   # `MolRec`/`Record` (I/O is `molpy.io.mrec`), stores atom indices as uint64,
   # and returns `MetaValue` wrappers from `frame.meta` (write by wholesale
-  # assignment). molhub tracks that minor line.
-  "molcrafts-molpy>=0.14,<0.15",
+  # assignment). 0.20 folded molrs into molpy (`molpy._core`); SMILES reads go
+  # through `read_smiles(...).to_atomistic()` and atom maps land in `atom_map`.
+  # molhub tracks that minor line.
+  "molcrafts-molpy>=0.20,<0.21",
   # Process home singleton (`molhub.config`) is a molcfg.Config subclass.
   "molcrafts-molcfg>=1.5.0",
   # Imported at module scope by every dataset adapter and by the conveyor's
@@ -160,8 +162,7 @@ unresolved-import = "ignore"
 # states what a release would need. These two lines are the development override;
 # they make the lock machine-specific, which is the accepted cost of not pushing.
 [tool.uv.sources]
-molcrafts-molpy = { path = "../molpy", editable = true }
-molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
+molcrafts-molpy = { path = "../molpy/molpy", editable = true }
 molrec = { path = "../molrec", editable = true }
 
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py

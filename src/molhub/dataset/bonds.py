@@ -36,7 +36,7 @@ _COVALENT: np.ndarray | None = None
 def _element_tables() -> tuple[np.ndarray, np.ndarray]:
     """Symbols and covalent radii (Å) indexed by Z, built once per process.
 
-    Replaces per-atom ``Element(z)`` construction on the frame-decode hot
+    Replaces per-atom ``Element.by_number(z)`` construction on the frame-decode hot
     path with two vectorised table lookups.
     """
     global _SYMBOLS, _COVALENT
@@ -45,7 +45,7 @@ def _element_tables() -> tuple[np.ndarray, np.ndarray]:
         radii = np.zeros(_MAX_Z + 1, dtype=np.float64)
         symbols[0] = ""
         for z in range(1, _MAX_Z + 1):
-            element = Element(z)
+            element = Element.by_number(z)
             symbols[z] = element.symbol
             radii[z] = float(element.covalent)
         _SYMBOLS, _COVALENT = symbols, radii

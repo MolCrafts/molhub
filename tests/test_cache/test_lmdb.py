@@ -119,7 +119,7 @@ class TestEncodeSample:
         assert first.meta["total_charge"] == 0
         assert first.meta["energy"] == -1.0
         assert first.box.pbc.tolist() == [True, False, True]
-        assert np.allclose(np.asarray(first.box.h), np.diag([10.0, 11.0, 12.0]))
+        assert np.allclose(np.asarray(first.box.matrix), np.diag([10.0, 11.0, 12.0]))
         assert np.allclose(np.asarray(first.box.origin), [1.0, 2.0, 3.0])
         assert second.meta["step_index"] == 1
         assert second.meta["energy"] == 0.5

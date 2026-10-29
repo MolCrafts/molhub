@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
+from typing import Any
 
 import numpy as np
 from molpy import Frame
-from molpy.core import UnitRegistry
+from molpy.core import MetaDocument, UnitRegistry
 
 __all__ = ["AtomicDress", "UnitConvert", "ConstantLabel"]
 
@@ -47,21 +48,22 @@ dataset target is one, so this union stays the documented contract for the
 values these transforms compute and write.
 """
 
-_MetaValue = MetaScalar | list[bool | int | float]
-"""Anything ``Frame.meta`` can hand back, including molpy's fixed-length
-sequences. Read paths carry values through untouched, so they must admit a
-value these transforms would never compute themselves."""
+_MetaValue = MetaScalar | tuple[Any, ...] | MetaDocument | None
+"""Anything ``Frame.meta`` hands back (molpy 0.20: values come out unwrapped and
+frozen — a fixed-length vector as a ``tuple``, a JSON object as a
+``MetaDocument``, ``None`` as itself). Read paths carry values through
+untouched, so they must admit a value these transforms would never compute
+themselves."""
 
 
 def _read_targets(sample: Frame) -> dict[str, _MetaValue]:
     """Graph-level targets of *sample*, as plain Python values.
 
-    The result is detached from the frame: ``Frame.meta`` hands back a copy of
-    ``MetaValue`` wrappers, and a transform must not write back through the
-    sample it reads. Unwrap here so every consumer sees the plain scalar /
-    sequence it computes with.
+    The result is detached from the frame: a transform must not write back
+    through the sample it reads. ``Frame.meta`` already hands back frozen,
+    unwrapped values, so the copy is the whole job.
     """
-    return {key: getattr(value, "value", value) for key, value in sample.meta.items()}
+    return dict(sample.meta.items())
 
 
 def _require_number(targets: Mapping[str, _MetaValue], key: str, owner: str) -> float:
@@ -69,14 +71,14 @@ def _require_number(targets: Mapping[str, _MetaValue], key: str, owner: str) -> 
 
     Raises:
         KeyError: *targets* does not carry *key*.
-        TypeError: *key* holds one of molpy's fixed-length sequences, which is
-            metadata but not a scalar target.
+        TypeError: *key* holds a fixed-length sequence, a JSON document or
+            ``None`` — metadata, but not a scalar target.
     """
     if key not in targets:
         raise KeyError(f"{owner}: sample carries no target {key!r}; present: {sorted(targets)}")
     value = targets[key]
-    if isinstance(value, list):
-        raise TypeError(f"{owner}: target {key!r} is a sequence, not a scalar: {value!r}")
+    if value is None or isinstance(value, (tuple, MetaDocument)):
+        raise TypeError(f"{owner}: target {key!r} is not a scalar: {value!r}")
     return float(value)
 
 

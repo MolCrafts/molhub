@@ -10,7 +10,8 @@ import io
 from pathlib import Path
 
 import pytest
-from molpy import Frame, UnitSystem
+from molpy import Frame
+from molpy.core import UnitRegistry
 
 from molhub.dataset import ArtifactHub, qm9
 from molhub.dataset.qm9 import (
@@ -296,9 +297,9 @@ class TestQM9Units:
 
     def test_every_unit_parses_through_the_molpy_registry(self):
         """UnitConvert reads these strings back; a typo must fail here."""
-        registry = UnitSystem()
+        registry = UnitRegistry()
         for unit in QM9.manifest.units.values():
-            registry.Unit(unit)
+            registry.parse(unit)
 
 
 class TestQM9MetaSurface:

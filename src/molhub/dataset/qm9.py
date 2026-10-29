@@ -188,7 +188,7 @@ def _parse_xyz(content: str) -> Frame:
         ys.append(float(parts[2]))
         zs.append(float(parts[3]))
 
-    numbers = [Element.get_atomic_number(s) for s in symbols]
+    numbers = [Element.by_symbol(s).z for s in symbols]
 
     atoms_blk = Block()
     atoms_blk["element"] = np.array(symbols, dtype="U3")

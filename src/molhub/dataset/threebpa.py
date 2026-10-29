@@ -119,7 +119,7 @@ def _parse_extxyz(path: Path) -> list[Frame]:
             fys.append(float(parts[5]))
             fzs.append(float(parts[6]))
 
-        numbers = [Element.get_atomic_number(s) for s in symbols]
+        numbers = [Element.by_symbol(s).z for s in symbols]
 
         atoms_blk = Block()
         atoms_blk["element"] = np.array(symbols, dtype="U3")

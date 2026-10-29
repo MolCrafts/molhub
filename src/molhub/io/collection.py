@@ -258,10 +258,10 @@ def _box_of(frame: Any) -> dict[str, Any] | None:
     if box is None:
         return None
     return {
-        "vectors": np.asarray(box.h, dtype=np.float64),
+        "vectors": np.asarray(box.matrix, dtype=np.float64),
         "origin": np.asarray(box.origin, dtype=np.float64),
         "boundary": [bool(flag) for flag in np.asarray(box.pbc).reshape(3)],
-        "cell_defined": bool(box.cell_defined),
+        "cell_defined": bool(box.is_cell_defined),
     }
 
 
@@ -287,6 +287,7 @@ def decode_sample(payload: bytes) -> tuple[Any, ...]:
             does not decode.
     """
     from molpy import Block, Box, Frame
+    from molpy.core import Cell
 
     frames: list[Any] = []
     for decoded in frame_bytes.decode_frames(payload):
@@ -297,9 +298,13 @@ def decode_sample(payload: bytes) -> tuple[Any, ...]:
         if decoded.box is not None:
             spec = decoded.box
             defined = bool(spec.get("cell_defined", True))
-            matrix = np.asarray(spec["vectors"], dtype=np.float64) if defined else None
+            cell = (
+                Cell.matrix(np.asarray(spec["vectors"], dtype=np.float64))
+                if defined
+                else Cell.undefined()
+            )
             frame.box = Box(
-                matrix,
+                cell,
                 pbc=np.asarray(spec["boundary"], dtype=bool),
                 origin=np.asarray(spec["origin"], dtype=np.float64),
             )
