@@ -88,7 +88,8 @@ def load(
 
     Args:
         name: HuggingFace spelling, e.g. ``"themol/mbis"``.
-        revision: molhub ``@version``. ``None`` takes the newest declared.
+        revision: molhub ``@version``. ``None`` takes the newest declared, except
+            ``polymer-tg``, whose Zenodo revisions must be named.
         streaming: Walk published files one at a time instead of indexing.
         disk_budget: Bytes of fetched files a walk may keep on disk at once.
         registry: Where registry YAML comes from.
@@ -101,7 +102,8 @@ def load(
     Raises:
         UnknownDataset: If this molhub has no reader for *name*.
         UnknownArtifact: If the registry has no such dataset or version.
-        AmbiguousRevision: If versions do not order and *revision* is omitted.
+        AmbiguousRevision: If versions do not order and *revision* is omitted,
+            or *name* is ``polymer-tg`` and no revision was given.
         ValueError: If *streaming* is asked of a whole-file dataset, or the
             payload needs a conversion this machine has not run.
     """

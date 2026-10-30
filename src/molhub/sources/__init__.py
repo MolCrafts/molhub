@@ -20,7 +20,7 @@ file changes::
     fetcher = Fetcher(drivers=Drivers.discover().with_driver(MySource()))
     path = fetcher.fetch(
         ["zenodo://14980914/data.csv", "https://mirror.example.org/data.csv"],
-        "dataset/molcrafts/polymer-tg@1/main",
+        "dataset/molcrafts/polymer-tg@v1/main",
         digest=Digest.parse("md5:ce2c7b2a879450cbbfff4d7ccea648f9"),
     )
 

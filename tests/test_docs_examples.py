@@ -6,7 +6,7 @@ Three directives, and what each promises the reader who copies the fence:
     Runs verbatim against the environment the reader already has — the
     **bundled** registry and whatever process home they happen to have.
     Nothing here exports ``$MOLHUB_REGISTRY`` for one of these: the
-    ``Molhub().resolve("polymer-tg@1")`` fence is a claim about the registry
+    ``Molhub().resolve("polymer-tg@v1")`` fence is a claim about the registry
     that ships inside the wheel, and pointing it at a synthetic directory would
     make it pass by reading a file this repo wrote for it.
 

@@ -43,7 +43,7 @@ a dataset that is not in it is refused rather than half-served. Eight entries:
 | `themol/hessian`, `themol/mbis`, `themol/torsion-scan` | `train`, `val`, `test` | the published derivation `class1-universal-splits@1` — a table, so counting is free |
 | `molcrafts/3bpa` | `train_300K`, `test_300K`, `test_600K`, `test_1200K` | one published extended-XYZ file per split |
 | `espaloma/zinc-typing`, `espaloma/phalkethoh-mm-small` | `train`, `val`, `test` (names only) | the payload's own `splits.json`, reachable only once the published bytes have been converted — see the conversion refusal below |
-| `molcrafts/qm9`, `molcrafts/polymer-tg` | `train` | nobody publishes a split of them, so their whole content is served as one view, under the name HuggingFace uses for "all of it" |
+| `molcrafts/qm9`, `molcrafts/polymer-tg` | `train` | nobody publishes a split of them, so their whole content is served as one view, under the name HuggingFace uses for "all of it". `polymer-tg` revisions are Zenodo's `v1`–`v7`; `load("polymer-tg")` without `revision` is refused |
 
 Three more are addressable and describable but have no split to declare, and
 their refusal hands over the class API that opens them: `molcrafts/revmd17`

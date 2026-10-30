@@ -21,7 +21,7 @@
 
 </div>
 
-molhub gives molecular datasets, models, and plugins one stable name and one way to get them. A coordinate like `dataset:molcrafts/polymer-tg@1` resolves through a registry of YAML manifests to an ordered list of mirrors. Adding an artifact is a manifest, not a release.
+molhub gives molecular datasets, models, and plugins one stable name and one way to get them. A coordinate like `dataset:molcrafts/polymer-tg@v1` resolves through a registry of YAML manifests to an ordered list of mirrors. Adding an artifact is a manifest, not a release.
 
 What guarantees the bytes are usable is the **transport contract**: check the response status, stream to a temporary file, rename into place atomically. A truncated body or a `202 Accepted` placeholder never lands on the final path. What pins *which version* you get is the **locator**, which must name a version upstream understands — a Figshare article version, a Zenodo record id, a git commit — together with the **DOI** the manifest records beside it. A `digest` is optional and secondary: molhub copies whatever the platform publishes, verbatim and in whatever algorithm it publishes it (md5 for QM9 and revMD17; nothing at all for 3BPA, because GitHub publishes no content checksum for a blob). When present it is checked, and what it proves is that upstream still serves the version the manifest names. molhub never computes a digest of its own.
 
@@ -150,20 +150,25 @@ from molhub import Molhub
 hub = Molhub()
 
 # Resolution and search read the bundled registry — no network.
-info = hub.resolve("polymer-tg@1")     # shorthand for dataset:molcrafts/polymer-tg@1
+# polymer-tg versions are Zenodo's v1–v7. The version is required.
+info = hub.resolve("polymer-tg@v1")    # shorthand for dataset:molcrafts/polymer-tg@v1
 print(info.title, info.license, info.doi)
 # LAMALAB curated polymer glass-transition temperatures CC-BY-4.0 10.5281/zenodo.14980914
 print(info.artifact("main").digest)    # md5:ce2c7b2a879450cbbfff4d7ccea648f9 — Zenodo's own value
 for locator in info.artifact("main").locators:
     print(locator)                     # zenodo://14980914/LAMALAB_CURATED_Tg_structured.csv
 
+embeddings = hub.resolve("polymer-tg@v7")
+print(embeddings.doi)                  # 10.5281/zenodo.15789599
+
 for manifest in hub.search(query="polymer"):
     print(manifest.coordinate.canonical, "—", manifest.title)
-# dataset:molcrafts/polymer-tg@1 — LAMALAB curated polymer glass-transition temperatures
+# dataset:molcrafts/polymer-tg@v1 — LAMALAB curated polymer glass-transition temperatures
+# … through dataset:molcrafts/polymer-tg@v7
 
 # Fetching hits the network on the first call only. Not run here.
-paths = hub.fetch("dataset:molcrafts/polymer-tg@1")
-# {'main': PosixPath('/home/you/.cache/molhub/files/dataset/molcrafts/polymer-tg@1/main')}
+paths = hub.fetch("dataset:molcrafts/polymer-tg@v7")
+# {'main': PosixPath('/home/you/.cache/molhub/files/dataset/molcrafts/polymer-tg@v7/main')}
 ```
 
 Files are cached at `$MOLHUB_HOME/files/<kind>/<namespace>/<name>@<version>/<role>` (default root `~/.cache/molhub`) — a path built from the coordinate and the role, **not** a content hash. That is deliberate: the manifest already names the file, so no digest has to be invented for the platforms that publish none. A cached file is returned without any network access, and the layout is a cross-SDK contract.
@@ -172,8 +177,8 @@ From the shell:
 
 ```bash
 molhub search polymer
-molhub info dataset:molcrafts/polymer-tg@1
-molhub fetch polymer-tg@1 --into ./data
+molhub info dataset:molcrafts/polymer-tg@v7
+molhub fetch polymer-tg@v7 --into ./data
 molhub cache verify            # re-check cached files against their manifests' digests;
                                # files whose manifest declares none are counted and skipped
 ```

@@ -41,6 +41,12 @@ run to a version nobody asked for. :class:`AmbiguousRevision` names every
 declared revision instead, because typing one of them is the only useful next
 step.
 
+**``polymer-tg`` refuses even though ``v1``–``v7`` order.** Those labels are
+Zenodo's versions of one concept, and the files are not successive cuts of one
+table. Picking ``v7`` because it sorts last would download a different file
+from the one a caller who omitted the version had in mind. The refusal is the
+same type: name a revision.
+
 Reference:
     ``.claude/specs/hf-facade-03-builder-info.md`` § Design (D4), under the
     2026-08-15 operator override recorded in ``.claude/notes/notes.md``
@@ -65,12 +71,17 @@ __all__ = ["AmbiguousRevision", "DatasetName"]
 # comparison can tell "differs by a number" from "differs by a word".
 _SEGMENTS = re.compile(r"\d+|\D+")
 
+# Revisions that sort, but must not be defaulted. Each label is one upstream
+# record, and the bytes are not one series. See polymer_tg.MANIFESTS.
+_PINNED_REVISION = frozenset({"dataset:molcrafts/polymer-tg"})
+
 
 class AmbiguousRevision(ValueError):
-    """The declared versions of an artifact do not order, and none was given.
+    """No revision was given, and molhub will not pick one.
 
     Raised by :meth:`DatasetName.resolve` when the newest version cannot be
-    decided by a numeric segment. The message lists every declared revision:
+    decided by a numeric segment, and when an artifact publishes one file per
+    upstream record (``polymer-tg``). The message lists every declared revision:
     the caller has to pick one, and a locator that pinned itself would break the
     promise that a coordinate names one immutable artifact.
     """
@@ -172,6 +183,12 @@ class DatasetName:
             )
         if len(declared) == 1:
             return declared[0]
+        if self.unversioned in _PINNED_REVISION:
+            raise AmbiguousRevision(
+                f"{self.unversioned} publishes revisions {', '.join(declared)}, one "
+                "Zenodo record each. Pass an explicit revision=; these files are not "
+                "one table, so none of them is the default."
+            )
         if not self._orders(declared):
             raise AmbiguousRevision(
                 f"{self.unversioned} declares revisions {', '.join(declared)}, which do "

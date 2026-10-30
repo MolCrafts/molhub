@@ -61,25 +61,92 @@ class TestBundledRegistryIsUsable:
             validator.validate(manifest.to_mapping())
 
 
+# Zenodo's own version label, DOI, locator, published md5, and size.
+# One row per record of concept 10.5281/zenodo.14980913. v5–v7 share a checksum;
+# they stay separate coordinates because the records are not the same DOI.
+POLYMER_TG_RELEASES = (
+    (
+        "v1",
+        "10.5281/zenodo.14980914",
+        "zenodo://14980914/LAMALAB_CURATED_Tg_structured.csv",
+        "md5:ce2c7b2a879450cbbfff4d7ccea648f9",
+        6_024_335,
+    ),
+    (
+        "v2",
+        "10.5281/zenodo.15209940",
+        "zenodo://15209940/LAMALAB_CURATED_Tg_structured_polymerclass.csv",
+        "md5:833ca70192089b0613b3292394b91c57",
+        5_296_460,
+    ),
+    (
+        "v3",
+        "10.5281/zenodo.15210011",
+        "zenodo://15210011/LAMALAB_CURATED_Tg_structured.csv",
+        "md5:833ca70192089b0613b3292394b91c57",
+        5_296_460,
+    ),
+    (
+        "v4",
+        "10.5281/zenodo.15210035",
+        "zenodo://15210035/LAMALAB_CURATED_Tg_structured_polymerclass.csv",
+        "md5:833ca70192089b0613b3292394b91c57",
+        5_296_460,
+    ),
+    (
+        "v5",
+        "10.5281/zenodo.15781175",
+        "zenodo://15781175/LAMALAB_CURATED_Tg_structured_polymerclass_with_embeddings.csv",
+        "md5:31400a5f499394e3a6e0658488a464bb",
+        43_615_282,
+    ),
+    (
+        "v6",
+        "10.5281/zenodo.15783761",
+        "zenodo://15783761/LAMALAB_CURATED_Tg_structured_polymerclass_with_embeddings.csv",
+        "md5:31400a5f499394e3a6e0658488a464bb",
+        43_615_282,
+    ),
+    (
+        "v7",
+        "10.5281/zenodo.15789599",
+        "zenodo://15789599/LAMALAB_CURATED_Tg_structured_polymerclass_with_embeddings.csv",
+        "md5:31400a5f499394e3a6e0658488a464bb",
+        43_615_282,
+    ),
+)
+
+
 class TestPolymerTgEntry:
-    @pytest.fixture
-    def manifest(self):
-        return Molhub().resolve("dataset:molcrafts/polymer-tg@1")
-
-    def test_resolves(self, manifest):
+    @pytest.mark.parametrize(("version", "doi", "locator", "digest", "size"), POLYMER_TG_RELEASES)
+    def test_each_zenodo_version_is_pinned(self, version, doi, locator, digest, size):
+        manifest = Molhub().resolve(f"dataset:molcrafts/polymer-tg@{version}")
+        artifact = manifest.artifact("main")
         assert manifest.title.startswith("LAMALAB")
+        assert manifest.doi == doi
+        assert str(artifact.locators[0]) == locator
+        assert str(artifact.digest) == digest
+        assert artifact.digest.algorithm == "md5"
+        assert artifact.size == size
+        assert manifest.targets.graph_level == ("labels.Exp_Tg(K)",)
 
-    def test_declares_a_zenodo_locator(self, manifest):
-        assert str(manifest.artifact("main").locators[0]).startswith("zenodo://")
+    def test_the_unlabeled_version_is_gone(self):
+        from molhub.registry import UnknownArtifact
 
-    def test_records_the_version_doi(self, manifest):
-        assert manifest.doi == "10.5281/zenodo.14980914"
+        with pytest.raises(UnknownArtifact, match="v1"):
+            Molhub().resolve("dataset:molcrafts/polymer-tg@1")
 
-    def test_digest_is_zenodos_own_published_md5(self, manifest):
-        assert manifest.artifact("main").digest.algorithm == "md5"
+    def test_an_omitted_revision_is_refused(self):
+        from molhub.loader.naming import AmbiguousRevision, DatasetName
 
-    def test_size_is_declared(self, manifest):
-        assert manifest.artifact("main").size == 6024335
+        with pytest.raises(AmbiguousRevision, match="v7"):
+            DatasetName("polymer-tg").resolve(Registry.builtin())
+
+    def test_an_explicit_revision_resolves(self):
+        from molhub.loader.naming import DatasetName
+
+        resolved = DatasetName("polymer-tg", revision="v7").resolve(Registry.builtin())
+        assert resolved.canonical == "dataset:molcrafts/polymer-tg@v7"
 
 
 class TestTHEMolMbisEntry:
@@ -202,7 +269,7 @@ class TestAgainstRealUpstream:
         previous = config.home_dir
         try:
             config.home_dir = tmp_path
-            paths = Molhub().fetch("dataset:molcrafts/polymer-tg@1")
+            paths = Molhub().fetch("dataset:molcrafts/polymer-tg@v1")
         finally:
             config.home_dir = previous
         assert paths["main"].stat().st_size == 6024335

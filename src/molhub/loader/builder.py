@@ -899,7 +899,8 @@ class DatasetBuilder:
         name: The dataset in HuggingFace spelling, ``"themol/mbis"`` or
             ``"qm9"``. Not a coordinate: the version is *revision*.
         revision: Which version to pin. ``None`` takes the newest the registry
-            declares, and refuses when they do not order.
+            declares, and refuses when they do not order. ``polymer-tg`` also
+            refuses: its revisions are Zenodo's ``v1``–``v7``, one record each.
         registry: Where manifests come from; ``None`` loads the configured or
             bundled registry.
         hub: Where bytes come from; ``None`` constructs a
