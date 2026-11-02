@@ -2,7 +2,7 @@
 #
 # Article 1057646 already has a v1 and a v2, so this resolves to whichever is
 # current and starts serving different data the day upstream publishes a v3.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

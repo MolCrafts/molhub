@@ -760,7 +760,7 @@ class TestBrokenRegistry:
     def test_a_malformed_manifest_is_a_clean_error(self, tmp_path):
         bad = tmp_path / "dataset" / "molcrafts" / "x" / "1.yaml"
         bad.parent.mkdir(parents=True)
-        bad.write_text("schema_version: 1\n")
+        bad.write_text("kind: dataset\n")
         result = runner.invoke(app, ["search", "--registry", str(tmp_path)])
         assert result.exit_code != 0
         assert "Traceback" not in result.stdout

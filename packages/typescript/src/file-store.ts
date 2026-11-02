@@ -25,7 +25,8 @@ export class FileStore {
 
   async has(key: string): Promise<boolean> {
     try {
-      return (await stat(this.pathFor(key))).size > 0;
+      const entry = await stat(this.pathFor(key));
+      return entry.isFile() && entry.size > 0;
     } catch {
       return false;
     }

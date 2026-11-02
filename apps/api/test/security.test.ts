@@ -23,7 +23,7 @@ describe("operational logging", () => {
         method: "POST",
         headers: { "content-type": "application/json", authorization: "Bearer top-secret" },
         body: JSON.stringify({
-          manifest: { schema_version: 1 },
+          manifest: {},
           contributor: { email: "private@example.org" },
         }),
       }),

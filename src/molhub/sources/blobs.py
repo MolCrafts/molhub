@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from uuid import uuid4
 
 from molhub.config import config
 
@@ -68,9 +69,10 @@ class BlobStore:
         """Return a scratch path for an in-flight transfer of *key*.
 
         Kept under the same root as :meth:`path_for`, so the final move is a
-        same-filesystem rename and therefore atomic.
+        same-filesystem rename and therefore atomic. Each call returns a distinct
+        path so concurrent transfers cannot overwrite or remove each other.
         """
-        return self._root / "tmp" / f"{'_'.join(self._segments(key))}.part"
+        return self._root / "tmp" / f"{'_'.join(self._segments(key))}.{uuid4().hex}.part"
 
     def has(self, key: str) -> bool:
         """Whether a non-empty file is cached under *key*.

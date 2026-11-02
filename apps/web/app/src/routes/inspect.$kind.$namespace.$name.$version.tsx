@@ -235,7 +235,7 @@ function InspectorPage() {
               <div className="mt-4 border-border border-t pt-4">
                 <div className="flex items-center gap-3">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     aria-label={playing ? "Pause trajectory" : "Play trajectory"}
                     onClick={() => setPlaying((value) => !value)}

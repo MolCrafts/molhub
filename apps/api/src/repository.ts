@@ -2,15 +2,15 @@ import type { ManifestDocument } from "@molcrafts/molhub/core";
 import type { Contributor, Submission, SubmissionStatus } from "./domain.js";
 
 export interface SubmissionRepository {
-  insert(submission: Submission): Promise<void>;
+  insert(submission: Submission): Promise<boolean>;
   get(id: string): Promise<Submission | null>;
   list(status?: SubmissionStatus): Promise<readonly Submission[]>;
-  findActiveByCoordinate(coordinate: string): Promise<Submission | null>;
-  updateReview(
+  transition(
     id: string,
-    status: SubmissionStatus,
+    expected: "pending" | "reviewing",
+    status: "reviewing" | "rejected",
     values: { readonly note?: string | null; readonly pullRequestUrl?: string | null },
-  ): Promise<Submission>;
+  ): Promise<Submission | null>;
   markAcceptedByPullRequest(pullRequestUrl: string): Promise<void>;
 }
 
@@ -31,14 +31,16 @@ interface SubmissionRow {
 export class D1SubmissionRepository implements SubmissionRepository {
   constructor(private readonly database: D1Database) {}
 
-  async insert(submission: Submission): Promise<void> {
-    await this.database
+  async insert(submission: Submission): Promise<boolean> {
+    const row = await this.database
       .prepare(
         `INSERT INTO submissions (
           id, coordinate, manifest_json, manifest_yaml, status,
           contributor_name, contributor_email, review_note, pull_request_url,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(coordinate) WHERE status IN ('pending', 'reviewing', 'accepted')
+        DO NOTHING RETURNING id`,
       )
       .bind(
         submission.id,
@@ -53,23 +55,14 @@ export class D1SubmissionRepository implements SubmissionRepository {
         submission.createdAt,
         submission.updatedAt,
       )
-      .run();
+      .first<{ id: string }>();
+    return row !== null;
   }
 
   async get(id: string): Promise<Submission | null> {
     const row = await this.database
       .prepare("SELECT * FROM submissions WHERE id = ?")
       .bind(id)
-      .first<SubmissionRow>();
-    return row ? D1SubmissionRepository.toDomain(row) : null;
-  }
-
-  async findActiveByCoordinate(coordinate: string): Promise<Submission | null> {
-    const row = await this.database
-      .prepare(
-        "SELECT * FROM submissions WHERE coordinate = ? AND status IN ('pending', 'reviewing', 'accepted') ORDER BY created_at DESC LIMIT 1",
-      )
-      .bind(coordinate)
       .first<SubmissionRow>();
     return row ? D1SubmissionRepository.toDomain(row) : null;
   }
@@ -84,38 +77,50 @@ export class D1SubmissionRepository implements SubmissionRepository {
     return result.results.map(D1SubmissionRepository.toDomain);
   }
 
-  async updateReview(
+  async transition(
     id: string,
-    status: SubmissionStatus,
+    expected: "pending" | "reviewing",
+    status: "reviewing" | "rejected",
     values: { readonly note?: string | null; readonly pullRequestUrl?: string | null },
-  ): Promise<Submission> {
-    const current = await this.get(id);
-    if (!current) throw new Error(`Submission ${id} does not exist.`);
-    const updatedAt = new Date().toISOString();
-    await this.database
-      .prepare(
-        "UPDATE submissions SET status = ?, review_note = ?, pull_request_url = ?, updated_at = ? WHERE id = ?",
-      )
+  ): Promise<Submission | null> {
+    const row = await this.database
+      .prepare(`
+      UPDATE submissions SET
+        status = CASE WHEN ? = 'reviewing' AND EXISTS (
+          SELECT 1 FROM merged_pull_requests WHERE url = COALESCE(?, pull_request_url)
+        ) THEN 'accepted' ELSE ? END,
+        review_note = CASE WHEN ? THEN ? ELSE review_note END,
+        pull_request_url = CASE WHEN ? THEN ? ELSE pull_request_url END,
+        updated_at = ?
+      WHERE id = ? AND status = ? RETURNING *
+    `)
       .bind(
         status,
-        values.note === undefined ? current.reviewNote : values.note,
-        values.pullRequestUrl === undefined ? current.pullRequestUrl : values.pullRequestUrl,
-        updatedAt,
+        values.pullRequestUrl ?? null,
+        status,
+        values.note !== undefined ? 1 : 0,
+        values.note ?? null,
+        values.pullRequestUrl !== undefined ? 1 : 0,
+        values.pullRequestUrl ?? null,
+        new Date().toISOString(),
         id,
+        expected,
       )
-      .run();
-    const updated = await this.get(id);
-    if (!updated) throw new Error(`Submission ${id} disappeared after update.`);
-    return updated;
+      .first<SubmissionRow>();
+    return row ? D1SubmissionRepository.toDomain(row) : null;
   }
 
   async markAcceptedByPullRequest(pullRequestUrl: string): Promise<void> {
-    await this.database
-      .prepare(
-        "UPDATE submissions SET status = 'accepted', updated_at = ? WHERE pull_request_url = ? AND status = 'reviewing'",
-      )
-      .bind(new Date().toISOString(), pullRequestUrl)
-      .run();
+    await this.database.batch([
+      this.database
+        .prepare("INSERT INTO merged_pull_requests (url) VALUES (?) ON CONFLICT DO NOTHING")
+        .bind(pullRequestUrl),
+      this.database
+        .prepare(
+          "UPDATE submissions SET status = 'accepted', updated_at = ? WHERE pull_request_url = ? AND status = 'reviewing'",
+        )
+        .bind(new Date().toISOString(), pullRequestUrl),
+    ]);
   }
 
   private static toDomain(row: SubmissionRow): Submission {

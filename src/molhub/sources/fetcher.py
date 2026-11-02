@@ -1,4 +1,4 @@
-"""Fetcher — ordered fallback across locators, with an optional version check.
+"""Fetcher — ordered fallback across locators, with an optional published-digest check.
 
 What this class guarantees, always: **a path it returns holds a complete file
 that the server returned with a 200.** Truncated and error responses never

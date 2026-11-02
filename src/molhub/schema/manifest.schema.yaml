@@ -10,12 +10,9 @@ title: molhub artifact manifest
 type: object
 additionalProperties: false
 
-required: [schema_version, kind, namespace, name, version, title, artifacts]
+required: [kind, namespace, name, version, title, artifacts]
 
 properties:
-  schema_version:
-    const: 1
-
   kind:
     enum: [dataset, model, plugin]
 

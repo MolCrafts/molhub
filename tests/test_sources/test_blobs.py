@@ -87,6 +87,12 @@ class TestBlobStoreLayout:
     def test_temp_path_shares_the_root_so_rename_is_atomic(self, store):
         assert store.temp_path(KEY).is_relative_to(store.root)
 
+    def test_each_transfer_gets_a_distinct_temp_path(self, store):
+        assert store.temp_path(KEY) != store.temp_path(KEY)
+
+    def test_flattened_keys_do_not_share_a_temp_path(self, store):
+        assert store.temp_path("a_b/c") != store.temp_path("a/b_c")
+
 
 class TestBlobStorePresence:
     @pytest.fixture

@@ -27,16 +27,9 @@ title: molhub aggregate registry
 type: object
 additionalProperties: false
 
-required: [schema_version, entries]
+required: [entries]
 
 properties:
-  schema_version:
-    description: >-
-      Tracks this envelope, not the manifests inside it. A breaking change to
-      the entry shape bumps this so an older client can refuse the file rather
-      than misread it.
-    const: 1
-
   entries:
     description: >-
       Every manifest in the registry, ordered by `coordinate` and by nothing
@@ -162,7 +155,7 @@ $defs:
         minLength: 1
 
       format:
-        description: Stable byte-format identifier, or `null` for legacy manifests.
+        description: Stable byte-format identifier, or `null` when not declared.
         oneOf:
           - { type: "null" }
           - { type: string, pattern: "^[a-z0-9][a-z0-9._+-]*$" }

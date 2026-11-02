@@ -16,7 +16,6 @@ describe("manifest builder", () => {
     const yaml = buildManifestYaml(DEFAULT_MANIFEST_DRAFT);
     const manifest = load(yaml) as Record<string, unknown>;
 
-    expect(manifest.schema_version).toBe(1);
     expect(manifest.kind).toBe("dataset");
     expect(manifestCoordinate(DEFAULT_MANIFEST_DRAFT)).toBe(
       "dataset:your-lab/molecular-benchmark@v1",

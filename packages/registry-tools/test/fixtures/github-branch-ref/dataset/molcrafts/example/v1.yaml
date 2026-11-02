@@ -2,7 +2,7 @@
 #
 # It serves whatever was pushed last. Compare with artifacts/dataset/molcrafts/
 # 3bpa/v1.yaml, which pins 29e6d467… and differs from this by one word.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

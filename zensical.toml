@@ -22,7 +22,6 @@ nav = [
     { "Publishing" = "guides/publishing.md" },
     { "Extending sources" = "guides/extending-sources.md" },
     { "Using TypeScript" = "guides/using-typescript.md" },
-    { "Migrating" = "guides/migrating.md" },
   ] },
   { "Inspector" = [
     { "Opening an artifact" = "inspector/opening-an-artifact.md" },

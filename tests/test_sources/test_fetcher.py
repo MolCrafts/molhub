@@ -1,4 +1,4 @@
-"""Tests for Fetcher — ordered fallback, cache reuse, optional version check.
+"""Tests for Fetcher — ordered fallback, cache reuse, optional published-digest check.
 
 Two guarantees, and they are separate on purpose:
 

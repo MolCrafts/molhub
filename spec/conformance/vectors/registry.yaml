@@ -1,6 +1,6 @@
 description: Registry resolution and deterministic search
 registry:
-  schema_version: 1
+
   entries:
     - coordinate: dataset:molcrafts/qm9@v2
       kind: dataset

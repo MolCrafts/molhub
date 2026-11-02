@@ -1,6 +1,6 @@
 # Broken: filed at .../example/v1.yaml while declaring version v2. Clients build
 # the path from the coordinate, so this file resolves to nothing.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

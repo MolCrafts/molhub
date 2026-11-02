@@ -1,16 +1,8 @@
-## Contract and data
+## Current contract and data
 
-- Contract change: none / additive / breaking (`schema_version`: ___)
+- Contract changes: ___
 - Registry snapshot revision: `___`
-- Cache or filesystem layout change: none / describe
-- Migration required: none / describe
-
-## Compatibility
-
-- Minimum Python version: ___
-- Minimum Node version: ___
-- Minimum compatible Python MolHub: ___
-- Minimum compatible `@molcrafts/molhub`: ___
+- Cache or filesystem layout changes: ___
 
 ## Verification
 

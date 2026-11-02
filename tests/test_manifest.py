@@ -50,7 +50,7 @@ class TestManifestFields:
         assert artifact.format == "tar-bz2"
         assert artifact.media_type == "application/x-bzip2"
 
-    def test_format_metadata_is_optional_for_legacy_manifests(self, manifest):
+    def test_format_metadata_is_optional(self, manifest):
         artifact = manifest.artifact("exclude")
         assert artifact.format is None
         assert artifact.media_type is None
@@ -141,7 +141,7 @@ class TestArtifactCrossCheck:
 
     def test_a_manifest_carrying_such_an_artifact_is_refused(self):
         bad = textwrap.dedent("""
-            schema_version: 1
+
             kind: dataset
             namespace: molcrafts
             name: qm9
@@ -173,15 +173,6 @@ class TestManifestRejection:
         with pytest.raises(InvalidManifest, match=field):
             Manifest.from_yaml("\n".join(lines))
 
-    def test_unknown_schema_version(self):
-        with pytest.raises(InvalidManifest, match="schema_version"):
-            Manifest.from_yaml(manifest_yaml(schema_version=99))
-
-    def test_missing_schema_version(self):
-        lines = [ln for ln in manifest_yaml().splitlines() if not ln.startswith("schema_version:")]
-        with pytest.raises(InvalidManifest, match="schema_version"):
-            Manifest.from_yaml("\n".join(lines))
-
     def test_no_artifacts(self):
         bad = manifest_yaml().split("artifacts:")[0] + "artifacts: []\n"
         with pytest.raises(InvalidManifest, match="artifacts"):
@@ -209,7 +200,7 @@ class TestManifestRejection:
 
     def test_error_carries_the_file_path(self, tmp_path):
         path = tmp_path / "broken.yaml"
-        path.write_text("schema_version: 1\n")
+        path.write_text("kind: dataset\n")
         with pytest.raises(InvalidManifest, match="broken.yaml"):
             Manifest.from_path(path)
 

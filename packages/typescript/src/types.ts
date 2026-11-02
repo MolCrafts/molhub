@@ -11,7 +11,6 @@ export interface ManifestArtifact {
 }
 
 export interface ManifestDocument {
-  readonly schema_version: 1;
   readonly kind: ArtifactKind;
   readonly namespace: string;
   readonly name: string;
@@ -55,6 +54,5 @@ export interface RegistryEntry {
 }
 
 export interface MolhubRegistry {
-  readonly schema_version: 1;
   readonly entries: RegistryEntry[];
 }

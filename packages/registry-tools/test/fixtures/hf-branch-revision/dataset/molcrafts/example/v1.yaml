@@ -1,7 +1,7 @@
 # Broken: the hf:// locator pins `@main`, which is a branch, not a commit.
 #
 # Spelling the branch out is no better than omitting it; a branch moves.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

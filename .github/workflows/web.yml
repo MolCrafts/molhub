@@ -1,40 +1,53 @@
-name: Web
+name: web
 
-on:
+'on':
   pull_request:
-    branches: [main, master, dev]
+    branches:
+    - dev
+    - master
+    - main
     paths:
-      - "apps/web/**"
-      - "packages/typescript/**"
-      - "packages/registry-tools/**"
-      - "spec/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/assets/moko.svg"
-      - ".github/workflows/web.yml"
+    - apps/web/**
+    - packages/typescript/**
+    - packages/registry-tools/**
+    - spec/**
+    - package.json
+    - package-lock.json
+    - .github/assets/moko.svg
+    - .github/workflows/web.yml
   push:
-    branches: [dev]
+    branches:
+    - '**'
     paths:
-      - "apps/web/**"
-      - "packages/typescript/**"
-      - "packages/registry-tools/**"
-      - "spec/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/assets/moko.svg"
-      - ".github/workflows/web.yml"
-  workflow_dispatch:
+    - apps/web/**
+    - packages/typescript/**
+    - packages/registry-tools/**
+    - spec/**
+    - package.json
+    - package-lock.json
+    - .github/assets/moko.svg
+    - .github/workflows/web.yml
+  workflow_dispatch: null
 
 permissions:
   contents: read
 
 concurrency:
-  group: web-${{ github.ref }}
-  cancel-in-progress: true
+  group: web-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
+  context:
+    permissions:
+      contents: read
+    name: web
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+
   checks:
-    name: Lint, test, typecheck, prerender
+    if: needs.context.outputs.skip-pr != 'true'
+    needs:
+    - context
+    name: web / Lint, test, typecheck, prerender
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

@@ -1,6 +1,6 @@
 # Broken by its extension: clients glob `*.yaml` and nothing else, so this file
 # is not a dataset that loads slowly — it is a dataset that does not exist.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

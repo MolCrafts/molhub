@@ -21,7 +21,10 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RegistryBuilder } from "./lib/builder.js";
 import { TOOL_ROOT } from "./lib/repo.js";
 
 /** A registry the gate must refuse, and the words it must refuse it with. */
@@ -114,6 +117,27 @@ function main(): number {
       continue;
     }
     process.stdout.write(`  accepted  ${directory}\n`);
+  }
+
+  const scratch = mkdtempSync(join(tmpdir(), "molhub-builder-"));
+  try {
+    for (const fixture of REJECTED) {
+      const output = join(scratch, fixture.directory);
+      try {
+        new RegistryBuilder().build(join(FIXTURES_DIR, fixture.directory), output);
+        failures.push(`builder accepted ${fixture.directory}`);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!detail.includes(fixture.expects)) {
+          failures.push(`builder rejected ${fixture.directory} for the wrong reason: ${detail}`);
+        }
+      }
+      if (existsSync(output)) failures.push(`builder wrote output for ${fixture.directory}`);
+    }
+    const valid = new RegistryBuilder().build(join(FIXTURES_DIR, "good"), join(scratch, "good"));
+    if (valid.entries !== 1) failures.push("builder did not build the valid fixture");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 
   if (failures.length > 0) {

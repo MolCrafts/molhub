@@ -1,13 +1,30 @@
-name: CI
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+name: ci
 
-on:
+'on':
   push:
-    branches: [main, master, dev]
+    branches:
+    - '**'
   pull_request:
-    branches: [main, master, dev]
+    branches:
+    - dev
+    - master
+    - main
 
 jobs:
+  context:
+    permissions:
+      contents: read
+    name: ci
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+
   lint:
+    if: needs.context.outputs.skip-pr != 'true'
+    needs:
+    - context
+    name: ci / lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +39,15 @@ jobs:
           uv run ty check src/
 
   test:
-    needs: lint
+    if: needs.context.outputs.skip-pr != 'true'
+    name: ci / test
+    needs:
+    - context
+    - lint
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["3.12", "3.13", "3.14"]' || '["3.12"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,7 +62,10 @@ jobs:
           flags: python${{ matrix.python-version }}
 
   node:
-    name: TypeScript, registry, API, and Web
+    if: needs.context.outputs.skip-pr != 'true'
+    needs:
+    - context
+    name: ci / TypeScript, registry, API, and Web
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -89,9 +113,11 @@ jobs:
           npm run build --workspace @molcrafts/molhub-web
 
   docs-and-packages:
-    name: Docs and package contents
+    needs:
+    - context
+    name: ci / Docs and package contents
     # Not part of the dev integration loop — docs/PyPI release stay on main/master.
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    if: needs.context.outputs.skip-pr != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -104,6 +130,18 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - run: uv sync --extra dev
       - run: npm ci
       - run: npm run docs:check
       - run: npm run package:audit
+
+  workflow-policy:
+    name: ci / workflows
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+    - uses: MolCrafts/molcrafts-ci/actions/check-workflows@master

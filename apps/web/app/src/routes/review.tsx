@@ -33,7 +33,7 @@ export const Route = createFileRoute("/review")({
 
 type QueueFilter = SubmissionStatus | "all";
 
-function ReviewPage() {
+export function ReviewPage() {
   const [token, setToken] = useState("");
   const [filter, setFilter] = useState<QueueFilter>("pending");
   const [queue, setQueue] = useState<readonly ReviewerSubmission[] | null>(null);
@@ -79,6 +79,10 @@ function ReviewPage() {
       setNote("");
       await loadQueue();
     } catch (reason) {
+      // Approval may already be durable even when publication fails.
+      await loadQueue("all");
+      setFilter("all");
+      setSelectedId(selected.id);
       setError(messageOf(reason));
       setBusy(false);
     }
@@ -200,7 +204,7 @@ function ReviewPage() {
   );
 }
 
-function SubmissionReview({
+export function SubmissionReview({
   submission,
   note,
   busy,
@@ -295,7 +299,8 @@ function SubmissionReview({
         </a>
       ) : null}
 
-      {submission.status === "pending" ? (
+      {submission.status === "pending" ||
+      (submission.status === "reviewing" && !submission.pullRequestUrl) ? (
         <section className="rounded-panel border border-border bg-canvas-tinted p-4 sm:p-5">
           <label htmlFor="review-note" className="font-medium text-sm">
             Review note
@@ -312,11 +317,12 @@ function SubmissionReview({
           />
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <Button disabled={busy} onClick={() => onDecision("approve")}>
-              <CheckCircle2 aria-hidden="true" /> Approve and open PR
+              <CheckCircle2 aria-hidden="true" />{" "}
+              {submission.status === "reviewing" ? "Retry publication" : "Approve and open PR"}
             </Button>
             <Button
               variant="outline"
-              disabled={busy || !note.trim()}
+              disabled={busy || submission.status !== "pending" || !note.trim()}
               onClick={() => onDecision("reject")}
             >
               <XCircle aria-hidden="true" /> Reject with note

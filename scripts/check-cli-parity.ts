@@ -15,7 +15,7 @@ try {
   await writeFile(
     manifestPath,
     [
-      "schema_version: 1",
+
       "kind: dataset",
       "namespace: lab",
       "name: sample",
@@ -46,7 +46,7 @@ try {
     snapshotPath,
     `${JSON.stringify(
       {
-        schema_version: 1,
+
         entries: [
           {
             coordinate: "dataset:lab/sample@v1",

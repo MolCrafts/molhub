@@ -1,6 +1,6 @@
 # Broken: the artifact records neither `digest` nor `size`, so a transfer that
 # reports success has nothing at all to be compared against.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

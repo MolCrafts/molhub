@@ -12,7 +12,7 @@ describe("browser Molhub", () => {
   });
 
   it("rejects a malformed registry snapshot", async () => {
-    const hub = new Molhub({ registry: { schema_version: 1, entries: [{}] } as never });
+    const hub = new Molhub({ registry: { entries: [{}] } as never });
     await expect(hub.search()).rejects.toThrow("registry.schema.yaml");
   });
 });

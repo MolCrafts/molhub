@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ class FakeResponse(io.BytesIO):
     def __init__(self, status: int = 200, body: bytes = b"") -> None:
         super().__init__(body)
         self.status = status
+        self.headers = Message()
 
     def __enter__(self) -> "FakeResponse":
         return self

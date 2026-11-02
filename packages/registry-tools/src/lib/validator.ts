@@ -11,8 +11,7 @@ export class RegistryValidator {
     private readonly manifests = new ManifestValidator(),
   ) {}
 
-  run(): Violation[] {
-    const loaded = this.source.load();
+  run(loaded: readonly LoadedManifest[] = this.source.load()): Violation[] {
     return [
       ...this.checkPopulated(loaded),
       ...this.source.strayFiles().map((file) => ({
@@ -21,17 +20,6 @@ export class RegistryValidator {
       })),
       ...loaded.flatMap((manifest) => this.checkManifest(manifest)),
     ];
-  }
-
-  private checkPopulated(loaded: readonly LoadedManifest[]): Violation[] {
-    return loaded.length > 0
-      ? []
-      : [
-          {
-            where: this.source.root,
-            message: "No manifests found here. Expected <kind>/<namespace>/<name>/<version>.yaml.",
-          },
-        ];
   }
 
   private checkManifest(loaded: LoadedManifest): Violation[] {
@@ -51,6 +39,17 @@ export class RegistryValidator {
       }));
     }
     return this.checkPath(loaded.relativePath, result.value);
+  }
+
+  private checkPopulated(loaded: readonly LoadedManifest[]): Violation[] {
+    return loaded.length > 0
+      ? []
+      : [
+          {
+            where: this.source.root,
+            message: "No manifests found here. Expected <kind>/<namespace>/<name>/<version>.yaml.",
+          },
+        ];
   }
 
   private checkPath(relativePath: string, document: ManifestDocument): Violation[] {

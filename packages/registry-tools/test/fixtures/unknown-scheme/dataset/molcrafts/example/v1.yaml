@@ -1,6 +1,6 @@
 # Broken: `zendo://` is a typo for `zenodo://`. It parses, satisfies the schema's
 # locator pattern, and loads into the registry; only a user's download would notice.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

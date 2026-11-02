@@ -53,7 +53,6 @@ from molhub.sources import Digest, InvalidDigest, Locator
 
 __all__ = ["Artifact", "TargetDeclaration", "Manifest", "InvalidManifest"]
 
-SCHEMA_VERSION = 1
 FORMAT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
 MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
 
@@ -212,18 +211,10 @@ class Manifest:
         """Build a manifest from an already-parsed mapping.
 
         Raises:
-            InvalidManifest: If a required field is missing, the schema version
-                is unknown, or any artifact is malformed.
+            InvalidManifest: If a required field is missing or any artifact is malformed.
         """
         if not isinstance(data, Mapping):
             raise InvalidManifest(f"{where} must be a mapping, got {type(data).__name__}.")
-
-        version = data.get("schema_version")
-        if version != SCHEMA_VERSION:
-            raise InvalidManifest(
-                f"{where} declares schema_version {version!r}; this molhub "
-                f"understands {SCHEMA_VERSION}."
-            )
 
         try:
             coordinate = Coordinate(

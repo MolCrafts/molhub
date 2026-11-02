@@ -1,6 +1,6 @@
 # Broken three ways at the schema level: an unknown top-level key, a digest that
 # is not `algorithm:hex`, and a `kind` outside the enum.
-schema_version: 1
+
 kind: datasets
 namespace: molcrafts
 name: example

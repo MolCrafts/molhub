@@ -48,7 +48,7 @@ describe("submission API", () => {
     const response = await call("/v1/submissions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ manifest: { schema_version: 1 } }),
+      body: JSON.stringify({ manifest: {} }),
     });
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ error: "invalid_manifest" });
@@ -130,7 +130,6 @@ async function call(path: string, init?: RequestInit): Promise<Response> {
 
 function manifest(name: string): object {
   return {
-    schema_version: 1,
     kind: "dataset",
     namespace: "lab",
     name,

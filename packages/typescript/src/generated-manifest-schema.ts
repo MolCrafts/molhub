@@ -7,7 +7,6 @@ export const MANIFEST_SCHEMA = {
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version",
     "kind",
     "namespace",
     "name",
@@ -16,9 +15,6 @@ export const MANIFEST_SCHEMA = {
     "artifacts"
   ],
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
     "kind": {
       "enum": [
         "dataset",

@@ -7,14 +7,9 @@ export const REGISTRY_SCHEMA = {
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version",
     "entries"
   ],
   "properties": {
-    "schema_version": {
-      "description": "Tracks this envelope, not the manifests inside it. A breaking change to the entry shape bumps this so an older client can refuse the file rather than misread it.",
-      "const": 1
-    },
     "entries": {
       "description": "Every manifest in the registry, ordered by `coordinate` and by nothing else. Order is part of the contract because it is what makes the build reproducible; a consumer that wants another order sorts a copy.\nMay be empty: a registry with no entries is a real state (a fresh fork, a registry mid-migration) and should build rather than fail. Emptiness is the site's problem to render, not the schema's to forbid.",
       "type": "array",
@@ -165,7 +160,7 @@ export const REGISTRY_SCHEMA = {
           "minLength": 1
         },
         "format": {
-          "description": "Stable byte-format identifier, or `null` for legacy manifests.",
+          "description": "Stable byte-format identifier, or `null` when not declared.",
           "oneOf": [
             {
               "type": "null"

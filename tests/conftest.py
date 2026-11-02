@@ -56,13 +56,11 @@ def manifest_yaml(
     version: str = "v2",
     kind: str = "dataset",
     namespace: str = "molcrafts",
-    schema_version: int = 1,
     with_side: bool = True,
 ) -> str:
     """A valid manifest, with a comment in it so comment handling stays covered."""
     return (
         "# Curated by hand; digests are copied from what the platform publishes.\n"
-        f"schema_version: {schema_version}\n"
         f"kind: {kind}\n"
         f"namespace: {namespace}\n"
         f"name: {name}\n"

@@ -37,8 +37,6 @@ export class SubmissionService {
     const validation = this.validator.validate(manifest);
     if (!validation.ok) throw new SubmissionValidationError(validation.issues);
     const coordinate = manifestCoordinate(validation.value).canonical;
-    const active = await this.repository.findActiveByCoordinate(coordinate);
-    if (active) throw new SubmissionConflict(`${coordinate} already has an active submission.`);
 
     const now = new Date().toISOString();
     const submission: Submission = {
@@ -53,7 +51,9 @@ export class SubmissionService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.repository.insert(submission);
+    if (!(await this.repository.insert(submission))) {
+      throw new SubmissionConflict(`${coordinate} already has an active submission.`);
+    }
     return publicSubmission(submission);
   }
 
@@ -68,31 +68,41 @@ export class SubmissionService {
   }
 
   async approve(id: string, note?: string): Promise<PublicSubmission> {
-    const submission = await this.repository.get(id);
+    let submission = await this.repository.get(id);
     if (!submission) throw new SubmissionNotFound(`Submission ${id} does not exist.`);
-    if (submission.status !== "pending") {
-      throw new SubmissionConflict(`Submission ${id} is already ${submission.status}.`);
+    if (submission.status === "pending") {
+      submission =
+        (await this.repository.transition(id, "pending", "reviewing", {
+          ...(note === undefined ? {} : { note }),
+        })) ?? (await this.repository.get(id));
     }
+    if (!submission || submission.status === "pending" || submission.status === "rejected") {
+      throw new SubmissionConflict(`Submission ${id} cannot be approved.`);
+    }
+    if (submission.pullRequestUrl) return publicSubmission(submission);
     const publication = await this.publisher.publish({
       submissionId: submission.id,
       coordinate: submission.coordinate,
       manifestYaml: submission.manifestYaml,
     });
-    return publicSubmission(
-      await this.repository.updateReview(id, "reviewing", {
-        ...(note === undefined ? {} : { note }),
+    if (publication.merged)
+      await this.repository.markAcceptedByPullRequest(publication.pullRequestUrl);
+    const updated =
+      (await this.repository.transition(id, "reviewing", "reviewing", {
         pullRequestUrl: publication.pullRequestUrl,
-      }),
-    );
+      })) ?? (await this.repository.get(id));
+    if (!updated || updated.pullRequestUrl !== publication.pullRequestUrl) {
+      throw new SubmissionConflict(`Submission ${id} changed during publication.`);
+    }
+    return publicSubmission(updated);
   }
 
   async reject(id: string, note: string): Promise<PublicSubmission> {
+    const updated = await this.repository.transition(id, "pending", "rejected", { note });
+    if (updated) return publicSubmission(updated);
     const submission = await this.repository.get(id);
     if (!submission) throw new SubmissionNotFound(`Submission ${id} does not exist.`);
-    if (submission.status !== "pending") {
-      throw new SubmissionConflict(`Submission ${id} is already ${submission.status}.`);
-    }
-    return publicSubmission(await this.repository.updateReview(id, "rejected", { note }));
+    throw new SubmissionConflict(`Submission ${id} is already ${submission.status}.`);
   }
 
   async acceptPullRequest(url: string): Promise<void> {

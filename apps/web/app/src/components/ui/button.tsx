@@ -36,16 +36,26 @@ const buttonVariants = cva(
   },
 );
 
-function Button({
-  className,
-  variant,
-  size,
-  asChild = false,
-  ...props
-}: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean;
-  }) {
+type IconSize = "icon" | "icon-sm" | "icon-lg";
+type TextSize = "default" | "sm" | "lg" | "content";
+type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
+/** Icon-only sizes cannot carry a border — use IconButton in chrome. */
+type ChromeVariant = Exclude<ButtonVariant, "outline">;
+
+type ButtonProps = React.ComponentProps<"button"> & {
+  asChild?: boolean;
+} & (
+    | {
+        size?: TextSize | null;
+        variant?: ButtonVariant | null;
+      }
+    | {
+        size: IconSize;
+        variant?: ChromeVariant | null;
+      }
+  );
+
+function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
   const Comp = asChild ? Slot : "button";
 
   return (
@@ -60,3 +70,4 @@ function Button({
 }
 
 export { Button, buttonVariants };
+export type { ButtonProps };

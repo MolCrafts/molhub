@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type ManifestDocument,
   ManifestValidator,
   type MolhubRegistry,
   type RegistryEntry,
@@ -12,6 +13,7 @@ import yaml from "js-yaml";
 import { JsonSchema } from "./json-schema.js";
 import { RegistrySource } from "./registry-source.js";
 import { REGISTRY_SCHEMA } from "./repo.js";
+import { RegistryValidator } from "./validator.js";
 
 export interface RegistryBuildResult {
   readonly entries: number;
@@ -28,7 +30,7 @@ export class RegistryBuilder {
 
   build(sourceDirectory: string, outputDirectory: string): RegistryBuildResult {
     const entries = this.collect(new RegistrySource(sourceDirectory));
-    const registry: MolhubRegistry = { schema_version: 1, entries };
+    const registry: MolhubRegistry = { entries };
     const aggregateErrors = this.registrySchema.errorsFor(registry);
     if (aggregateErrors.length > 0) {
       throw new Error(
@@ -54,27 +56,14 @@ export class RegistryBuilder {
   }
 
   private collect(source: RegistrySource): RegistryEntry[] {
-    const problems: string[] = [];
-    const entries: RegistryEntry[] = [];
-    for (const loaded of source.load()) {
-      if (loaded.error !== null) {
-        problems.push(`${loaded.relativePath}: ${loaded.error}`);
-        continue;
-      }
-      const validation = this.manifestValidator.validate(loaded.data);
-      if (!validation.ok) {
-        problems.push(
-          `${loaded.relativePath}:\n${validation.issues.map((issue) => `  ${issue.path}: ${issue.message}`).join("\n")}`,
-        );
-        continue;
-      }
-      entries.push(toRegistryEntry(validation.value));
+    const loaded = source.load();
+    const violations = new RegistryValidator(source, this.manifestValidator).run(loaded);
+    if (violations.length > 0) {
+      throw new Error(violations.map((issue) => `${issue.where}: ${issue.message}`).join("\n"));
     }
-    if (problems.length > 0) {
-      throw new Error(
-        `${problems.length} manifest(s) could not be indexed:\n\n${problems.join("\n\n")}`,
-      );
-    }
-    return entries.sort((left, right) => compareCodePoints(left.coordinate, right.coordinate));
+    // The complete admission check above validates this exact parsed snapshot.
+    return loaded
+      .map((manifest) => toRegistryEntry(manifest.data as ManifestDocument))
+      .sort((left, right) => compareCodePoints(left.coordinate, right.coordinate));
   }
 }

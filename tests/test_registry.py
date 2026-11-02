@@ -51,9 +51,7 @@ class TestRegistryLoading:
     def test_a_broken_manifest_fails_loudly(self, registry_dir):
         """Skipping a bad entry would silently hide a dataset; worse than failing."""
         (registry_dir / "dataset" / "molcrafts" / "bad" / "v1.yaml").parent.mkdir(parents=True)
-        (registry_dir / "dataset" / "molcrafts" / "bad" / "v1.yaml").write_text(
-            "schema_version: 1\n"
-        )
+        (registry_dir / "dataset" / "molcrafts" / "bad" / "v1.yaml").write_text("kind: dataset\n")
         with pytest.raises(InvalidManifest):
             Registry.load(registry_dir)
 

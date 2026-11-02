@@ -1,6 +1,6 @@
 # Broken: not YAML. The unquoted `: ` inside the title opens a mapping where a
 # scalar was expected — the most common way a real manifest fails to parse.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

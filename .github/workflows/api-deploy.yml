@@ -1,19 +1,20 @@
-name: Deploy Submission API
+name: api-deploy
 
-on:
+'on':
   push:
-    branches: [main, master]
+    branches:
+    - master
     paths:
-      - "apps/api/**"
-      - "packages/typescript/**"
-      - "spec/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/api-deploy.yml"
+    - apps/api/**
+    - packages/typescript/**
+    - spec/**
+    - package.json
+    - package-lock.json
+    - .github/workflows/api-deploy.yml
   workflow_dispatch:
     inputs:
       write_smoke:
-        description: "Create one persistent staging smoke submission"
+        description: Create one persistent staging smoke submission
         required: false
         type: boolean
         default: false
@@ -23,11 +24,24 @@ permissions:
   deployments: write
 
 concurrency:
-  group: molhub-api-production
+  group: api-deploy-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  context:
+    permissions:
+      contents: read
+    name: api-deploy
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+
   deploy:
+    concurrency:
+      group: api-deploy-deploy-publication
+      cancel-in-progress: false
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    name: api-deploy / deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -78,7 +92,7 @@ jobs:
           NAME="deployment-smoke-${GITHUB_RUN_ID}"
           RESPONSE=$(curl --fail-with-body --request POST "$API_URL/v1/submissions" \
             --header 'content-type: application/json' \
-            --data "{\"manifest\":{\"schema_version\":1,\"kind\":\"dataset\",\"namespace\":\"smoke\",\"name\":\"$NAME\",\"version\":\"v1\",\"title\":\"Deployment smoke\",\"license\":\"CC0-1.0\",\"doi\":\"10.0000/smoke\",\"artifacts\":[{\"role\":\"main\",\"filename\":\"sample.xyz\",\"format\":\"extxyz\",\"media_type\":\"chemical/x-xyz\",\"size\":4,\"locators\":[\"https://example.test/sample.xyz\"]}]}}")
+            --data "{\"manifest\":{\"kind\":\"dataset\",\"namespace\":\"smoke\",\"name\":\"$NAME\",\"version\":\"v1\",\"title\":\"Deployment smoke\",\"license\":\"CC0-1.0\",\"doi\":\"10.0000/smoke\",\"artifacts\":[{\"role\":\"main\",\"filename\":\"sample.xyz\",\"format\":\"extxyz\",\"media_type\":\"chemical/x-xyz\",\"size\":4,\"locators\":[\"https://example.test/sample.xyz\"]}]}}")
           ID=$(printf '%s' "$RESPONSE" | jq -r .id)
           test -n "$ID" && test "$ID" != null
           curl --fail-with-body "$API_URL/v1/submissions/$ID" | grep '"status":"pending"'

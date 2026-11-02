@@ -3,7 +3,6 @@ import { describe, expect, it } from "@rstest/core";
 import { ManifestValidator, serializeManifest, toRegistryEntry } from "../src/index.js";
 
 const DOCUMENT = {
-  schema_version: 1,
   kind: "dataset",
   namespace: "lab",
   name: "sample",
@@ -32,7 +31,7 @@ describe("ManifestValidator", () => {
       format: "extxyz",
       media_type: "chemical/x-xyz",
     });
-    expect(serializeManifest(result.value)).toContain("schema_version: 1");
+    expect(serializeManifest(result.value)).toContain("kind: dataset");
   });
 
   it("rejects display labels where a stable format identifier is required", () => {

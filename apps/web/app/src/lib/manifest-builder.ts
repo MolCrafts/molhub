@@ -74,7 +74,6 @@ export function buildManifestYaml(draft: ManifestDraft): string {
 
 export function buildManifestDocument(draft: ManifestDraft): ManifestDocument {
   return {
-    schema_version: 1,
     kind: draft.kind,
     namespace: draft.namespace.trim(),
     name: draft.name.trim(),

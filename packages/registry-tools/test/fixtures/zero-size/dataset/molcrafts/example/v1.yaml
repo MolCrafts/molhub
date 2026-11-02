@@ -5,7 +5,7 @@
 # a valid exclusion list. Since a size may be an artifact's only cross-check,
 # accepting `size: 0` would let that exact empty download verify as correct --
 # the wire failure reintroduced one level up, in the registry.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

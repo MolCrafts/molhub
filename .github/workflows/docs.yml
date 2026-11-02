@@ -1,43 +1,61 @@
-name: Docs
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+name: docs
 
-on:
+'on':
   pull_request:
     paths:
-      - "docs/**"
-      - "src/**"
-      - "scripts/check-docs-*"
-      - "tests/test_docs_examples.py"
-      - "zensical.toml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "package.json"
-      - "package-lock.json"
-      - "typedoc.json"
-      - "packages/typescript/src/**"
-      - ".github/workflows/docs.yml"
+    - docs/**
+    - src/**
+    - scripts/check-docs-*
+    - tests/test_docs_examples.py
+    - zensical.toml
+    - pyproject.toml
+    - uv.lock
+    - package.json
+    - package-lock.json
+    - typedoc.json
+    - packages/typescript/src/**
+    - .github/workflows/docs.yml
+    branches:
+    - dev
+    - master
+    - main
   push:
-    branches: [main, master]
+    branches:
+    - '**'
     paths:
-      - "docs/**"
-      - "src/**"
-      - "scripts/check-docs-*"
-      - "tests/test_docs_examples.py"
-      - "zensical.toml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "package.json"
-      - "package-lock.json"
-      - "typedoc.json"
-      - "packages/typescript/src/**"
-      - ".github/workflows/docs.yml"
-  workflow_dispatch:
+    - docs/**
+    - src/**
+    - scripts/check-docs-*
+    - tests/test_docs_examples.py
+    - zensical.toml
+    - pyproject.toml
+    - uv.lock
+    - package.json
+    - package-lock.json
+    - typedoc.json
+    - packages/typescript/src/**
+    - .github/workflows/docs.yml
+  workflow_dispatch: null
 
 permissions:
   contents: read
   deployments: write
 
 jobs:
+  context:
+    permissions:
+      contents: read
+    name: docs
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+
   build:
+    if: needs.context.outputs.skip-pr != 'true'
+    needs:
+    - context
+    name: docs / build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -54,6 +72,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - run: uv sync --extra dev
       - run: npm ci
       - run: npm run docs:check
       - uses: actions/upload-artifact@v4
@@ -63,8 +82,14 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    if: github.event_name != 'pull_request'
-    needs: build
+    concurrency:
+      group: docs-deploy-publication
+      cancel-in-progress: false
+    name: docs / deploy
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    - build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

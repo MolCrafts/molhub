@@ -2,7 +2,7 @@ description: Manifest structural validation
 cases:
   - name: valid manifest
     document:
-      schema_version: 1
+
       kind: dataset
       namespace: molcrafts
       name: example
@@ -19,7 +19,7 @@ cases:
     expect: { valid: true }
   - name: malformed artifact format is rejected
     document:
-      schema_version: 1
+
       kind: dataset
       namespace: molcrafts
       name: example
@@ -33,24 +33,9 @@ cases:
           locators: [zenodo://123/example.xyz]
           size: 3
     expect: { error: invalid_manifest }
-  - name: unknown schema version is rejected
-    document:
-      schema_version: 99
-      kind: dataset
-      namespace: molcrafts
-      name: example
-      version: v1
-      title: Example
-      doi: 10.0000/example
-      artifacts:
-        - role: main
-          filename: example.xyz
-          locators: [zenodo://123/example.xyz]
-          size: 3
-    expect: { error: invalid_manifest }
   - name: duplicate roles are rejected
     document:
-      schema_version: 1
+
       kind: dataset
       namespace: molcrafts
       name: example

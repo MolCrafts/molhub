@@ -1,6 +1,6 @@
 # Broken: two artifacts share the role `main`. One is unreachable, and they
 # collide in the cache, which is keyed by coordinate and role.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

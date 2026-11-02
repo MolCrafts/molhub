@@ -1,7 +1,6 @@
 import type { MolhubRegistry } from "../src/types.js";
 
 export const REGISTRY: MolhubRegistry = {
-  schema_version: 1,
   entries: [
     {
       coordinate: "dataset:molcrafts/example@v1",

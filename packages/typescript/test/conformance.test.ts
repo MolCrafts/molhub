@@ -181,7 +181,7 @@ describe("fallback conformance", () => {
 it("collects every language-neutral vector case", async () => {
   const names = (await readdir(vectorRoot)).filter((name) => name.endsWith(".yaml"));
   const expected = names.reduce((total, name) => total + cases(name).length, 0);
-  expect(expected).toBe(25);
+  expect(expected).toBe(24);
 });
 
 it("the runner rejects an intentionally wrong expectation", () => {

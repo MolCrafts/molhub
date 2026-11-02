@@ -1,6 +1,6 @@
 # Broken: no `doi`. The locator pins a version, but nothing says which published
 # release it is, and there is nothing for a user to cite.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

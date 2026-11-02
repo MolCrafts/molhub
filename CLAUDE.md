@@ -46,7 +46,7 @@ Cloudflare REST API、语言中立 contract 与 registry 工具。独立的 `mol
 - Registry validator/builder: `packages/registry-tools/`
 - Language-neutral contract and conformance vectors: `spec/`
 - Registry database: sibling `molhub-registry` repository; approved YAML only
-- Public documentation: `README.md`（本仓暂无 `docs/`）
+- Public documentation: `README.md` 和 `docs/`
 - Passive project knowledge (notes, decisions, debt, blueprint): `.claude/notes/`
 - Active runtime specs (alive, deleted on completion): `.claude/specs/`
 - Claude Code runtime config (agents, skills, hooks, settings):
@@ -58,6 +58,12 @@ Cloudflare REST API、语言中立 contract 与 registry 工具。独立的 `mol
 **explicitly** requires a functional (or other) style for a named
 subsystem — then capture the exception with `/mol:note` and scope it.
 Do **not** invent a functional style on your own.
+
+### Pre-1.0 policy
+
+1.0 前只维护当前 API 和数据结构：不保留旧 API 兼容层、历史迁移、
+弃用回退或依赖/schema 版本门禁。旧入口直接删除，调用方同步更新。
+制品坐标的版本和上游固定 revision 属于业务寻址，不是兼容检查。
 
 ### Iron law — no silent debt (all projects)
 
@@ -171,9 +177,9 @@ For non-trivial work, prefer:
 - **坐标语法** `kind:namespace/name@version` — 由 molhub 拥有并承诺长期稳定；
   它存在的全部意义就是让上游 locator 变动时用户代码不动。改语法等于毁约。
 - **磁盘缓存布局** `$MOLHUB_HOME/files/<kind>/<ns>/<name>@<ver>/<role>` —
-  Python 与 TypeScript 客户端同机共享此缓存，任何变更必须两端同步且升 schema 版本。
+  Python 与 TypeScript 客户端同机共享此缓存，任何变更必须两端同步。
 - **manifest / registry 的 JSON Schema** — 语言中立契约，前端与两个客户端共读；
-  破坏性变更须走 `schema_version` 升级，不得原地改语义。
+  1.0 前只维护当前结构，不保留历史兼容、升级路径或 schema 版本检查。
 - **传输契约** — fetch 必须「查 status → 流式写临时文件 → 原子改名」；最终路径上
   永不出现半截或错误响应的文件。这条不依赖 digest，是数据正确性的最后防线。
 - **locator 必须钉版本** — Figshare 的 article id 不分版本，写 `figshare://<id>/v<n>/<file>`；

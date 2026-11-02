@@ -8,6 +8,7 @@ export interface PublishRequest {
 
 export interface PublicationResult {
   readonly pullRequestUrl: string;
+  readonly merged?: boolean;
 }
 
 export interface RegistryPublisher {
@@ -33,40 +34,86 @@ export class GitHubRegistryPublisher implements RegistryPublisher {
     const coordinate = Coordinate.parse(request.coordinate);
     const branch = `molhub/submission-${request.submissionId}`;
     const path = `artifacts/${coordinate.manifestPath}`;
+    const previous = await this.findPullRequest(branch);
+    if (previous) return previous;
     const base = await this.github(`/git/ref/heads/${encodeURIComponent(this.options.baseBranch)}`);
     const sha = requiredString(objectValue(objectValue(base, "object"), "sha"), "base ref sha");
-
     const existing = await this.github(
       `/contents/${path}?ref=${encodeURIComponent(this.options.baseBranch)}`,
-      {
-        allowNotFound: true,
-      },
+      { allowNotFound: true },
     );
     if (existing !== null)
       throw new Error(`${coordinate.canonical} already exists in the registry.`);
 
-    await this.github("/git/refs", {
-      method: "POST",
-      body: { ref: `refs/heads/${branch}`, sha },
+    const branchPath = `/git/ref/heads/${encodeURIComponent(branch)}`;
+    if ((await this.github(branchPath, { allowNotFound: true })) === null) {
+      try {
+        await this.github("/git/refs", {
+          method: "POST",
+          body: { ref: `refs/heads/${branch}`, sha },
+        });
+      } catch (error) {
+        // A concurrent attempt or a lost response may have created the ref.
+        if ((await this.github(branchPath, { allowNotFound: true })) === null) throw error;
+      }
+    }
+    const contentPath = `/contents/${path}?ref=${encodeURIComponent(branch)}`;
+    const content = base64(request.manifestYaml);
+    let saved = await this.github(contentPath, { allowNotFound: true });
+    if (saved === null) {
+      try {
+        await this.github(`/contents/${path}`, {
+          method: "PUT",
+          body: { message: `Add ${coordinate.canonical}`, content, branch },
+        });
+      } catch (error) {
+        saved = await this.github(contentPath, { allowNotFound: true });
+        const recovered = objectValue(saved, "content");
+        if (typeof recovered !== "string" || recovered.replace(/\s/g, "") !== content) throw error;
+      }
+    } else {
+      const savedContent = requiredString(objectValue(saved, "content"), "manifest content");
+      if (savedContent.replace(/\s/g, "") !== content) {
+        throw new Error(`Submission branch ${branch} contains a different manifest.`);
+      }
+    }
+    try {
+      const pull = await this.github("/pulls", {
+        method: "POST",
+        body: {
+          title: `Add ${coordinate.canonical}`,
+          head: branch,
+          base: this.options.baseBranch,
+          body: `Submitted through MolHub.\n\nSubmission ID: \`${request.submissionId}\``,
+        },
+      });
+      return { pullRequestUrl: requiredString(objectValue(pull, "html_url"), "pull request URL") };
+    } catch (error) {
+      const recovered = await this.findPullRequest(branch);
+      if (recovered) return recovered;
+      throw error;
+    }
+  }
+
+  private async findPullRequest(branch: string): Promise<PublicationResult | null> {
+    const owner = this.options.repository.split("/")[0];
+    const query = new URLSearchParams({
+      state: "all",
+      head: `${owner}:${branch}`,
+      base: this.options.baseBranch,
     });
-    await this.github(`/contents/${path}`, {
-      method: "PUT",
-      body: {
-        message: `Add ${coordinate.canonical}`,
-        content: base64(request.manifestYaml),
-        branch,
-      },
-    });
-    const pull = await this.github("/pulls", {
-      method: "POST",
-      body: {
-        title: `Add ${coordinate.canonical}`,
-        head: branch,
-        base: this.options.baseBranch,
-        body: `Submitted through MolHub.\n\nSubmission ID: \`${request.submissionId}\``,
-      },
-    });
-    return { pullRequestUrl: requiredString(objectValue(pull, "html_url"), "pull request URL") };
+    const pulls = await this.github(`/pulls?${query}`);
+    if (!Array.isArray(pulls)) throw new Error("GitHub returned an invalid pull request list.");
+    const pull = pulls[0];
+    if (!pull) return null;
+    const merged = typeof objectValue(pull, "merged_at") === "string";
+    if (objectValue(pull, "state") !== "open" && !merged) {
+      throw new Error("Submission pull request was closed without merging.");
+    }
+    return {
+      pullRequestUrl: requiredString(objectValue(pull, "html_url"), "pull request URL"),
+      merged,
+    };
   }
 
   private async github(

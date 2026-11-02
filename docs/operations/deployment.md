@@ -24,6 +24,9 @@ Create D1 and replace the `wrangler.jsonc` placeholder database id. Store `GITHU
 and `GITHUB_WEBHOOK_SECRET` with Wrangler secrets. Apply migrations locally first, then remotely; run
 Worker tests and `deploy:dry` before deployment. Smoke `/health`, create, and status in staging.
 
+The initial database definition describes the current pre-1.0 structure. No historical upgrade path is
+maintained. Interrupted publication can be retried from the Reviewing or All queue.
+
 Rollback the Worker with Cloudflare deployment rollback and redeploy the previous immutable Web build.
 Rotate a secret by writing the replacement, updating the matching GitHub webhook/client, testing, then
 revoking the old credential. Never put secrets in repository variables or `.dev.vars` commits.

@@ -75,7 +75,6 @@ class TestSchemaAcceptsValidManifests:
         """
         validator.validate(
             {
-                "schema_version": 1,
                 "kind": "dataset",
                 "namespace": "ns",
                 "name": "n",
@@ -89,7 +88,6 @@ class TestSchemaAcceptsValidManifests:
         """A published digest is a cross-check on its own."""
         validator.validate(
             {
-                "schema_version": 1,
                 "kind": "dataset",
                 "namespace": "ns",
                 "name": "n",
@@ -115,7 +113,6 @@ class TestSchemaAcceptsValidManifests:
 
     def test_optional_blocks_may_be_absent(self, validator):
         minimal = {
-            "schema_version": 1,
             "kind": "dataset",
             "namespace": "ns",
             "name": "n",
@@ -161,10 +158,6 @@ class TestSchemaRejectsWhatTheParserRejects:
 
     def test_no_artifacts(self, validator, base):
         base["artifacts"] = []
-        self._both_reject(validator, base)
-
-    def test_wrong_schema_version(self, validator, base):
-        base["schema_version"] = 99
         self._both_reject(validator, base)
 
     def test_a_zero_size(self, validator, base):

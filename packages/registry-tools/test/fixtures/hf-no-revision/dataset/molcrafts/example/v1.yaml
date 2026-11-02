@@ -2,7 +2,7 @@
 #
 # An absent revision is not "unspecified" — the client substitutes `main`, so
 # this manifest quietly tracks a branch.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

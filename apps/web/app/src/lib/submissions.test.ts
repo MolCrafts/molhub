@@ -4,7 +4,6 @@ import { describe, expect, it } from "@rstest/core";
 import { SubmissionApiError, SubmissionClient } from "./submissions";
 
 const manifest: ManifestDocument = {
-  schema_version: 1,
   kind: "dataset",
   namespace: "acme",
   name: "example",
@@ -72,7 +71,7 @@ describe("SubmissionClient", () => {
 
   it("loads and reviews the protected queue with a bearer token", async () => {
     const requests: Request[] = [];
-    const queued = { ...receipt, manifest, manifestYaml: "schema_version: 1\n", contributor: {} };
+    const queued = { ...receipt, manifest, manifestYaml: "kind: dataset\n", contributor: {} };
     const client = new SubmissionClient("https://api.example.test", async (input, init) => {
       const request = new Request(input, init);
       requests.push(request);

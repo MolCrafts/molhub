@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import shutil
 import urllib.request
+from http.client import IncompleteRead
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-from molhub.sources.errors import BadStatus
+from molhub.sources.errors import BadStatus, SourceError
 from molhub.sources.locator import Locator
 from molhub.sources.remote import RemoteFile
 
@@ -56,22 +58,49 @@ class HttpsSource:
         Raises:
             BadStatus: If the response status is not 200. Notably, Figshare
                 answers 202 with an empty body while preparing a file.
+            SourceError: If the body does not match its declared Content-Length.
         """
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        partial = dest.with_name(dest.name + _TEMP_SUFFIX)
         request = urllib.request.Request(remote.url, headers={"User-Agent": self._user_agent})
+        temporary = NamedTemporaryFile(
+            mode="wb", dir=dest.parent, prefix=f"{dest.name}.", suffix=_TEMP_SUFFIX, delete=False
+        )
+        partial = Path(temporary.name)
         try:
-            with urllib.request.urlopen(request) as response:
-                if response.status != 200:
-                    raise BadStatus(
-                        f"{remote.url} returned HTTP {response.status}, expected 200. "
-                        "Some hosts answer 202 while preparing a file asynchronously — "
-                        "retry shortly."
-                    )
-                with open(partial, "wb") as handle:
+            with temporary as handle:
+                with urllib.request.urlopen(request) as response:
+                    if response.status != 200:
+                        raise BadStatus(
+                            f"{remote.url} returned HTTP {response.status}, expected 200. "
+                            "Some hosts answer 202 while preparing a file asynchronously — "
+                            "retry shortly."
+                        )
+                    # Chunked framing takes precedence over Content-Length.
+                    declared = response.headers.get("Content-Length")
+                    if response.headers.get("Transfer-Encoding", "").lower() == "chunked":
+                        declared = None
+                    expected = None
+                    if declared is not None:
+                        try:
+                            expected = int(declared)
+                        except ValueError as error:
+                            raise SourceError(
+                                f"{remote.url} returned invalid Content-Length {declared!r}."
+                            ) from error
+                        if expected < 0:
+                            raise SourceError(
+                                f"{remote.url} returned invalid Content-Length {declared!r}."
+                            )
                     shutil.copyfileobj(response, handle)
+                    received = handle.tell()
+                    if expected is not None and received != expected:
+                        raise SourceError(
+                            f"{remote.url} declared {expected} bytes but received {received}."
+                        )
             partial.replace(dest)
+        except IncompleteRead as error:
+            raise SourceError(f"{remote.url} returned an incomplete response body.") from error
         finally:
             partial.unlink(missing_ok=True)
         return dest

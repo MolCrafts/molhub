@@ -61,7 +61,12 @@ export class Fetcher {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        await handle.write(value);
+        let offset = 0;
+        while (offset < value.byteLength) {
+          const { bytesWritten } = await handle.write(value.subarray(offset));
+          if (bytesWritten === 0) throw new Error(`${url}: filesystem write made no progress.`);
+          offset += bytesWritten;
+        }
         hash?.update(value);
       }
       await handle.sync();

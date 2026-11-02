@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS submissions (
+CREATE TABLE submissions (
   id TEXT PRIMARY KEY,
   coordinate TEXT NOT NULL,
   manifest_json TEXT NOT NULL,
@@ -12,8 +12,17 @@ CREATE TABLE IF NOT EXISTS submissions (
   updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS submissions_coordinate_status
+CREATE INDEX submissions_coordinate_status
   ON submissions (coordinate, status);
 
-CREATE INDEX IF NOT EXISTS submissions_created_at
+CREATE INDEX submissions_created_at
   ON submissions (created_at DESC);
+
+CREATE UNIQUE INDEX submissions_one_active_coordinate
+  ON submissions (coordinate)
+  WHERE status IN ('pending', 'reviewing', 'accepted');
+
+-- A merge webhook may arrive before its PR URL has been saved to submissions.
+CREATE TABLE merged_pull_requests (
+  url TEXT PRIMARY KEY
+);

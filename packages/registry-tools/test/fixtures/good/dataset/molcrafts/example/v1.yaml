@@ -1,6 +1,6 @@
 # The positive control. Every other fixture is this file with one thing broken,
 # so a fixture failing for an unrelated reason shows up as this one failing too.
-schema_version: 1
+
 kind: dataset
 namespace: molcrafts
 name: example

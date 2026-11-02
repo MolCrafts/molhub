@@ -98,7 +98,6 @@ def test_registry_vectors(case: dict[str, Any]) -> None:
     manifests = {
         entry["coordinate"]: Manifest.from_mapping(
             {key: value for key, value in entry.items() if key != "coordinate"}
-            | {"schema_version": 1}
         )
         for entry in source["registry"]["entries"]
     }
