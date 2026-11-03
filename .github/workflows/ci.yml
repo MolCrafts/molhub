@@ -28,6 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: ../molpy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -50,6 +55,11 @@ jobs:
         python-version: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["3.12", "3.13", "3.14"]' || '["3.12"]') }}
     steps:
       - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: ../molpy
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -71,10 +81,16 @@ jobs:
     steps:
       - name: Check out MolHub
         uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: ../molpy
       - name: Check out the registry database
         uses: actions/checkout@v4
         with:
           repository: MolCrafts/molhub-registry
+          ref: dev
           path: .registry-source
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -122,6 +138,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: ../molpy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

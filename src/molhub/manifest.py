@@ -55,6 +55,8 @@ __all__ = ["Artifact", "TargetDeclaration", "Manifest", "InvalidManifest"]
 
 FORMAT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
 MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
+# Authored manifests are schema 1. registry.py and the registry YAML use the same number.
+SCHEMA_VERSION = 1
 
 
 class InvalidManifest(ValueError):

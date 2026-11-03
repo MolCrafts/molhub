@@ -70,4 +70,8 @@ export class Registry {
  * every viewer, and already in memory before React starts. Threading it through
  * context would add a seam with nothing on the other side of it.
  */
-export const REGISTRY = new Registry(registryData as MolhubRegistry);
+// `schema_version` is the snapshot's version gate. spec/registry.schema.yaml
+// describes only `{ entries }` and rejects every other key.
+export const REGISTRY = new Registry({
+  entries: registryData.entries,
+} as MolhubRegistry);

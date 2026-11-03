@@ -60,6 +60,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: dev
+          path: ../molpy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
