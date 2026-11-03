@@ -33,6 +33,11 @@ jobs:
           repository: MolCrafts/molpy
           ref: dev
           path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -60,6 +65,11 @@ jobs:
           repository: MolCrafts/molpy
           ref: dev
           path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -86,6 +96,11 @@ jobs:
           repository: MolCrafts/molpy
           ref: dev
           path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
       - name: Check out the registry database
         uses: actions/checkout@v4
         with:
@@ -143,6 +158,11 @@ jobs:
           repository: MolCrafts/molpy
           ref: dev
           path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
