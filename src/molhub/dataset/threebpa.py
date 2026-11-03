@@ -66,6 +66,8 @@ MANIFEST = Manifest(
         role: Artifact(
             role=role,
             filename=f"{role}.xyz",
+            format="extxyz",
+            media_type="chemical/x-xyz",
             locators=(Locator.parse(f"{_BOTNET_DIR}/{role}.xyz"),),
             size=size,
         )
