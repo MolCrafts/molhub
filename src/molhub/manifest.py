@@ -55,8 +55,6 @@ __all__ = ["Artifact", "TargetDeclaration", "Manifest", "InvalidManifest"]
 
 FORMAT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
 MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
-# Authored manifests are schema 1. registry.py and the registry YAML use the same number.
-SCHEMA_VERSION = 1
 
 
 class InvalidManifest(ValueError):
@@ -291,13 +289,14 @@ class Manifest:
             ) from None
 
     def to_mapping(self) -> dict[str, Any]:
-        """Authored-document shape of this manifest (``schema_version`` 1).
+        """Authored-document shape of this manifest.
 
         This is the Python catalog's serialisable form — the same mapping
         :meth:`from_mapping` accepts. Optional empty fields are omitted.
+        The shipped manifest schema rejects keys it does not list, so this
+        mapping does not add one.
         """
         document: dict[str, Any] = {
-            "schema_version": SCHEMA_VERSION,
             "kind": self.coordinate.kind,
             "namespace": self.coordinate.namespace,
             "name": self.coordinate.name,

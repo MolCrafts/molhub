@@ -79,11 +79,19 @@ class TestMrecWriter:
 
         path = tmp_path / "c.mrec.lmdb"
         system, frames = _water_record(3)
-        with MrecWriter(path, backend=Lmdb, units={"length": "angstrom"}) as out:
+        with MrecWriter(
+            path,
+            backend=Lmdb,
+            units={"length": "angstrom", "energy": "kcal/mol", "force": "kcal/mol/angstrom"},
+        ) as out:
             out.write_record(frames, system=system)
         collection = molrec_lmdb.LmdbCollectionCodec().read(molrec_lmdb.LmdbCollectionStorage(path))
         trajectory = collection.records[0].trajectory
-        assert collection.meta.units == {"length": "angstrom"}
+        units = collection.meta.units
+        stated = units if isinstance(units, dict) else units.model_dump()
+        assert stated["length"] == "angstrom"
+        assert stated["energy"] == "kcal/mol"
+        assert stated["force"] == "kcal/mol/angstrom"
         assert trajectory.step == [0, 1, 2]
         assert [f.meta["pe"] for f in trajectory.frames] == [-1.0, -2.0, -3.0]
         assert collection.records[0].system.blocks["bonds"].count == 2
