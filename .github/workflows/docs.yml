@@ -63,7 +63,7 @@ jobs:
       - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
         with:
           repository: MolCrafts/molpy
-          ref: dev
+          ref: sync/into-dev
           path: ../molpy
       - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
         with:

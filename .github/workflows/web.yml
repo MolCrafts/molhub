@@ -55,6 +55,22 @@ jobs:
       - name: Check out MolHub
         uses: actions/checkout@v4
 
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molpy
+          ref: sync/into-dev
+          path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev
+
       - name: Check out the canonical registry database
         uses: actions/checkout@v4
         with:
