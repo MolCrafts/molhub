@@ -921,8 +921,8 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.1" },
-    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.65" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.17.2" },
+    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.91" },
     { name = "zensical", marker = "extra == 'doc'", specifier = ">=0.0.53" },
 ]
 provides-extras = ["all", "dev", "doc"]

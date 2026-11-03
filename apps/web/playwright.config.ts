@@ -13,7 +13,15 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173/molhub",
     colorScheme: "light",
     launchOptions: {
-      args: ["--enable-webgl", "--ignore-gpu-blocklist", "--use-gl=swiftshader"],
+      args: [
+        "--enable-webgl",
+        "--ignore-gpu-blocklist",
+        "--use-gl=swiftshader",
+        // html { scroll-behavior: smooth } animates scroll-into-view, so a
+        // click's mouseup misses the play control. This flag makes the
+        // existing prefers-reduced-motion rule instant.
+        "--force-prefers-reduced-motion",
+      ],
     },
     trace: "retain-on-failure",
   },
