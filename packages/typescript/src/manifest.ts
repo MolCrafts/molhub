@@ -20,7 +20,11 @@ export interface ManifestIssue {
 }
 
 export type ManifestValidation =
-  | { readonly ok: true; readonly value: ManifestDocument; readonly issues: readonly [] }
+  | {
+      readonly ok: true;
+      readonly value: ManifestDocument;
+      readonly issues: readonly [];
+    }
   | { readonly ok: false; readonly issues: readonly ManifestIssue[] };
 
 const SUPPORTED_SCHEMES = new Set(["https", "http", "figshare", "zenodo", "hf", "molhub"]);
@@ -74,14 +78,22 @@ export class ManifestValidator {
     const locator = Locator.parse(text);
     if (!SUPPORTED_SCHEMES.has(locator.scheme)) {
       return [
-        { code: "unknown_scheme", path, message: `No MolHub source handles ${locator.scheme}://.` },
+        {
+          code: "unknown_scheme",
+          path,
+          message: `No MolHub source handles ${locator.scheme}://.`,
+        },
       ];
     }
     if (locator.scheme === "figshare") {
       const parts = locator.path.split("/");
       if (!/^v\d+$/.test(parts[1] ?? "")) {
         return [
-          { code: "unpinned_locator", path, message: "Pin a Figshare article version as /vN/." },
+          {
+            code: "unpinned_locator",
+            path,
+            message: "Pin a Figshare article version as /vN/.",
+          },
         ];
       }
     }
@@ -90,7 +102,11 @@ export class ManifestValidator {
       const revision = repo.split("@", 2)[1];
       if (!revision || !COMMIT.test(revision)) {
         return [
-          { code: "unpinned_locator", path, message: "Pin Hugging Face to a commit revision." },
+          {
+            code: "unpinned_locator",
+            path,
+            message: "Pin Hugging Face to a commit revision.",
+          },
         ];
       }
     }
@@ -100,11 +116,22 @@ export class ManifestValidator {
     ) {
       const url = new URL(locator.toString());
       const segments = url.pathname.split("/").filter(Boolean);
+      // A GitHub Release asset is pinned by its tag (`releases/download/<tag>/`).
+      // A branch name in that slot is still a moving ref.
+      const releaseTag =
+        segments[2] === "releases" && segments[3] === "download" ? segments[4] : undefined;
+      if (releaseTag && /\d/.test(releaseTag) && !/^(main|master|dev|head)$/i.test(releaseTag)) {
+        return [];
+      }
       const marker = segments.findIndex((segment) => segment === "blob" || segment === "raw");
       const revision = marker !== -1 ? segments[marker + 1] : segments[2];
       if (!COMMIT.test(revision ?? "")) {
         return [
-          { code: "unpinned_locator", path, message: "Pin GitHub URLs to a commit, not a branch." },
+          {
+            code: "unpinned_locator",
+            path,
+            message: "Pin GitHub URLs to a commit, not a branch.",
+          },
         ];
       }
     }

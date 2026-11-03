@@ -42,10 +42,40 @@ describe("ManifestValidator", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("accepts a GitHub release asset and rejects a branch in that slot", () => {
+    const release = new ManifestValidator().validate({
+      ...DOCUMENT,
+      artifacts: [
+        {
+          ...DOCUMENT.artifacts[0],
+          locators: [
+            "https://github.com/choderalab/espaloma/releases/download/0.2.1/small_phalkethoh_mm.zip",
+          ],
+        },
+      ],
+    });
+    expect(release.ok).toBe(true);
+    const branch = new ManifestValidator().validate({
+      ...DOCUMENT,
+      artifacts: [
+        {
+          ...DOCUMENT.artifacts[0],
+          locators: ["https://github.com/choderalab/espaloma/releases/download/main/sample.zip"],
+        },
+      ],
+    });
+    expect(branch.ok).toBe(false);
+  });
+
   it("rejects a moving Hugging Face revision", () => {
     const result = new ManifestValidator().validate({
       ...DOCUMENT,
-      artifacts: [{ ...DOCUMENT.artifacts[0], locators: ["hf://lab/data@main/sample.xyz"] }],
+      artifacts: [
+        {
+          ...DOCUMENT.artifacts[0],
+          locators: ["hf://lab/data@main/sample.xyz"],
+        },
+      ],
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected an invalid manifest.");
