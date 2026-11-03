@@ -503,7 +503,9 @@ class TestFetch:
     def test_help_lists_home(self):
         result = runner.invoke(app, ["fetch", "--help"])
         assert result.exit_code == 0, result.output
-        assert "--home" in result.output
+        # Rich paints each dash, so the option name is not a contiguous substring.
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "--home" in plain
 
     def test_help_does_not_name_molhub_home_env(self):
         result = runner.invoke(app, ["fetch", "--help"])
