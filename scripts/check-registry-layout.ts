@@ -21,6 +21,7 @@ const repositoryFiles = execFileSync(
 const exactFiles = new Set([
 	".gitignore",
 	".github/CODEOWNERS",
+	".github/release.toml",
 	"CLAUDE.md",
 	"LICENSE",
 	"LICENSE.md",
