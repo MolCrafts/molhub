@@ -1,0 +1,242 @@
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+name: deploy
+
+# Stable deployments, upstream master only (`deploy / context` decides):
+# the manual (Cloudflare Pages), the submission API (Cloudflare Worker + D1)
+# and MolHub Web (Cloudflare Pages). molhub-registry's deploy dispatches
+# `registry-published` to rebuild against a new registry snapshot.
+'on':
+  push:
+    branches:
+    - master
+  repository_dispatch:
+    types:
+    - registry-published
+  workflow_dispatch:
+    inputs:
+      write_smoke:
+        description: Create one persistent staging smoke submission
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  context:
+    permissions:
+      contents: read
+    name: deploy
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+
+  docs-build:
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    name: deploy / Build the manual
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        with:
+          repository: MolCrafts/molpy
+          ref: sync/into-dev
+          path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: uv sync --extra dev
+      - run: npm ci
+      - run: npm run docs:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: molhub-docs-${{ github.sha }}
+          path: site/
+          if-no-files-found: error
+
+  docs:
+    concurrency:
+      group: deploy-docs-publication
+      cancel-in-progress: false
+    name: deploy / Publish the manual
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    - docs-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: cloudflare-pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: molhub-docs-${{ github.sha }}
+          path: site
+      - name: Require the Docs Pages project
+        env:
+          PROJECT: ${{ vars.CLOUDFLARE_DOCS_PROJECT }}
+        run: |
+          if [ -z "$PROJECT" ]; then
+            echo "::error::CLOUDFLARE_DOCS_PROJECT is unset."
+            exit 1
+          fi
+      - name: Publish immutable docs build
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: >-
+            pages deploy site
+            --project-name=${{ vars.CLOUDFLARE_DOCS_PROJECT }}
+            --branch=${{ github.ref_name }}
+
+  api:
+    concurrency:
+      group: deploy-api-publication
+      cancel-in-progress: false
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    name: deploy / Submission API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare-pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Test and dry-run the Worker
+        run: |
+          npm run lint --workspace @molcrafts/molhub-api
+          npm run typecheck --workspace @molcrafts/molhub-api
+          npm run test --workspace @molcrafts/molhub-api
+          npm run deploy:dry --workspace @molcrafts/molhub-api
+      - name: Require a provisioned D1 database id
+        run: |
+          if grep -q '00000000-0000-0000-0000-000000000000' apps/api/wrangler.jsonc; then
+            echo "::error::Provision D1 and replace the placeholder database_id before deployment."
+            exit 1
+          fi
+      - name: Apply remote D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/api
+          command: d1 migrations apply molhub-submissions --remote
+      - name: Deploy the Worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          workingDirectory: apps/api
+          command: deploy
+      - name: Smoke health
+        env:
+          API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          test -n "$API_URL"
+          curl --fail-with-body --retry 4 --retry-all-errors "$API_URL/health" | grep '"status":"ok"'
+      - name: Smoke create and status in the configured staging API
+        if: inputs.write_smoke == true
+        env:
+          API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          NAME="deployment-smoke-${GITHUB_RUN_ID}"
+          RESPONSE=$(curl --fail-with-body --request POST "$API_URL/v1/submissions" \
+            --header 'content-type: application/json' \
+            --data "{\"manifest\":{\"kind\":\"dataset\",\"namespace\":\"smoke\",\"name\":\"$NAME\",\"version\":\"v1\",\"title\":\"Deployment smoke\",\"license\":\"CC0-1.0\",\"doi\":\"10.0000/smoke\",\"artifacts\":[{\"role\":\"main\",\"filename\":\"sample.xyz\",\"format\":\"extxyz\",\"media_type\":\"chemical/x-xyz\",\"size\":4,\"locators\":[\"https://example.test/sample.xyz\"]}]}}")
+          ID=$(printf '%s' "$RESPONSE" | jq -r .id)
+          test -n "$ID" && test "$ID" != null
+          curl --fail-with-body "$API_URL/v1/submissions/$ID" | grep '"status":"pending"'
+
+  web:
+    concurrency:
+      group: deploy-web-publication
+      cancel-in-progress: false
+    if: needs.context.outputs.deploy == 'true'
+    needs:
+    - context
+    name: deploy / Build against the registry and publish MolHub Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare-pages
+    steps:
+      - name: Check out MolHub
+        uses: actions/checkout@v4
+      - name: Check out the canonical registry database
+        uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molhub-registry
+          ref: dev
+          path: .registry-source
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install the workspace
+        run: npm ci
+      - name: Validate and build the registry snapshot input
+        run: |
+          npm run registry:validate -- "$GITHUB_WORKSPACE/.registry-source/artifacts"
+          npm run registry:build -- "$GITHUB_WORKSPACE/.registry-source/artifacts" "$GITHUB_WORKSPACE/.registry-source/dist"
+      - name: Record the registry source revision
+        run: echo "PUBLIC_MOLHUB_REGISTRY_REVISION=$(git -C .registry-source rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Require the submission API URL
+        env:
+          API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::error::Repository variable MOLHUB_API_URL is unset."
+            exit 1
+          fi
+      - name: Test and prerender the Web app
+        env:
+          MOLHUB_REGISTRY_JSON: ${{ github.workspace }}/.registry-source/dist/registry.json
+          PUBLIC_MOLHUB_API_URL: ${{ vars.MOLHUB_API_URL }}
+        run: |
+          npm run test --workspace @molcrafts/molhub-web
+          npm run typecheck --workspace @molcrafts/molhub-web
+          npm run build --workspace @molcrafts/molhub-web
+      - name: Check the publish directory
+        run: test -s apps/web/dist/client/index.html
+      - name: Require the Web Pages project name
+        env:
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          if [ -z "$PROJECT" ]; then
+            echo "::error::Repository variable CLOUDFLARE_PAGES_PROJECT is unset."
+            exit 1
+          fi
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: >-
+            pages deploy apps/web/dist/client
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=${{ github.ref_name }}

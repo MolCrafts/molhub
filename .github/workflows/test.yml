@@ -1,7 +1,7 @@
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: test-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
-name: ci
+name: test
 
 'on':
   push:
@@ -11,29 +11,32 @@ name: ci
     branches:
     - dev
     - master
-    - main
+  workflow_dispatch: null
+
+permissions:
+  contents: read
 
 jobs:
   context:
     permissions:
       contents: read
-    name: ci
-    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+    name: test
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
 
   lint:
     if: needs.context.outputs.skip-pr != 'true'
     needs:
     - context
-    name: ci / lint
+    name: test / lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molpy
           ref: sync/into-dev
           path: ../molpy
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molrec
           ref: dev
@@ -50,7 +53,7 @@ jobs:
 
   test:
     if: needs.context.outputs.skip-pr != 'true'
-    name: ci / test
+    name: test / Python ${{ matrix.python-version }}
     needs:
     - context
     - lint
@@ -60,12 +63,12 @@ jobs:
         python-version: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["3.12", "3.13", "3.14"]' || '["3.12"]') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molpy
           ref: sync/into-dev
           path: ../molpy
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molrec
           ref: dev
@@ -85,18 +88,18 @@ jobs:
     if: needs.context.outputs.skip-pr != 'true'
     needs:
     - context
-    name: ci / TypeScript, registry, API, and Web
+    name: test / TypeScript, registry, API, and Web
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out MolHub
         uses: actions/checkout@v4
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molpy
           ref: sync/into-dev
           path: ../molpy
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molrec
           ref: dev
@@ -143,22 +146,91 @@ jobs:
           npm run deploy:dry --workspace @molcrafts/molhub-api
           npm run build --workspace @molcrafts/molhub-web
 
-  docs-and-packages:
+  web:
+    if: needs.context.outputs.skip-pr != 'true'
     needs:
     - context
-    name: ci / Docs and package contents
-    # Not part of the dev integration loop — docs/PyPI release stay on main/master.
-    if: needs.context.outputs.skip-pr != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    name: test / Web lint, test, typecheck, prerender, browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - name: Check out MolHub
+        uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molpy
           ref: sync/into-dev
           path: ../molpy
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        with:
+          repository: MolCrafts/molrec
+          ref: dev
+          path: ../molrec
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev
+      - name: Check out the canonical registry database
+        uses: actions/checkout@v4
+        with:
+          repository: MolCrafts/molhub-registry
+          ref: dev
+          path: .registry-source
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install the workspace
+        run: npm ci
+      - name: Validate and build the registry snapshot input
+        run: |
+          npm run registry:validate -- "$GITHUB_WORKSPACE/.registry-source/artifacts"
+          npm run registry:build -- "$GITHUB_WORKSPACE/.registry-source/artifacts" "$GITHUB_WORKSPACE/.registry-source/dist"
+      - name: Record the registry source revision
+        run: echo "PUBLIC_MOLHUB_REGISTRY_REVISION=$(git -C .registry-source rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Run Web gates
+        env:
+          MOLHUB_REGISTRY_JSON: ${{ github.workspace }}/.registry-source/dist/registry.json
+        run: |
+          npm run lint --workspace @molcrafts/molhub-web
+          npm run test --workspace @molcrafts/molhub-web
+          npm run typecheck --workspace @molcrafts/molhub-web
+          npm run build --workspace @molcrafts/molhub-web
+      - name: Check the prerendered site exists
+        run: test -s apps/web/dist/client/index.html
+      - name: Install the Inspector browser
+        run: npx playwright install --with-deps chromium
+      - name: Run the real-browser Inspector acceptance
+        env:
+          MOLHUB_REGISTRY_JSON: ${{ github.workspace }}/.registry-source/dist/registry.json
+        run: npm run test:e2e --workspace @molcrafts/molhub-web
+      - name: Retain Inspector traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inspector-browser-${{ github.sha }}
+          path: apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  docs:
+    if: needs.context.outputs.skip-pr != 'true'
+    needs:
+    - context
+    name: test / Docs and package contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        with:
+          repository: MolCrafts/molpy
+          ref: sync/into-dev
+          path: ../molpy
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
         with:
           repository: MolCrafts/molrec
           ref: dev
@@ -171,13 +243,15 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      # docs:check is `uv run pytest tests/test_docs_examples.py && …`: it
+      # needs the synced dev environment.
       - run: uv sync --extra dev
       - run: npm ci
       - run: npm run docs:check
       - run: npm run package:audit
 
   workflow-policy:
-    name: ci / workflows
+    name: test / workflows
     needs: context
     if: needs.context.outputs.skip-pr != 'true'
     runs-on: ubuntu-latest
@@ -185,4 +259,15 @@ jobs:
       contents: read
     steps:
     - uses: actions/checkout@v7
-    - uses: MolCrafts/molcrafts-ci/actions/check-workflows@master
+    - uses: MolCrafts/molcrafts-ci/actions/check-workflows@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+
+  result:
+    name: test / result
+    needs: [context, lint, test, node, web, docs, workflow-policy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: echo "$RESULTS" | jq -e 'all(.[]; . == "success" or . == "skipped")'

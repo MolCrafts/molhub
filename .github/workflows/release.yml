@@ -18,7 +18,7 @@ jobs:
     permissions:
       contents: read
     name: release
-    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
 
   build:
     if: needs.context.outputs.skip-pr != 'true'
@@ -29,12 +29,12 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+    - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       with:
         repository: MolCrafts/molpy
         ref: sync/into-dev
         path: ../molpy
-    - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+    - uses: MolCrafts/molcrafts-ci/actions/setup-partners@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
       with:
         repository: MolCrafts/molrec
         ref: dev
@@ -66,22 +66,20 @@ jobs:
         path: dist/
         if-no-files-found: error
 
-  publish:
-    name: release / publish
+  publish-pypi:
+    name: release / Publish to PyPI
     needs:
     - context
     - build
     if: needs.context.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/molhub
     permissions:
       contents: read
       id-token: write
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '22'
-        registry-url: https://registry.npmjs.org
     - uses: actions/download-artifact@v4
       with:
         name: molhub-release-${{ github.sha }}
@@ -90,6 +88,29 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages-dir: dist/python/
+
+  publish-npm:
+    name: release / Publish to npm
+    needs:
+    - context
+    - build
+    if: needs.context.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@molcrafts/molhub
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        registry-url: https://registry.npmjs.org
+    - uses: actions/download-artifact@v4
+      with:
+        name: molhub-release-${{ github.sha }}
+        path: dist/
     - name: Publish TypeScript distribution
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
