@@ -17,7 +17,7 @@ mol_project:
   science:
     required: false
   ci:
-    config: .github/workflows/ci.yml
+    config: .github/workflows/test.yml
     local: "uv sync --extra dev && npm ci && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run pytest -v && npm run check"
   notes_path: .claude/notes/notes.md
   specs_path: .claude/specs/

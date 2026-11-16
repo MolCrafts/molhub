@@ -1,0 +1,13 @@
+# What molhub publishes. molcrafts-ci check-workflows holds the workflows to
+# it and `molci audit` holds the GitHub settings to it.
+
+[pypi]
+packages = ["molhub"]
+
+[npm]
+packages = ["@molcrafts/molhub"]
+
+# The manual, the submission API Worker and MolHub Web; the Pages project
+# names come from vars.CLOUDFLARE_DOCS_PROJECT / CLOUDFLARE_PAGES_PROJECT.
+[cloudflare-pages]
+packages = ["molhub-docs", "molhub-api", "molhub-web"]

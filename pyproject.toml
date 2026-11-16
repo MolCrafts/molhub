@@ -53,7 +53,7 @@ dev = [
   # ty reads types out of packages that ship no
   # py.typed (molpy does not), which is the only way a checker can see the
   # `Frame.metadata` -> `Frame.meta` class of upstream rename; mypy treats
-  # molpy as Any and sees nothing. Gate it (tox lint / ci.yml / pre-commit)
+  # molpy as Any and sees nothing. Gate it (tox lint / test.yml / pre-commit)
   # CI gates `ty check src/`; keep a lower bound because ty is still 0.0.x and
   # diagnostics can move between releases.
   "ty>=0.0.69",

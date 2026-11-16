@@ -927,6 +927,12 @@ requires-dist = [
 ]
 provides-extras = ["all", "dev", "doc"]
 
+[package.metadata.requires-dev]
+ci = [
+    { name = "molcrafts-ci", git = "https://github.com/MolCrafts/molcrafts-ci?rev=3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76" },
+    { name = "molrec", git = "https://github.com/MolCrafts/molrec?rev=5707ec1d49d2049796ef46fb61c0775b986e753a" },
+]
+
 [[package]]
 name = "molcrafts-zensical-theme"
 version = "0.2.9"
@@ -1038,7 +1044,7 @@ requires-dist = [
     { name = "lmdb", marker = "extra == 'dev'", specifier = ">=1.4" },
     { name = "lmdb", marker = "extra == 'lmdb'", specifier = ">=1.4" },
     { name = "lmdb", marker = "extra == 'test'", specifier = ">=1.4" },
-    { name = "molcrafts-molpy", marker = "extra == 'dev'", directory = "../molrs/molpy" },
+    { name = "molcrafts-molpy", marker = "extra == 'dev'", directory = "../molpy/molpy" },
     { name = "molcrafts-zensical-theme", marker = "extra == 'docs'", specifier = ">=0.2.5" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.7" },
