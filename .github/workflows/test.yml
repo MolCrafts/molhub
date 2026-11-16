@@ -78,11 +78,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --extra dev
-      - run: uv run pytest --cov=src/molhub --cov-report=term-missing --cov-report=xml -v
-      - uses: codecov/codecov-action@v5
+      - run: uv run pytest --cov=src/molhub --cov-report=term-missing --cov-report=json:coverage.json --junitxml=junit.xml -v
+      - uses: MolCrafts/molcrafts-ci/actions/report@3cc26f4ff1b8b6d09365d677c4a05cc8cbb70a76
+        if: ${{ !cancelled() }}
         with:
-          files: ./coverage.xml
-          flags: python${{ matrix.python-version }}
+          title: test / Python ${{ matrix.python-version }}
+          junit: junit.xml
+          coverage: coverage.json
 
   node:
     if: needs.context.outputs.skip-pr != 'true'

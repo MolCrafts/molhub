@@ -205,5 +205,5 @@ commands_pre = [
   ],
 ]
 commands = [
-  ["{envpython}", "-m", "pytest", "--cov=src/molhub", "--cov-report=term-missing", "--cov-report=xml", "-v"],
+  ["{envpython}", "-m", "pytest", "--cov=src/molhub", "--cov-report=term-missing", "--cov-report=json:coverage.json", "-v"],
 ]
