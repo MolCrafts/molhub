@@ -20,8 +20,11 @@ def _source(tmp_path: Path) -> Path:
 
 
 def _kind(local: Path):
+    # runtime_cache_root probes resolved paths: /tmp is /private/tmp on macOS.
+    node_local = (str(local), "/tmp", str(Path("/tmp").resolve()))
+
     def fstype(path: Path) -> str:
-        if str(path).startswith(str(local)) or str(path).startswith("/tmp"):
+        if str(path).startswith(node_local):
             return "xfs"
         return "lustre"
 
